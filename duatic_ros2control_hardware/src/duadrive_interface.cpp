@@ -1,13 +1,22 @@
-#include "duatic_ros2control_hardware/duadrive_ros2control_hardware.hpp"
+#include "duatic_ros2control_hardware/duadrive_interface.hpp"
 
 #include "ethercat_sdk_master/EthercatMasterSingleton.hpp"
 #include <filesystem>
+#include "duatic_ros2control_hardware/interface_utils.hpp"
 
 namespace duatic_ros2control_hardware
 {
 
 DuaDriveInterface::DuaDriveInterface(rclcpp::Logger logger) : logger_(logger)
 {
+}
+DuaDriveInterface::~DuaDriveInterface() {
+   RCLCPP_INFO_STREAM(logger_, "Destructor of DuaDriveHardwareInterface Hardware Interface called");
+  if (ecat_master_handle_.ecat_master) {
+    RCLCPP_INFO_STREAM(logger_, "Releasing ethercat master");
+    ecat_master::EthercatMasterSingleton::instance().releaseMaster(ecat_master_handle_);
+    ecat_master_handle_.ecat_master.reset();
+  }
 }
 hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfaceParameters& params)
 {
@@ -48,11 +57,56 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   RCLCPP_INFO_STREAM(logger_, "Registered drive: " << joint_name << " at bus address: " << address);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
-std::vector<hardware_interface::StateInterface> DuaDriveInterface::export_state_interfaces() const
+std::vector<hardware_interface::InterfaceDescription> DuaDriveInterface::generate_state_interface_descriptions() const
 {
+  std::vector<hardware_interface::InterfaceDescription> interfaces{
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_POSITION, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_VELOCITY, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_ACCELERATION, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_EFFORT, 0.0),
+
+    create_interface_description<double>(get_name(), "position_commanded", 0.0),
+    create_interface_description<double>(get_name(), "velocity_commanded", 0.0),
+    create_interface_description<double>(get_name(), "acceleration_commanded", 0.0),
+    create_interface_description<double>(get_name(), "effort_commanded", 0.0),
+
+    create_interface_description<double>(get_name(), "p_gain_commanded", 0.0),
+    create_interface_description<double>(get_name(), "i_gain_commanded", 0.0),
+    create_interface_description<double>(get_name(), "d_gain_commanded", 0.0),
+
+    create_interface_description<double>(get_name(), "temperature_system", 0.0),
+    create_interface_description<double>(get_name(), "temperature_coil_A", 0.0),
+    create_interface_description<double>(get_name(), "temperature_coil_B", 0.0),
+    create_interface_description<double>(get_name(), "temperature_coil_C", 0.0),
+
+    create_interface_description<double>(get_name(), "bus_voltage", 0.0),
+
+    create_interface_description<double>(get_name(), "current_d", 0.0),
+    create_interface_description<double>(get_name(), "current_q", 0.0),
+    create_interface_description<double>(get_name(), "current_coil_A", 0.0),
+    create_interface_description<double>(get_name(), "current_coil_B", 0.0),
+    create_interface_description<double>(get_name(), "current_coil_C", 0.0),
+
+    create_interface_description<double>(get_name(), "voltage_coil_A", 0.0),
+    create_interface_description<double>(get_name(), "voltage_coil_B", 0.0),
+    create_interface_description<double>(get_name(), "voltage_coil_C", 0.0),
+
+  };
+  return interfaces;
 }
-std::vector<hardware_interface::CommandInterface> DuaDriveInterface::export_command_interfaces() const
+std::vector<hardware_interface::InterfaceDescription> DuaDriveInterface::generate_command_interface_desriptions() const
 {
+  std::vector<hardware_interface::InterfaceDescription> interfaces{
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_POSITION, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_VELOCITY, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_ACCELERATION, 0.0),
+    create_interface_description<double>(get_name(), hardware_interface::HW_IF_EFFORT, 0.0),
+    create_interface_description<double>(get_name(), "p_gain", 0.0),
+    create_interface_description<double>(get_name(), "i_gain", 0.0),
+    create_interface_description<double>(get_name(), "d_gain", 0.0),
+    create_interface_description<bool>(get_name(), "freeze_mode", false)
+  };
+  return interfaces;
 }
 
 hardware_interface::CallbackReturn DuaDriveInterface::configure()
@@ -106,10 +160,31 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 
   // Perform the initial readout to set the current positions as targets
   if (read() != hardware_interface::return_type::OK) {
+    RCLCPP_ERROR_STREAM(logger_, "Initial readout failed for: " << get_name() << " - this is critical!");
+    return hardware_interface::CallbackReturn::FAILURE;
   }
+
+  // Validate initial readout - if it is exactly 0.0 something went wrong
+  if (state_.joint_position == 0.0) {
+    RCLCPP_FATAL_STREAM(logger_, "Initial joint position reading was 0.0 - this is a critical error");
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
+
+  // Set joint position command to current position
+  command_.joint_position = state_.joint_position;
+
+  return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
-{
+{ 
+  // Put drive into freeze mode at shutdown
+  if (drive_) {
+    drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 3.0, 0.01);
+
+    rsl_drive_sdk::Command cmd;
+    cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Freeze);
+    drive_->setCommand(cmd);
+  }
 }
 
 hardware_interface::return_type DuaDriveInterface::read()

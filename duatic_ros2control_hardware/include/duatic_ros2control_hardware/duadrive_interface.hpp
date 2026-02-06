@@ -53,6 +53,12 @@ struct DuaDriveInterfaceParameters
   std::string drive_default_parameter_file_path;
   int device_address;
 };
+struct DuaDriveInterfaceInfo
+{
+  std::string drive_name;
+  std::string drive_model;
+  std::string drive_build_tag;
+};
 struct DuaDriveInterfaceState
 {
   // This is the current state read from the drive
@@ -106,6 +112,7 @@ class DuaDriveInterface
 {
 public:
   DuaDriveInterface(rclcpp::Logger logger);
+  virtual ~DuaDriveInterface();
 
   hardware_interface::CallbackReturn init(const DuaDriveInterfaceParameters& params);
   const std::string& get_name() const
@@ -113,8 +120,8 @@ public:
     return params_.joint_name;
   }
 
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() const;
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() const;
+  std::vector<hardware_interface::InterfaceDescription> generate_state_interface_descriptions() const;
+  std::vector<hardware_interface::InterfaceDescription> generate_command_interface_desriptions() const;
 
   hardware_interface::CallbackReturn activate();
   hardware_interface::CallbackReturn configure();
@@ -126,8 +133,11 @@ public:
   {
     command_ = command;
   }
-  const DuaDriveInterfaceCommands& get_last_command();
-  const DuaDriveInterfaceState& get_last_state()
+  const DuaDriveInterfaceCommands& get_last_command()
+  {
+    return command_;
+  }
+  const DuaDriveInterfaceState& get_last_state() const
   {
     return state_;
   }
@@ -136,6 +146,10 @@ public:
   {
     previous_mode_ = active_mode_;
     active_mode_ = mode;
+  }
+
+  const DuaDriveInterfaceInfo get_drive_info() const
+  {
   }
 
 private:
@@ -147,6 +161,7 @@ private:
   DuaDriveInterfaceState state_;
   DuaDriveInterfaceCommands command_;
   DuaDriveInterfaceParameters params_;
+  DuaDriveInterfaceInfo drive_info_;
 
   rsl_drive_sdk::mode::ModeEnum active_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
   rsl_drive_sdk::mode::ModeEnum previous_mode_{ rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains };

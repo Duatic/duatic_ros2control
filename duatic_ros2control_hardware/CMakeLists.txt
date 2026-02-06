@@ -24,9 +24,9 @@ foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
 endforeach()
 
 
-add_library(duatic_ros2control_hardware src/duadrive_ros2control_hardware.cpp)
+add_library(duatic_ros2control_hardware src/duadrive_interface.cpp)
 add_library(duatic_ros2control_hardware::duatic_ros2control_hardware ALIAS duatic_ros2control_hardware)
-target_compile_features(duatic_ros2control_hardware PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(duatic_ros2control_hardware PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
 target_include_directories(duatic_ros2control_hardware PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
