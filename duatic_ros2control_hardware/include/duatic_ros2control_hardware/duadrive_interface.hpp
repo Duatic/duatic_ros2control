@@ -108,26 +108,48 @@ struct DuaDriveInterfaceCommands
   double d_gain{};
 };
 
+/**
+ * @brief the DuaDriveInterface class intends to make a single Duatic DuaDrive easier to use within ros2control hardware
+ * interfaces
+ *
+ * It manages internally a single instance of the SDK drive object.
+ * The ethercat bus is always handled asynchronously in the background
+ */
 class DuaDriveInterface
 {
 public:
   DuaDriveInterface(rclcpp::Logger logger);
   virtual ~DuaDriveInterface();
-
+  /**
+   * @brief perform initialization of the duadrive interface component
+   */
   hardware_interface::CallbackReturn init(const DuaDriveInterfaceParameters& params);
-  const std::string& get_name() const
-  {
-    return params_.joint_name;
-  }
-
-  std::vector<hardware_interface::InterfaceDescription> generate_state_interface_descriptions() const;
-  std::vector<hardware_interface::InterfaceDescription> generate_command_interface_desriptions() const;
-
+  /**
+   * @brief obtain the configured joint name of this drive
+   */
+  const std::string& get_name() const;
+  /**
+   * @brief perform the activation procedure of this drive component
+   * @note this will perform a read internally trying to obtain the current position values
+   */
   hardware_interface::CallbackReturn activate();
+  /**
+   * @brief perform the configuration procedure of this drive component
+   * This will simply attach the drive representation to the ethercat bus
+   */
   hardware_interface::CallbackReturn configure();
+  /**
+   * @brief perform the deactivation procedure of this drive component
+   * This will try to put the drive into freeze mode
+   */
   hardware_interface::CallbackReturn deactivate();
-
+  /**
+   * @brief perform a single read on the drive component
+   */
   hardware_interface::return_type read();
+  /**
+   * @brief perform a single write on the drive component
+   */
   hardware_interface::return_type write();
   void stage_command(const DuaDriveInterfaceCommands command)
   {
@@ -146,10 +168,31 @@ public:
   {
     previous_mode_ = active_mode_;
     active_mode_ = mode;
+
+    // Configure the current position as target position to avoid sudden jumps
+    command_.joint_position = state_.joint_position;
   }
 
   const DuaDriveInterfaceInfo get_drive_info() const
   {
+    return drive_info_;
+  }
+
+  const std::vector<hardware_interface::InterfaceDescription> get_state_interface_descriptions() const
+  {
+    return state_interface_descriptions_;
+  }
+  const std::vector<hardware_interface::InterfaceDescription> get_command_interface_descriptions() const
+  {
+    return command_interface_descriptions_;
+  }
+  auto& get_default_state_mapping()
+  {
+    return state_interface_mapping_;
+  }
+  auto& get_default_command_mapping()
+  {
+    return command_interface_mapping_;
   }
 
 private:
@@ -167,5 +210,14 @@ private:
   rsl_drive_sdk::mode::ModeEnum previous_mode_{ rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains };
 
   rsl_drive_sdk::Statusword last_status_word_;
+
+  std::vector<hardware_interface::InterfaceDescription> state_interface_descriptions_;
+  std::vector<hardware_interface::InterfaceDescription> command_interface_descriptions_;
+
+  std::unordered_map<std::string, std::variant<double*, int*, bool*>> state_interface_mapping_;
+  std::unordered_map<std::string, std::variant<double*, int*, bool*>> command_interface_mapping_;
+
+  void generate_state_interface_descriptions();
+  void generate_command_interface_desriptions();
 };
 }  // namespace duatic_ros2control_hardware

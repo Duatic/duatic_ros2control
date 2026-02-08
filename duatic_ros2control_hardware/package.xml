@@ -17,6 +17,7 @@
   <depend>pluginlib</depend>
 
   <depend>hardware_interface</depend>
+  <depend>rsl_drive_sdk</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
