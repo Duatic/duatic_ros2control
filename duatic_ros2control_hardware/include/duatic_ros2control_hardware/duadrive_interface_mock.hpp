@@ -37,10 +37,7 @@
 #include "hardware_interface/hardware_info.hpp"
 #include "hardware_interface/system_interface.hpp"
 
-// sdk
-#include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
-#include <rsl_drive_sdk/Drive.hpp>
-
+// Local
 #include "duatic_ros2control_hardware/duadrive_utils.hpp"
 #include "duatic_ros2control_hardware/duadrive_interface_base.hpp"
 
@@ -54,11 +51,11 @@ namespace duatic_ros2control_hardware
  * It manages internally a single instance of the SDK drive object.
  * The ethercat bus is always handled asynchronously in the background
  */
-class DuaDriveInterface : public DuaDriveInterfaceBase
+class DuaDriveInterfaceMock : public DuaDriveInterfaceBase
 {
 public:
-  DuaDriveInterface(rclcpp::Logger logger);
-  virtual ~DuaDriveInterface();
+  DuaDriveInterfaceMock(rclcpp::Logger logger);
+  virtual ~DuaDriveInterfaceMock();
   /**
    * @brief perform initialization of the duadrive interface component
    */
@@ -88,9 +85,5 @@ public:
   hardware_interface::return_type write() final;
 
 private:
-  ecat_master::EthercatMasterSingleton::Handle ecat_master_handle_;
-  rsl_drive_sdk::DriveEthercatDevice::SharedPtr drive_;
-
-  rsl_drive_sdk::Statusword last_status_word_;
 };
 }  // namespace duatic_ros2control_hardware
