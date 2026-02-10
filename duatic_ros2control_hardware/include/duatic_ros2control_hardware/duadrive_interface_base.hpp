@@ -201,8 +201,8 @@ protected:
   std::vector<hardware_interface::InterfaceDescription> state_interface_descriptions_;
   std::vector<hardware_interface::InterfaceDescription> command_interface_descriptions_;
 
-  std::unordered_map<std::string, std::variant<double*, int*, bool*>> state_interface_mapping_;
-  std::unordered_map<std::string, std::variant<double*, int*, bool*>> command_interface_mapping_;
+  std::unordered_map<std::string, SupportedVariant> state_interface_mapping_;
+  std::unordered_map<std::string, SupportedVariant> command_interface_mapping_;
 
   void generate_state_interface_descriptions();
   void generate_command_interface_desriptions();
