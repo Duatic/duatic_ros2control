@@ -67,6 +67,16 @@ using CommandInterfaceMapping =
     std::vector<std::pair<hardware_interface::CommandInterface::SharedPtr, SupportedVariant>>;
 
 /**
+ * @brief obtain the internal ros2control interface name
+ */
+inline std::string get_interface_name(const std::string& joint_name, const std::string& interface_type)
+{
+  // This is a bit nasty as we need to build the whole description in order to obtain the name
+  return hardware_interface::InterfaceDescription(joint_name,
+                                                  hardware_interface::InterfaceInfo{ .name = interface_type })
+      .get_interface_name();
+}
+/**
  * @brief helpers function which allows to create a ros2control InterfaceDescription with less writing effort
  */
 template <typename T>
