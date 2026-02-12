@@ -7,8 +7,6 @@ namespace duatic_ros2control_hardware
 
 DuaDriveInterfaceBase::DuaDriveInterfaceBase(rclcpp::Logger logger) : logger_(logger)
 {
-  generate_state_interface_descriptions();
-  generate_command_interface_desriptions();
 }
 DuaDriveInterfaceBase::~DuaDriveInterfaceBase()
 {
@@ -17,12 +15,7 @@ const std::string& DuaDriveInterfaceBase::get_name() const
 {
   return params_.joint_name;
 }
-hardware_interface::CallbackReturn DuaDriveInterfaceBase::init(const DuaDriveInterfaceParameters& params)
-{
-  params_ = params;
 
-  return hardware_interface::CallbackReturn::SUCCESS;
-}
 void DuaDriveInterfaceBase::generate_state_interface_descriptions()
 {
   state_interface_descriptions_ = {
@@ -65,23 +58,23 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
   state_interface_mapping_.insert({ state_interface_descriptions_[6].get_name(), &state_.joint_velocity_commanded });
   state_interface_mapping_.insert(
       { state_interface_descriptions_[7].get_name(), &state_.joint_acceleration_commanded });
-  state_interface_mapping_.insert({ state_interface_descriptions_[8].get_name(), &state_.joint_torque_commanded });
+  state_interface_mapping_.insert({ state_interface_descriptions_[7].get_name(), &state_.joint_torque_commanded });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[9].get_name(), &state_.temperature_system });
-  state_interface_mapping_.insert({ state_interface_descriptions_[10].get_name(), &state_.temperature_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[11].get_name(), &state_.temperature_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[12].get_name(), &state_.temperature_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[8].get_name(), &state_.temperature_system });
+  state_interface_mapping_.insert({ state_interface_descriptions_[9].get_name(), &state_.temperature_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[10].get_name(), &state_.temperature_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[11].get_name(), &state_.temperature_coil_C });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[13].get_name(), &state_.bus_voltage });
-  state_interface_mapping_.insert({ state_interface_descriptions_[14].get_name(), &state_.current_d });
-  state_interface_mapping_.insert({ state_interface_descriptions_[15].get_name(), &state_.current_q });
-  state_interface_mapping_.insert({ state_interface_descriptions_[16].get_name(), &state_.current_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[17].get_name(), &state_.current_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[18].get_name(), &state_.current_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[12].get_name(), &state_.bus_voltage });
+  state_interface_mapping_.insert({ state_interface_descriptions_[13].get_name(), &state_.current_d });
+  state_interface_mapping_.insert({ state_interface_descriptions_[14].get_name(), &state_.current_q });
+  state_interface_mapping_.insert({ state_interface_descriptions_[15].get_name(), &state_.current_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[16].get_name(), &state_.current_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[17].get_name(), &state_.current_coil_C });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[19].get_name(), &state_.voltage_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[21].get_name(), &state_.voltage_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[18].get_name(), &state_.voltage_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[19].get_name(), &state_.voltage_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_C });
 }
 void DuaDriveInterfaceBase::generate_command_interface_desriptions()
 {

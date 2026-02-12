@@ -9,8 +9,6 @@ namespace duatic_ros2control_hardware
 
 DuaDriveInterface::DuaDriveInterface(rclcpp::Logger logger) : DuaDriveInterfaceBase(logger)
 {
-  generate_state_interface_descriptions();
-  generate_command_interface_desriptions();
 }
 DuaDriveInterface::~DuaDriveInterface()
 {
@@ -25,6 +23,8 @@ DuaDriveInterface::~DuaDriveInterface()
 hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfaceParameters& params)
 {
   params_ = params;
+  generate_state_interface_descriptions();
+  generate_command_interface_desriptions();
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
   const ecat_master::EthercatMasterConfiguration ecat_master_config = {

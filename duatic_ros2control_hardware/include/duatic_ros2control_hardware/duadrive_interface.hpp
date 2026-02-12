@@ -59,6 +59,7 @@ class DuaDriveInterface : public DuaDriveInterfaceBase
 public:
   DuaDriveInterface(rclcpp::Logger logger);
   virtual ~DuaDriveInterface();
+  using UniquePtr = std::unique_ptr<DuaDriveInterface>;
   /**
    * @brief perform initialization of the duadrive interface component
    */

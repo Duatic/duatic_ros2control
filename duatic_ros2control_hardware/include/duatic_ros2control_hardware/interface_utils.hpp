@@ -74,7 +74,7 @@ inline std::string get_interface_name(const std::string& joint_name, const std::
   // This is a bit nasty as we need to build the whole description in order to obtain the name
   return hardware_interface::InterfaceDescription(joint_name,
                                                   hardware_interface::InterfaceInfo{ .name = interface_type })
-      .get_interface_name();
+      .get_name();
 }
 /**
  * @brief helpers function which allows to create a ros2control InterfaceDescription with less writing effort

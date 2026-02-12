@@ -14,6 +14,8 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::init(const DuaDriveInt
 {
   params_ = params;
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterfaceMock_" + params.joint_name);
+  generate_state_interface_descriptions();
+  generate_command_interface_desriptions();
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 

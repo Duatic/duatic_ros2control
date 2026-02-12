@@ -56,6 +56,7 @@ class DuaDriveInterfaceMock : public DuaDriveInterfaceBase
 public:
   DuaDriveInterfaceMock(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceMock();
+  using UniquePtr = std::unique_ptr<DuaDriveInterfaceMock>;
   /**
    * @brief perform initialization of the duadrive interface component
    */

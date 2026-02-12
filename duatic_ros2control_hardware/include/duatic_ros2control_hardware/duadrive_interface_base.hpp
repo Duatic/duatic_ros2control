@@ -111,10 +111,14 @@ class DuaDriveInterfaceBase
 public:
   DuaDriveInterfaceBase(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceBase();
+
+  // As it is inherently unsafe to copy this class delete the copy ctr
+  DuaDriveInterfaceBase(const DuaDriveInterfaceBase&) = delete;
+  DuaDriveInterfaceBase& operator=(const DuaDriveInterfaceBase&) = delete;
   /**
    * @brief perform initialization of the duadrive interface component
    */
-  virtual hardware_interface::CallbackReturn init(const DuaDriveInterfaceParameters& params);
+  virtual hardware_interface::CallbackReturn init(const DuaDriveInterfaceParameters& params) = 0;
   /**
    * @brief obtain the configured joint name of this drive
    */
