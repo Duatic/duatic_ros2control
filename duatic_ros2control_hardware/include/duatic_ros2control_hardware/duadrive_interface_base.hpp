@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <unordered_map>
 
 // ros2_control hardware_interface
 #include <rclcpp/rclcpp.hpp>
@@ -108,7 +109,7 @@ struct DuaDriveInterfaceCommands
 class DuaDriveInterfaceBase
 {
 public:
-  DuaDriveInterfaceBase(rclcpp::Logger logger);
+  explicit DuaDriveInterfaceBase(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceBase();
 
   // As it is inherently unsafe to copy this class delete the copy ctr

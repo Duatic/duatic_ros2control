@@ -57,7 +57,7 @@ namespace duatic_ros2control_hardware
 class DuaDriveInterface : public DuaDriveInterfaceBase
 {
 public:
-  DuaDriveInterface(rclcpp::Logger logger);
+  explicit DuaDriveInterface(rclcpp::Logger logger);
   virtual ~DuaDriveInterface();
   using UniquePtr = std::unique_ptr<DuaDriveInterface>;
   /**

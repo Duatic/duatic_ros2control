@@ -54,7 +54,7 @@ namespace duatic_ros2control_hardware
 class DuaDriveInterfaceMock : public DuaDriveInterfaceBase
 {
 public:
-  DuaDriveInterfaceMock(rclcpp::Logger logger);
+  explicit DuaDriveInterfaceMock(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceMock();
   using UniquePtr = std::unique_ptr<DuaDriveInterfaceMock>;
   /**
