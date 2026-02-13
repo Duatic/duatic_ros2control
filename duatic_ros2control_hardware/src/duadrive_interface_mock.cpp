@@ -78,6 +78,7 @@ hardware_interface::return_type DuaDriveInterfaceMock::write()
   state_.joint_acceleration = command_.joint_acceleration;
   state_.joint_velocity = command_.joint_velocity;
   state_.joint_position = command_.joint_position;
+
   return hardware_interface::return_type::OK;
 }
 }  // namespace duatic_ros2control_hardware

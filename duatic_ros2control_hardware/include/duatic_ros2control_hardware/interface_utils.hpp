@@ -39,6 +39,9 @@
 
 namespace duatic_ros2control_hardware
 {
+/**
+ * @brief helper method to extra the interface from a ros2control interface string
+ */
 inline std::string extract_interface_type(const std::string& interface)
 {
   // Extract only the interface type
