@@ -86,7 +86,7 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
     create_interface_description<double>(get_name(), "p_gain", 0.0),
     create_interface_description<double>(get_name(), "i_gain", 0.0),
     create_interface_description<double>(get_name(), "d_gain", 0.0),
-    create_interface_description<double>(get_name(), "freeze_mode", 0.0)
+    create_interface_description<bool>(get_name(), "freeze_mode", true)
   };
 
   command_interface_mapping_.insert({ command_interface_descriptions_[0].get_name(), &command_.joint_position });

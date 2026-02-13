@@ -99,8 +99,7 @@ struct DuaDriveInterfaceCommands
   double joint_velocity{};
   double joint_acceleration{};
   double joint_torque{};
-  double joint_freeze_mode{ 1.0 };  // Init with 1.0 to enforce start in freeze mode - TODO(firesurfer) - no double
-
+  bool joint_freeze_mode{ true };  // Init with true to enforce start in freeze mode
   double p_gain{};
   double i_gain{};
   double d_gain{};

@@ -61,6 +61,19 @@ struct interface_type_to_string<int>
   static constexpr std::string_view value = "int";
 };
 
+/**
+ * @brief ros2control expects us for the "default_value" to use "true" and "false" instead of "1" and "0"
+ */
+template <typename T>
+constexpr std::string compatible_to_string(const T& val)
+{
+  if constexpr (std::is_same_v<T, bool>) {
+    return val ? "true" : "false";
+  } else {
+    return std::to_string(val);
+  }
+}
+
 using SupportedVariant = std::variant<double*, int*, bool*>;
 using StateInterfaceMapping = std::vector<std::pair<hardware_interface::StateInterface::SharedPtr, SupportedVariant>>;
 using CommandInterfaceMapping =
@@ -71,10 +84,14 @@ using CommandInterfaceMapping =
  */
 inline std::string get_interface_name(const std::string& joint_name, const std::string& interface_type)
 {
+// We cannot really do anything about this warning. (Does not make sense to fill in dummy filler in there)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
   // This is a bit nasty as we need to build the whole description in order to obtain the name
   return hardware_interface::InterfaceDescription(joint_name,
                                                   hardware_interface::InterfaceInfo{ .name = interface_type })
       .get_name();
+#pragma GCC diagnostic pop
 }
 /**
  * @brief helpers function which allows to create a ros2control InterfaceDescription with less writing effort
@@ -84,12 +101,16 @@ hardware_interface::InterfaceDescription create_interface_description(const std:
                                                                       const std::string& interface_type,
                                                                       const T& initial_value = {})
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
   return hardware_interface::InterfaceDescription(
       joint_name, hardware_interface::InterfaceInfo{ .name = interface_type,
-                                                     .initial_value = std::to_string(initial_value),
+                                                     .initial_value = compatible_to_string<T>(initial_value),
                                                      .data_type = std::string(interface_type_to_string<T>::value),
                                                      .size = 0,  // Only to suppress warning
                                                      .enable_limits = false });
+
+#pragma GCC diagnostic pop
 }
 
 /**
