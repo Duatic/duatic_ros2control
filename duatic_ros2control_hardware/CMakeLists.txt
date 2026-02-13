@@ -1,14 +1,10 @@
 cmake_minimum_required(VERSION 3.8)
 project(duatic_ros2control_hardware)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_ros REQUIRED)
-find_package(yaml-cpp REQUIRED)
+find_package(yaml-cpp REQUIRED) # We need to use yaml-cpp from the system otherwise the rsl_drive_sdk will be unhappy
 
 set(PACKAGE_DEPENDENCIES
   rclcpp
@@ -36,6 +32,20 @@ target_include_directories(duatic_ros2control_hardware PUBLIC
 
 ament_target_dependencies(duatic_ros2control_hardware ${PACKAGE_DEPENDENCIES})
 target_link_libraries(duatic_ros2control_hardware ${YAML_CPP_LIBRARIES})
+# enable additional warnings
+target_compile_options(duatic_ros2control_hardware PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Wshadow
+  -Wnon-virtual-dtor
+  -Wconversion
+  -Wundef
+  -Wformat=2
+  -Wsign-conversion
+  -Wnull-dereference
+  -Werror=return-type
+)
 
 # Causes the visibility macros to use dllexport rather than dllimport,
 # which is appropriate when building the dll but not consuming it.
