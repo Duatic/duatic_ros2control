@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<!--
+Copyright 2026 Duatic AG
+
+Redistribution and use in source and binary forms, with or without modification, are permitted
+provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions
+and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+conditions and the following disclaimer in the documentation and/or other materials provided with
+the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to
+endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF
+THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-->
+
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+<!--Base macro which represents a single duadrive-->
+<xacro:macro name="duadrive_interface_joint" params="name ethercat_address ethercat_bus mode parent_unit drive_parameter_file">
+    <joint name="${name}">
+      <xacro:if value="${mode != 'isaac'}">
+        <param name="ethercat_address">${ethercat_address}</param>
+        <param name="ethercat_bus">${ethercat_bus}</param>
+        <param name="parent_unit">${parent_unit}</param>
+        <state_interface name="position">
+            <!-- Slightly offset the initial position for the gazebo sim-->
+            <param name="initial_value">0.05</param>
+        </state_interface>
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+        <state_interface name="acceleration" />
+        <state_interface name="position_commanded" />
+        <state_interface name="velocity_commanded" />
+        <state_interface name="acceleration_commanded" />
+        <state_interface name="effort_commanded" />
+        <state_interface name="temperature_system" />
+        <state_interface name="temperature_coil_A" />
+        <state_interface name="temperature_coil_B" />
+        <state_interface name="temperature_coil_C" />
+        <state_interface name="bus_voltage" />
+        <command_interface name="position" />
+        <command_interface name="velocity" />
+        <command_interface name="effort" />
+        <command_interface name="p_gain" />
+        <command_interface name="i_gain" />
+        <command_interface name="d_gain" />
+      </xacro:if>
+      <xacro:if value="${mode == 'isaac'}">
+        <!--isaac gym does not like additional interfaces-->
+        <command_interface name="position" />
+        <command_interface name="velocity" />
+        <command_interface name="effort" />
+        <state_interface name="position">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+        <state_interface name="velocity" />
+        <state_interface name="effort" />
+      </xacro:if>
+    </joint>
+</xacro:macro>
+
+</robot>

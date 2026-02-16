@@ -59,6 +59,10 @@ install(
   DESTINATION include/${PROJECT_NAME}
 )
 install(
+  DIRECTORY urdf
+  DESTINATION share/${PROJECT_NAME}
+)
+install(
   TARGETS duatic_duadrive_interface
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
