@@ -37,7 +37,7 @@
 #include <rsl_drive_sdk/mode/ModeEnum.hpp>
 
 /*project*/
-#include "duatic_ros2control_hardware/interface_utils.hpp"
+#include "duatic_duadrive_interface/interface_utils.hpp"
 
 namespace duatic_ros2control_hardware
 {

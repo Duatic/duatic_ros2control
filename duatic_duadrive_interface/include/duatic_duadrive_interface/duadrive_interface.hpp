@@ -41,8 +41,8 @@
 #include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
 #include <rsl_drive_sdk/Drive.hpp>
 
-#include "duatic_ros2control_hardware/duadrive_utils.hpp"
-#include "duatic_ros2control_hardware/duadrive_interface_base.hpp"
+#include "duatic_duadrive_interface/duadrive_utils.hpp"
+#include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 
 namespace duatic_ros2control_hardware
 {

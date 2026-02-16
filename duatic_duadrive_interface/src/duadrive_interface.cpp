@@ -30,8 +30,8 @@
 #include "ethercat_sdk_master/EthercatMasterSingleton.hpp"
 
 /*project*/
-#include "duatic_ros2control_hardware/duadrive_interface.hpp"
-#include "duatic_ros2control_hardware/interface_utils.hpp"
+#include "duatic_duadrive_interface/duadrive_interface.hpp"
+#include "duatic_duadrive_interface/interface_utils.hpp"
 
 namespace duatic_ros2control_hardware
 {

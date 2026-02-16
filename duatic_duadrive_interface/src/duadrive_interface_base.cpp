@@ -23,9 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_ros2control_hardware/duadrive_interface_base.hpp"
-
-#include "duatic_ros2control_hardware/interface_utils.hpp"
+#include "duatic_duadrive_interface/duadrive_interface_base.hpp"
+#include "duatic_duadrive_interface/interface_utils.hpp"
 
 namespace duatic_ros2control_hardware
 {

@@ -40,7 +40,7 @@
 
 // sdk
 
-#include "duatic_ros2control_hardware/duadrive_utils.hpp"
+#include "duatic_duadrive_interface/duadrive_utils.hpp"
 
 namespace duatic_ros2control_hardware
 {

@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_ros2control_hardware/duadrive_interface_mock.hpp"
+#include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 
 namespace duatic_ros2control_hardware
 {
