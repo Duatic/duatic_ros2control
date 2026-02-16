@@ -3,8 +3,8 @@
 <package format="3">
   <name>duatic_duadrive_interface</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="ubuntu@todo.todo">ubuntu</maintainer>
+  <description>Collection of classes and utils which makes using a Duatic DuaDrive easy with ros2control</description>
+  <maintainer email="lnachtigall@duatic.com">Lennart Nachtigall</maintainer>
   <license>BSD3-Clause</license>
 
   <buildtool_depend>ament_cmake_ros</buildtool_depend>
