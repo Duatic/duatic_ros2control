@@ -39,7 +39,7 @@
 /*project*/
 #include "duatic_duadrive_interface/interface_utils.hpp"
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 
 /**
@@ -143,4 +143,4 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::vector<std::string>&
   return rsl_drive_sdk::mode::ModeEnum::Freeze;
 }
 
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface

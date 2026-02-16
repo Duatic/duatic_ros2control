@@ -25,7 +25,7 @@
 
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger) : DuaDriveInterfaceBase(logger)
 {
@@ -81,4 +81,4 @@ hardware_interface::return_type DuaDriveInterfaceMock::write()
 
   return hardware_interface::return_type::OK;
 }
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface

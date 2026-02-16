@@ -42,7 +42,7 @@
 
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 struct DuaDriveInterfaceParameters
 {
@@ -212,4 +212,4 @@ protected:
   void generate_command_interface_desriptions();
 };
 
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface

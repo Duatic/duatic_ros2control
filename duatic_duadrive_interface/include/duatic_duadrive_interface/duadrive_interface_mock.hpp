@@ -41,7 +41,7 @@
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
 #include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 
 /**
@@ -87,4 +87,4 @@ public:
 
 private:
 };
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface

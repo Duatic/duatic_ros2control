@@ -26,7 +26,7 @@
 #include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 #include "duatic_duadrive_interface/interface_utils.hpp"
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 
 DuaDriveInterfaceBase::DuaDriveInterfaceBase(rclcpp::Logger logger) : logger_(logger)
@@ -144,4 +144,4 @@ hardware_interface::return_type DuaDriveInterfaceBase::write()
   return hardware_interface::return_type::OK;
 }
 
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface

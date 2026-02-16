@@ -37,7 +37,7 @@
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/system_interface.hpp>
 
-namespace duatic_ros2control_hardware
+namespace duatic::duadrive_interface
 {
 /**
  * @brief helper method to extra the interface from a ros2control interface string
@@ -164,4 +164,4 @@ inline void update_command_interfaces(const CommandInterfaceMapping& mapping,
   }
 }
 
-}  // namespace duatic_ros2control_hardware
+}  // namespace duatic::duadrive_interface
