@@ -50,7 +50,7 @@ inline std::string extract_interface_type(const std::string& interface)
 
 inline std::string extract_interface_name(const std::string& interface)
 {
-  // Extract everthing apart form the inteface type
+  // Extract everything apart form the interface type
   return interface.substr(0, interface.find_last_of('/') + 1);
 }
 
