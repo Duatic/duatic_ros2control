@@ -31,6 +31,7 @@
 #include <vector>
 #include <unordered_map>
 #include <filesystem>
+#include <set>
 
 // ros2_control hardware_interface
 #include <rclcpp/rclcpp.hpp>
@@ -295,17 +296,25 @@ public:
   prepare_command_mode_switch([[maybe_unused]] const std::vector<std::string>& start_interfaces,
                               [[maybe_unused]] const std::vector<std::string>& stop_interfaces) override
   {
+    // Prepare command mode switch by selecting the write drive mode depending on the selected interfaces
+    for (const auto& interface : start_interfaces) {
+      currently_active_interfaces_.insert(interface);
+    }
+
+    for (const auto& interface : stop_interfaces) {
+      currently_active_interfaces_.erase(interface);
+    }
+    // This is now staged and will be applied in the "perform_command_mode_switch" method
+    current_active_drive_mode_ = select_mode(currently_active_interfaces_, logger_);
+    RCLCPP_INFO_STREAM(logger_, "Staging new control mode: " << current_active_drive_mode_);
     return hardware_interface::return_type::OK;
   }
 
   hardware_interface::return_type perform_command_mode_switch(const std::vector<std::string>& start_interfaces,
                                                               const std::vector<std::string>& stop_interfaces) override
   {
-    // TODO(firesurfer) we need to track currently active interfaces. Otherwise the selected mode with be wrong
-    const auto next_mode = select_mode(start_interfaces, stop_interfaces, logger_);
-    RCLCPP_INFO_STREAM(logger_, "Selecting new control mode: " << next_mode);
     for (auto& drive : drives_) {
-      drive->configure_drive_mode(next_mode);
+      drive->configure_drive_mode(current_active_drive_mode_);
     }
     return hardware_interface::return_type::OK;
   }
@@ -332,6 +341,9 @@ private:
   hardware_interface::CommandInterface::SharedPtr freeze_mode_interface_;
 
   rclcpp::Logger logger_;
+
+  std::set<std::string> currently_active_interfaces_;
+  rsl_drive_sdk::mode::ModeEnum current_active_drive_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
 };
 
 }  // namespace duatic::duadrive_interface

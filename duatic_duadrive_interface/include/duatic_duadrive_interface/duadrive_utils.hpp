@@ -85,13 +85,11 @@ inline void print_drive_status_changes(
   }
 }
 
-inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::vector<std::string>& start_interfaces,
-                                                 [[maybe_unused]] const std::vector<std::string>& stop_interfaces,
-                                                 rclcpp::Logger& logger_)
+inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_)
 {
   // 1. extract the types of all selected new interfaces
   std::set<std::string> interface_types;
-  for (const auto& interface : start_interfaces) {
+  for (const auto& interface : interfaces) {
     interface_types.insert(extract_interface_type(interface));
   }
 
