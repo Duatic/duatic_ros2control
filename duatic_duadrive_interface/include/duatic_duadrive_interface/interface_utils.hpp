@@ -48,6 +48,12 @@ inline std::string extract_interface_type(const std::string& interface)
   return interface.substr(interface.find_last_of('/') + 1);
 }
 
+inline std::string extract_interface_name(const std::string& interface)
+{
+  // Extract everthing apart form the inteface type
+  return interface.substr(0, interface.find_last_of('/') + 1);
+}
+
 // Template magic to generate ros2control compatible type strings from specific types
 template <typename T>
 struct interface_type_to_string;
