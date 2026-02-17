@@ -69,17 +69,12 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   const auto address = params.device_address;
   // Obtain the parameter file for the currently processed drive
   std::string device_file_path = params.drive_parameter_file_path;
-  // If there is no configuration available for the current joint in the passed parameter folder we load it from the
-  // default folder
+  // If there is no configuration available for the current joint in the passed parameter folder we abort
   if (!std::filesystem::exists(device_file_path)) {
-    RCLCPP_WARN_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path
-                                                                     << " Loading default drive parameters");
-
-    device_file_path = params.drive_default_parameter_file_path;
-    RCLCPP_INFO_STREAM(logger_, "Drive file path " << device_file_path);
+    RCLCPP_FATAL_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path);
+    return hardware_interface::CallbackReturn::FAILURE;
   }
   drive_ = rsl_drive_sdk::DriveEthercatDevice::deviceFromFile(device_file_path, joint_name, address,
-
                                                               rsl_drive_sdk::PdoTypeEnum::E);
 
   // And attach it to the ethercat master

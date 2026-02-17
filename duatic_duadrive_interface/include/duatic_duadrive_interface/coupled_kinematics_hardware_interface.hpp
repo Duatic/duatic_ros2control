@@ -68,6 +68,7 @@ public:
     for (const auto& drive : drives_) {
       RCLCPP_INFO_STREAM(logger_, "Setting up state interfaces for drive: " << drive->get_name());
       const auto drive_state_interfaces = drive->get_state_interface_descriptions();
+      RCLCPP_INFO_STREAM(logger_, "size: " << drive_state_interfaces.size());
       state_interfaces.insert(state_interfaces.end(), drive_state_interfaces.begin(), drive_state_interfaces.end());
     }
 
@@ -129,10 +130,6 @@ public:
       command_interface_pre_mapping_.insert(cmd_mapping.begin(), cmd_mapping.end());
     }
 
-    for (auto& cmd_interface : command_interfaces) {
-      RCLCPP_INFO_STREAM(logger_, cmd_interface.get_name());
-    }
-
     return command_interfaces;
   }
 
@@ -144,41 +141,25 @@ public:
     // The logger is now a child logger with a more descriptive name
     logger_ = logger_.get_child(arm_name);
 
-    const auto ethercat_bus = system_info.hardware_info.hardware_parameters.at("ethercat_bus");
-
     RCLCPP_INFO_STREAM(logger_, "Start with drives");
     // We obtain information about configured joints and create DuaDriveInterface instances from them
     // and initialize them
     for (const auto& joint : system_info.hardware_info.joints) {
-      const auto address = std::stoi(joint.parameters.at("address"));
+      const auto ethercat_address = std::stoi(joint.parameters.at("ethercat_address"));
+      const auto ethercat_bus = joint.parameters.at("ethercat_bus");
       const auto joint_name = joint.name;
+      const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
 
-      // TODO(firesurfer) replace with per drive config file path
-      // We do not want the joint prefix in the path for the parameter files
-      auto joint_wo_prefix = joint_name;
-      const auto tf_prefix = system_info.hardware_info.hardware_parameters.at("tf_prefix");
-      // Check if the joint name starts with the tf_prefix
-      if (joint_name.find(tf_prefix) == 0) {
-        // Remove it from the string
-        joint_wo_prefix.erase(0, tf_prefix.size());
+      RCLCPP_INFO_STREAM(logger_, "Setup drive instance for joint: " << joint_name
+                                                                     << " on ethercat bus:" << ethercat_bus
+                                                                     << " at address: " << ethercat_address);
+      RCLCPP_INFO_STREAM(logger_, "Drive parameter file: " << drive_parameter_file_path);
+      // We do not startup a drive without a parameter file on purpose
+      // even though this is possible we want to make sure that we use the parameteritation from the file
+      if (!std::filesystem::exists(drive_parameter_file_path)) {
+        RCLCPP_ERROR_STREAM(logger_, "Drive parameter file does not exist!");
+        return hardware_interface::CallbackReturn::FAILURE;
       }
-
-      // Obtain the parameter file for the currently processed drive
-      const std::string base_directory = info_.hardware_parameters.at("drive_parameter_folder") + "/";
-      std::string device_file_path = base_directory + joint_wo_prefix + ".yaml";
-      // If there is no configuration available for the current joint in the passed parameter folder we load it from the
-      // default folder
-      if (!std::filesystem::exists(device_file_path)) {
-        RCLCPP_WARN_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << base_directory
-                                                                         << " Loading drive parameters from default "
-                                                                            "location");
-
-        device_file_path =
-            info_.hardware_parameters.at("drive_parameter_folder_default") + "/" + joint_wo_prefix + ".yaml";
-      }
-
-      RCLCPP_INFO_STREAM(logger_, "Setup drive instance for joint: " << joint_name << " on ethercat bus:"
-                                                                     << ethercat_bus << " at address: " << address);
       drives_.emplace_back(std::make_unique<DriveTypeT>(logger_));
       // As we need to apply the kinematic translation we need some place to store the corresponding data
       // TODO(firesurfer) we could ellide copies if we would directly use pointers on the state interface
@@ -190,9 +171,8 @@ public:
       // Init doesn't really do anything apart from setting parameters
       drives_.back()->init(DuaDriveInterfaceParameters{ .ethercat_bus = ethercat_bus,
                                                         .joint_name = joint_name,
-                                                        .drive_parameter_file_path = device_file_path,
-                                                        .drive_default_parameter_file_path = device_file_path,
-                                                        .device_address = address });
+                                                        .drive_parameter_file_path = drive_parameter_file_path,
+                                                        .device_address = ethercat_address });
     }
 
     RCLCPP_INFO_STREAM(logger_, "Done setting up drives");

@@ -49,7 +49,6 @@ struct DuaDriveInterfaceParameters
   std::string ethercat_bus;
   std::string joint_name;
   std::string drive_parameter_file_path;
-  std::string drive_default_parameter_file_path;
   int device_address;
 };
 struct DuaDriveInterfaceInfo
