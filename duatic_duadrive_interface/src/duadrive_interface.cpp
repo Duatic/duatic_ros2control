@@ -143,6 +143,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
+  RCLCPP_INFO_STREAM(logger_, "Initial joint position for joint:" << get_name() << " " << state_.joint_position);
   // Validate initial readout - if it is exactly 0.0 something went wrong
   if (state_.joint_position == 0.0) {
     RCLCPP_FATAL_STREAM(logger_, "Initial joint position reading was 0.0 - this is a critical error");
