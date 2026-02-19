@@ -64,16 +64,19 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::deactivate()
 
 hardware_interface::return_type DuaDriveInterfaceMock::read()
 {
-  state_.joint_position_commanded = command_.joint_position;
-  state_.joint_velocity_commanded = command_.joint_velocity;
-  state_.joint_acceleration_commanded = command_.joint_acceleration;
-  state_.joint_torque_commanded = command_.joint_torque;
-
   return hardware_interface::return_type::OK;
 }
 
 hardware_interface::return_type DuaDriveInterfaceMock::write()
 {
+  state_.joint_position_commanded = command_.joint_position;
+  state_.joint_velocity_commanded = command_.joint_velocity;
+  state_.joint_acceleration_commanded = command_.joint_acceleration;
+  state_.joint_torque_commanded = command_.joint_torque;
+
+  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
+    return hardware_interface::return_type::OK;
+  }
   state_.joint_torque = command_.joint_torque;
   state_.joint_acceleration = command_.joint_acceleration;
   state_.joint_velocity = command_.joint_velocity;
