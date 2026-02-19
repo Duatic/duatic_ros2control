@@ -262,6 +262,11 @@ public:
       state.velocity = latest_reading.joint_velocity;
       state.acceleration = latest_reading.joint_acceleration;
       state.torque = latest_reading.joint_torque;
+
+      state.position_commanded = latest_reading.joint_position_commanded;
+      state.velocity_commanded = latest_reading.joint_velocity_commanded;
+      state.acceleration_commanded = latest_reading.joint_acceleration_commanded;
+      state.torque_commanded = latest_reading.joint_torque_commanded;
     }
 
     // Now comes the interesting part. We need to take the data from each drive and apply the serial linkage
@@ -279,7 +284,6 @@ public:
     update_command_interfaces(command_interface_mapping_, *this);
     // Translated commands to coupled kinematics
     kinematics_translator::map_from_serial_to_coupled(commands_serial_kinematics_, commands_coupled_kinematics_);
-
     // TODO(firesurfer) port fancy self collision avoidance logic
 
     const bool enforced_freeze = freeze_mode_interface_->get_optional<bool>().value();
@@ -334,6 +338,7 @@ public:
     for (auto& drive : drives_) {
       drive->configure_drive_mode(current_active_drive_mode_);
     }
+    RCLCPP_INFO_STREAM(logger_, "Configured new control mode: " << current_active_drive_mode_);
     return hardware_interface::return_type::OK;
   }
 

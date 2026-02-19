@@ -99,7 +99,7 @@ struct DuaDriveInterfaceCommands
   double joint_velocity{};
   double joint_acceleration{};
   double joint_torque{};
-  bool joint_freeze_mode{ true };  // Init with true to enforce start in freeze mode
+  bool joint_freeze_mode{ true };  // NOTE this is the only interface that we do not directly expose
   double p_gain{};
   double i_gain{};
   double d_gain{};
