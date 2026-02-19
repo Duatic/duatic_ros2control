@@ -218,6 +218,8 @@ public:
     }
 
     // Now the internal fields are updated an we can update the externally exposed commands
+    update_write_command_interfaces(command_interface_mapping_, *this);
+    // Explicitly handle the joint position case !
     // Otherwise the external interface will command 0
     for (std::size_t i = 0; i < drives_.size(); i++) {
       const auto& drive = drives_[i];

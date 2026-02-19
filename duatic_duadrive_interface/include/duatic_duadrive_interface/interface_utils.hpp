@@ -169,5 +169,12 @@ inline void update_command_interfaces(const CommandInterfaceMapping& mapping,
     std::visit([&](auto&& value) { hw_interface.get_command(handle, *value, false); }, variant);
   }
 }
+inline void update_write_command_interfaces(const CommandInterfaceMapping& mapping,
+                                            hardware_interface::SystemInterface& hw_interface)
+{
+  for (const auto& [handle, variant] : mapping) {
+    std::visit([&](auto&& value) { hw_interface.set_command(handle, *value, false); }, variant);
+  }
+}
 
 }  // namespace duatic::duadrive_interface

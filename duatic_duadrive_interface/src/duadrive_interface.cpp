@@ -152,7 +152,6 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
-
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
