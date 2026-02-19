@@ -228,6 +228,7 @@ public:
                         state_serial_kinematics_[i].position);
       RCLCPP_INFO_STREAM(logger_, "Set actuator " << drive->get_name()
                                                   << " position command to:" << state_serial_kinematics_[i].position);
+      // TODO(firesurfer) - do the same for the velocity, acceleration and torque fields ?
     }
 
     return hardware_interface::CallbackReturn::SUCCESS;
