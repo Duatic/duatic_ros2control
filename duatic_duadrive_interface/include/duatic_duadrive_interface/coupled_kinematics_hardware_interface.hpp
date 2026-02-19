@@ -60,7 +60,7 @@ namespace duatic::duadrive_interface
  * @tparam enable_advanced_command_limit - Enable the advanced position command limiting algorithm
  */
 template <typename DriveTypeT, kinematics::KinematicsTranslator kinematics_translator,
-          bool enable_advanced_command_limit = true>
+          bool enable_advanced_command_limit = false>
 class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
 public:
