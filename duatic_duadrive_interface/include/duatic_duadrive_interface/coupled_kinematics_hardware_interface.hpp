@@ -309,17 +309,17 @@ public:
           // The if statements below make sure that the arm is not moving towards collision with itself
           // First checking if it is within limits, if yes it works under normal circumstances
           cmd.position = std::clamp(cmd.position, limits.min_position, limits.max_position);
-          last_valid_serial_position_commands_[i] = cmd.position;
+          last_valid_serial_position_commands_[i] = state.position;
         } else if (state.position < limits.min_position && cmd.position >= state.position) {
           // If we are lower than the low_limit but the joint is moving away from collision we accept the move
           // Then it is safe to move and we Accept the new position to be commanded
           // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
           cmd.position = std::clamp(cmd.position, state.position, limits.max_position);
-          last_valid_serial_position_commands_[i] = cmd.position;
+          last_valid_serial_position_commands_[i] = state.position;
         } else if (state.position > limits.max_position && cmd.position <= state.position) {
           // Same for the upper limmit
           cmd.position = std::clamp(cmd.position, limits.min_position, state.position);
-          last_valid_serial_position_commands_[i] = cmd.position;
+          last_valid_serial_position_commands_[i] = state.position;
         } else {
           // Hold last valid position, this is why we need the position_last variable.
           cmd.position = last_valid_serial_position_commands_[i];
@@ -329,7 +329,6 @@ public:
 
     // Translated commands to coupled kinematics
     kinematics_translator::map_from_serial_to_coupled(commands_serial_kinematics_, commands_coupled_kinematics_);
-    // TODO(firesurfer) port fancy self collision avoidance logic
 
     const bool enforced_freeze = freeze_mode_interface_->get_optional<bool>().value();
     // Stage all commands with the coupled
