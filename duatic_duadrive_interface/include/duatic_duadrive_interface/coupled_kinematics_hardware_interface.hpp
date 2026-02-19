@@ -210,6 +210,24 @@ public:
         return hardware_interface::CallbackReturn::FAILURE;
       }
     }
+
+    // Enforce an initial read now so that the internal fields are correctly filed
+    if (read(rclcpp::Time(), rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
+      RCLCPP_FATAL_STREAM(logger_, "Failed to perform initial 'read'. Aborting startup!");
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
+    // Now the internal fields are updated an we can update the externally exposed commands
+    // Otherwise the external interface will command 0
+    for (std::size_t i = 0; i < drives_.size(); i++) {
+      const auto& drive = drives_[i];
+
+      this->set_command(get_interface_name(drive->get_name(), hardware_interface::HW_IF_POSITION),
+                        state_serial_kinematics_[i].position);
+      RCLCPP_INFO_STREAM(logger_, "Set actuator " << drive->get_name()
+                                                  << " position command to:" << state_serial_kinematics_[i].position);
+    }
+
     return hardware_interface::CallbackReturn::SUCCESS;
   }
 
