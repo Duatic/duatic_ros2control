@@ -82,11 +82,11 @@ public:
   /**
    * @brief perform a single read on the drive component
    */
-  hardware_interface::return_type read() final;
+  hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) final;
   /**
    * @brief perform a single write on the drive component
    */
-  hardware_interface::return_type write() final;
+  hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
 
 private:
   ecat_master::EthercatMasterSingleton::Handle ecat_master_handle_;

@@ -281,15 +281,14 @@ public:
     return hardware_interface::CallbackReturn::SUCCESS;
   }
 
-  hardware_interface::return_type read([[maybe_unused]] const rclcpp::Time& time,
-                                       [[maybe_unused]] const rclcpp::Duration& period) override
+  hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override
   {
     // TODO(firesurfer) - replace with std::views::zip (or own implementation) when available
     for (std::size_t i = 0; i < drives_.size(); i++) {
       auto& drive = drives_[i];
       auto& state = state_coupled_kinematics_[i];
       // Try to read from each drive - in case of an error
-      if (drive->read() != hardware_interface::return_type::OK) {
+      if (drive->read(time, period) != hardware_interface::return_type::OK) {
         RCLCPP_ERROR_STREAM(logger_, "Failed to 'read' from drive: " << drive->get_name());
         return hardware_interface::return_type::ERROR;
       }
@@ -315,8 +314,7 @@ public:
 
     return hardware_interface::return_type::OK;
   }
-  hardware_interface::return_type write([[maybe_unused]] const rclcpp::Time& time,
-                                        [[maybe_unused]] const rclcpp::Duration& period) override
+  hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override
   {
     // Get commands from the ros2control exposed command interfaces
     update_command_interfaces(command_interface_mapping_, *this);
@@ -353,7 +351,7 @@ public:
     // Perform actual write action
     // Note this is still asynchronous to the bus communication
     for (auto& drive : drives_) {
-      if (drive->write() != hardware_interface::return_type::OK) {
+      if (drive->write(time, period) != hardware_interface::return_type::OK) {
         RCLCPP_ERROR_STREAM(logger_, "Failed to 'write' to drive: " << drive->get_name());
         return hardware_interface::return_type::ERROR;
       }

@@ -138,7 +138,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains);
 
   // Perform the initial readout to set the current positions as targets
-  if (read() != hardware_interface::return_type::OK) {
+  if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
     RCLCPP_ERROR_STREAM(logger_, "Initial readout failed for: " << get_name() << " - this is critical!");
     return hardware_interface::CallbackReturn::FAILURE;
   }
@@ -167,7 +167,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
-hardware_interface::return_type DuaDriveInterface::read()
+hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const rclcpp::Time& time,
+                                                        [[maybe_unused]] const rclcpp::Duration& period)
 {
   // Obtain the latest reading from the drive (note: we assume asynchronous spinning)
   rsl_drive_sdk::ReadingExtended reading;
@@ -217,7 +218,8 @@ hardware_interface::return_type DuaDriveInterface::read()
 
   return hardware_interface::return_type::OK;
 }
-hardware_interface::return_type DuaDriveInterface::write()
+hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const rclcpp::Time& time,
+                                                         [[maybe_unused]] const rclcpp::Duration& period)
 {
   // Only write the command if we are already in the correct state
   if (drive_->goalStateHasBeenReached()) {

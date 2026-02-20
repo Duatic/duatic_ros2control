@@ -140,11 +140,13 @@ hardware_interface::CallbackReturn DuaDriveInterfaceBase::deactivate()
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
-hardware_interface::return_type DuaDriveInterfaceBase::read()
+hardware_interface::return_type DuaDriveInterfaceBase::read([[maybe_unused]] const rclcpp::Time& time,
+                                                            [[maybe_unused]] const rclcpp::Duration& period)
 {
   return hardware_interface::return_type::OK;
 }
-hardware_interface::return_type DuaDriveInterfaceBase::write()
+hardware_interface::return_type DuaDriveInterfaceBase::write([[maybe_unused]] const rclcpp::Time& time,
+                                                             [[maybe_unused]] const rclcpp::Duration& period)
 {
   return hardware_interface::return_type::OK;
 }

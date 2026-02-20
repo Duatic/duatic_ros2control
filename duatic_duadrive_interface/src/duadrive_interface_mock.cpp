@@ -62,12 +62,14 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::deactivate()
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
-hardware_interface::return_type DuaDriveInterfaceMock::read()
+hardware_interface::return_type DuaDriveInterfaceMock::read([[maybe_unused]] const rclcpp::Time& time,
+                                                            [[maybe_unused]] const rclcpp::Duration& period)
 {
   return hardware_interface::return_type::OK;
 }
 
-hardware_interface::return_type DuaDriveInterfaceMock::write()
+hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] const rclcpp::Time& time,
+                                                             const rclcpp::Duration& period)
 {
   state_.joint_position_commanded = command_.joint_position;
   state_.joint_velocity_commanded = command_.joint_velocity;
@@ -77,10 +79,18 @@ hardware_interface::return_type DuaDriveInterfaceMock::write()
   if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
     return hardware_interface::return_type::OK;
   }
-  state_.joint_torque = command_.joint_torque;
-  state_.joint_acceleration = command_.joint_acceleration;
-  state_.joint_velocity = command_.joint_velocity;
-  state_.joint_position = command_.joint_position;
+
+  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::JointVelocity) {
+    // Especially support the joint velocity mode where we calculate the position from the last position and the
+    // velocity
+    state_.joint_velocity = command_.joint_velocity;
+    state_.joint_position += command_.joint_velocity * period.to_chrono<std::chrono::duration<float>>().count();
+  } else {
+    state_.joint_torque = command_.joint_torque;
+    state_.joint_acceleration = command_.joint_acceleration;
+    state_.joint_velocity = command_.joint_velocity;
+    state_.joint_position = command_.joint_position;
+  }
 
   return hardware_interface::return_type::OK;
 }

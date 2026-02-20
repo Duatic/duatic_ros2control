@@ -140,11 +140,11 @@ public:
   /**
    * @brief perform a single read on the drive component
    */
-  virtual hardware_interface::return_type read();
+  virtual hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period);
   /**
    * @brief perform a single write on the drive component
    */
-  virtual hardware_interface::return_type write();
+  virtual hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period);
 
   void stage_command(const DuaDriveInterfaceCommands command)
   {
