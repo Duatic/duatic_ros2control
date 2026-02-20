@@ -48,6 +48,7 @@
 // sdk
 #include <duatic_duadrive_interface/interface_utils.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_base.hpp>
+#include <duatic_duadrive_interface/duadrive_interface_mock.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_translation_traits.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
@@ -146,9 +147,9 @@ public:
   on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info) override
   {
     RCLCPP_INFO_STREAM(logger_, "on_init");
-    const auto arm_name = system_info.hardware_info.name;
+    const auto system_name = system_info.hardware_info.name;
     // The logger is now a child logger with a more descriptive name
-    logger_ = logger_.get_child(arm_name);
+    logger_ = rclcpp::get_logger(system_name + "_hardware_interface");
 
     RCLCPP_INFO_STREAM(logger_, "Start with drives");
     // We obtain information about configured joints and create DuaDriveInterface instances from them
@@ -188,6 +189,25 @@ public:
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
                                                         .device_address = ethercat_address });
+    }
+
+    // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
+    // In case there are predefined positions for mock operation we enforce them
+    // This is a pure compile time statement
+    if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
+      if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
+        const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
+                                                                                                        "positions"));
+        if (positions.size() == drives_.size()) {
+          for (std::size_t i = 0; i < drives_.size(); i++) {
+            drives_[i]->enforce_position(positions[i]);
+          }
+        } else {
+          RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
+                                          << positions.size() << ") does not match amount of drives (" << drives_.size()
+                                          << ") We do not apply the initial positions therefore");
+        }
+      }
     }
 
     RCLCPP_INFO_STREAM(logger_, "Done setting up drives");
@@ -362,6 +382,8 @@ public:
   hardware_interface::return_type perform_command_mode_switch(const std::vector<std::string>& start_interfaces,
                                                               const std::vector<std::string>& stop_interfaces) override
   {
+    // This is run in the realtime context -> We now configure each drive to use the new mode
+    // Will be applied in the next "write" run
     for (auto& drive : drives_) {
       drive->configure_drive_mode(current_active_drive_mode_);
     }
@@ -374,7 +396,7 @@ public:
     RCLCPP_INFO_STREAM(logger_, "Destructor of DynaArm Hardware Interface called");
   }
 
-private:
+protected:
   std::vector<typename DriveTypeT::UniquePtr> drives_;
   std::vector<CoupledJointState> state_coupled_kinematics_;
   std::vector<SerialJointState> state_serial_kinematics_;
@@ -395,6 +417,37 @@ private:
 
   std::set<std::string> currently_active_interfaces_;
   rsl_drive_sdk::mode::ModeEnum current_active_drive_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
+
+  // Internal methods
+  std::vector<double> parse_initial_positions(std::string initial_positions_str)
+  {
+    std::vector<double> initial_positions;
+
+    // Remove brackets
+    initial_positions_str.erase(std::remove(initial_positions_str.begin(), initial_positions_str.end(), '['),
+                                initial_positions_str.end());
+    initial_positions_str.erase(std::remove(initial_positions_str.begin(), initial_positions_str.end(), ']'),
+                                initial_positions_str.end());
+
+    // Split by comma and convert to doubles
+    std::stringstream ss(initial_positions_str);
+    std::string item;
+
+    while (std::getline(ss, item, ',')) {
+      // Trim whitespace
+      item.erase(0, item.find_first_not_of(" \t"));
+      item.erase(item.find_last_not_of(" \t") + 1);
+
+      try {
+        double value = std::stod(item);
+        initial_positions.push_back(value);
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR_STREAM(logger_, "Failed to parse initial position value: " << item);
+        initial_positions.push_back(0.0);
+      }
+    }
+    return initial_positions;
+  }
 };
 
 }  // namespace duatic::duadrive_interface

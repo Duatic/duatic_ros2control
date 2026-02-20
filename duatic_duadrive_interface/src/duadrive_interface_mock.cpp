@@ -84,4 +84,10 @@ hardware_interface::return_type DuaDriveInterfaceMock::write()
 
   return hardware_interface::return_type::OK;
 }
+void DuaDriveInterfaceMock::enforce_position(const double position)
+{
+  state_.joint_position = position;
+  state_.joint_position_commanded = position;
+  command_.joint_position = position;
+}
 }  // namespace duatic::duadrive_interface

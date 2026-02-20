@@ -84,6 +84,10 @@ public:
    * @brief perform a single write on the drive component
    */
   hardware_interface::return_type write() final;
+  /**
+   * @brief Allow in the mocked hardware to explicitly enforce a specific position (e.g. at startup)
+   */
+  void enforce_position(const double position);
 
 private:
 };
