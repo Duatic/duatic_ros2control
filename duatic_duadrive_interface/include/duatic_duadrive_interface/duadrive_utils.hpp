@@ -93,6 +93,13 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
     interface_types.insert(extract_interface_type(interface));
   }
 
+  // The freeze mode interface always overrides all other modes
+  // This means: WHEN the freeze_mode interface is claimend we go into freeze mode !
+  if (interface_types.find("freeze_mode") != interface_types.end()) {
+    RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: Freeze");
+    return rsl_drive_sdk::mode::ModeEnum::Freeze;
+  }
+
   // 2. start to select mode depending on selection
   // Option 1: only one interface selected - choose between position, velocity, effort
   if (interface_types.find("position") != interface_types.end() && interface_types.size() == 1) {
@@ -108,11 +115,6 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   if (interface_types.find("effort") != interface_types.end() && interface_types.size() == 1) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointTorque");
     return rsl_drive_sdk::mode::ModeEnum::JointTorque;
-  }
-
-  if (interface_types.find("freeze_mode") != interface_types.end() && interface_types.size() == 1) {
-    RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: Freeze");
-    return rsl_drive_sdk::mode::ModeEnum::Freeze;
   }
 
   // Option 2:  2-tuple Combinations of the modes above

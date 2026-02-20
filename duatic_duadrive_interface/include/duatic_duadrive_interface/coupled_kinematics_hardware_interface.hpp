@@ -50,6 +50,7 @@
 #include <duatic_duadrive_interface/duadrive_interface_base.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_translation_traits.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
+#include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
 
 namespace duatic::duadrive_interface
 {
@@ -173,7 +174,12 @@ public:
       // TODO(firesurfer) we could ellide copies if we would directly use pointers on the state interface
       state_coupled_kinematics_.emplace_back(CoupledJointState{});
       state_serial_kinematics_.emplace_back(SerialJointState{});
-      last_valid_serial_position_commands_.emplace_back(0.0);
+
+      const auto position_limits = system_info.hardware_info.limits.at(joint_name);
+      RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
+                                                           << " max: " << position_limits.max_position);
+      position_limiters_.emplace_back(
+          AdvancedPositionCommandLimiter{ position_limits.min_position, position_limits.max_position });
 
       commands_coupled_kinematics_.emplace_back(SerialCommand{});
       commands_serial_kinematics_.emplace_back(CoupledCommand{});
@@ -236,7 +242,7 @@ public:
                         state_serial_kinematics_[i].position);
       RCLCPP_INFO_STREAM(logger_, "Set actuator " << drive->get_name()
                                                   << " position command to:" << state_serial_kinematics_[i].position);
-      last_valid_serial_position_commands_[i] = state_serial_kinematics_[i].position;
+      position_limiters_[i].init_last_valid_position(state_serial_kinematics_[i].position);
       // TODO(firesurfer) - do the same for the velocity, acceleration and torque fields ?
     }
 
@@ -296,34 +302,11 @@ public:
     update_command_interfaces(command_interface_mapping_, *this);
 
     // self collision avoidance logic
+    // this logic is actually a bit advanced as it allows to move out of positions limits if the drive is current inside
+    // a position limit
     if constexpr (enable_advanced_command_limit) {
       for (std::size_t i = 0; i < drives_.size(); i++) {
-        auto& drive = drives_[i];
-        // TODO(firesurfer) - this is actually a rather expensive statement - should be done once at startup
-        const auto limits = info_.limits.at(drive->get_name());
-
-        const auto state = state_serial_kinematics_[i];
-        auto& cmd = commands_serial_kinematics_[i];
-
-        if (state.position >= limits.min_position && state.position <= limits.max_position) {
-          // The if statements below make sure that the arm is not moving towards collision with itself
-          // First checking if it is within limits, if yes it works under normal circumstances
-          cmd.position = std::clamp(cmd.position, limits.min_position, limits.max_position);
-          last_valid_serial_position_commands_[i] = state.position;
-        } else if (state.position < limits.min_position && cmd.position >= state.position) {
-          // If we are lower than the low_limit but the joint is moving away from collision we accept the move
-          // Then it is safe to move and we Accept the new position to be commanded
-          // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
-          cmd.position = std::clamp(cmd.position, state.position, limits.max_position);
-          last_valid_serial_position_commands_[i] = state.position;
-        } else if (state.position > limits.max_position && cmd.position <= state.position) {
-          // Same for the upper limmit
-          cmd.position = std::clamp(cmd.position, limits.min_position, state.position);
-          last_valid_serial_position_commands_[i] = state.position;
-        } else {
-          // Hold last valid position, this is why we need the position_last variable.
-          cmd.position = last_valid_serial_position_commands_[i];
-        }
+        position_limiters_[i].limit(commands_serial_kinematics_[i], state_serial_kinematics_[i]);
       }
     }
 
@@ -395,10 +378,10 @@ private:
   std::vector<typename DriveTypeT::UniquePtr> drives_;
   std::vector<CoupledJointState> state_coupled_kinematics_;
   std::vector<SerialJointState> state_serial_kinematics_;
-  std::vector<double> last_valid_serial_position_commands_;
 
   std::vector<CoupledCommand> commands_coupled_kinematics_;
   std::vector<SerialCommand> commands_serial_kinematics_;
+  std::vector<AdvancedPositionCommandLimiter> position_limiters_;
 
   std::unordered_map<std::string, SupportedVariant> state_interface_pre_mapping_;
   std::unordered_map<std::string, SupportedVariant> command_interface_pre_mapping_;
