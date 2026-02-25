@@ -132,7 +132,8 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   // Option 3: 3-tuple combinations of the modes above
   if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("velocity") != interface_types.end() &&
-      interface_types.find("effort") != interface_types.end() && interface_types.size() == 3) {
+      interface_types.find("effort") != interface_types.end() &&
+      interface_types.size() >= 3 /*Allow to also claim pid gain interfaces*/) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionVelocityTorquePID");
     return rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains;
   }
@@ -140,6 +141,9 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   // This is our fallback mode (Freeze for safety reasons)
   RCLCPP_WARN_STREAM(logger_, "Fallback to: Select drive mode: Freeze (Note this is usually do to an invalid "
                               "combination of interfaces)");
+  for (const auto& itype : interface_types) {
+    RCLCPP_WARN_STREAM(logger_, itype);
+  }
   return rsl_drive_sdk::mode::ModeEnum::Freeze;
 }
 
