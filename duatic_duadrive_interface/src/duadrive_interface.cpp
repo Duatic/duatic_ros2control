@@ -74,8 +74,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
     RCLCPP_FATAL_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path);
     return hardware_interface::CallbackReturn::FAILURE;
   }
-  drive_ = rsl_drive_sdk::DriveEthercatDevice::deviceFromFile(device_file_path, joint_name, address,
-                                                              rsl_drive_sdk::PdoTypeEnum::E);
+  drive_ = rsl_drive_sdk::DriveEthercatDevice::deviceFromFile(
+      device_file_path, joint_name, static_cast<uint32_t>(address), rsl_drive_sdk::PdoTypeEnum::E);
 
   // And attach it to the ethercat master
   if (!ecat_master_handle_.ecat_master->attachDevice(drive_)) {
@@ -228,9 +228,9 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     rsl_drive_sdk::Command cmd;
 
     rsl_drive_sdk::mode::PidGainsF gains;
-    gains.setP(command_.p_gain);
-    gains.setI(command_.i_gain);
-    gains.setD(command_.d_gain);
+    gains.setP(static_cast<float>(command_.p_gain));
+    gains.setI(static_cast<float>(command_.i_gain));
+    gains.setD(static_cast<float>(command_.d_gain));
 
     // Sanitize inputs - might result in weird behaviour otherwise
     sanitize_command_input(command_.joint_position);
