@@ -180,7 +180,7 @@ public:
       RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
                                                            << " max: " << position_limits.max_position);
       position_limiters_.emplace_back(
-          AdvancedPositionCommandLimiter{ position_limits.min_position, position_limits.max_position });
+          AdvancedPositionCommandLimiter{ joint_name, position_limits.min_position, position_limits.max_position });
 
       commands_coupled_kinematics_.emplace_back(SerialCommand{});
       commands_serial_kinematics_.emplace_back(CoupledCommand{});

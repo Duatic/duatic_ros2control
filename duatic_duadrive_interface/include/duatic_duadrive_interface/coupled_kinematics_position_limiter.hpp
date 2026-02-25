@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <string>
 
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
 
@@ -39,8 +40,9 @@ namespace duatic::duadrive_interface
 class AdvancedPositionCommandLimiter
 {
 public:
-  constexpr AdvancedPositionCommandLimiter(const double limit_lower, const double limit_upper)
-    : limit_lower_(limit_lower), limit_upper_(limit_upper)
+  constexpr AdvancedPositionCommandLimiter(const std::string& joint_name, const double limit_lower,
+                                           const double limit_upper)
+    : limit_lower_(limit_lower), limit_upper_(limit_upper), joint_name_(joint_name)
   {
   }
   constexpr void init_last_valid_position(const double position)
@@ -51,9 +53,11 @@ public:
     last_valid_position_ = position;
   }
 
-  constexpr void limit(SerialCommand& cmd, const SerialJointState& state)
+  bool limit(SerialCommand& cmd, const SerialJointState& state)
   {
+    const auto prev_pos = cmd.position;
     cmd.position = limit(cmd.position, state.position);
+    return std::abs(cmd.position - prev_pos) > 0.0001;
   }
 
   constexpr double limit(double cmd, const double current_position)
@@ -61,9 +65,9 @@ public:
     if (current_position >= limit_lower_ && current_position <= limit_upper_) {
       // The if statements below make sure that the arm is not moving towards collision with itself
       // First checking if it is within limits, if yes it works under normal circumstances
-      cmd = std::clamp(cmd, limit_upper_, limit_upper_);
+      cmd = std::clamp(cmd, limit_lower_, limit_upper_);
       last_valid_position_ = current_position;
-    } else if (current_position < limit_upper_ && cmd >= current_position) {
+    } else if (current_position < limit_lower_ && cmd >= current_position) {
       // If we are lower than the low_limit but the joint is moving away from collision we accept the move
       // Then it is safe to move and we Accept the new position to be commanded
       // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
@@ -71,7 +75,7 @@ public:
       last_valid_position_ = current_position;
     } else if (current_position > limit_upper_ && cmd <= current_position) {
       // Same for the upper limmit
-      cmd = std::clamp(cmd, limit_upper_, current_position);
+      cmd = std::clamp(cmd, limit_lower_, current_position);
       last_valid_position_ = current_position;
     } else {
       // Hold last valid position, this is why we need the last_valid_position_ variable.
@@ -83,6 +87,7 @@ public:
 private:
   const double limit_lower_;
   const double limit_upper_;
+  const std::string joint_name_;
   std::optional<double> last_valid_position_{};
 };
 }  // namespace duatic::duadrive_interface
