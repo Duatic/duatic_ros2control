@@ -85,12 +85,18 @@ inline void print_drive_status_changes(
   }
 }
 
-inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_)
+inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_,
+                                                 bool remove_gain_interfaces = true)
 {
   // 1. extract the types of all selected new interfaces
   std::set<std::string> interface_types;
   for (const auto& interface : interfaces) {
-    interface_types.insert(extract_interface_type(interface));
+    const auto interface_type = extract_interface_type(interface);
+    // Remove p_gain/d_gain/i_gain interfaces - they should not change which mode we select
+    // TODO(firesurfer) this is incorrect if we have a "strict view on this" but makes life easier
+    if (interface_type.find("_gain") == std::string::npos || !remove_gain_interfaces) {
+      interface_types.insert(interface_type);
+    }
   }
 
   // The freeze mode interface always overrides all other modes
@@ -133,7 +139,7 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("velocity") != interface_types.end() &&
       interface_types.find("effort") != interface_types.end() &&
-      interface_types.size() >= 3 /*Allow to also claim pid gain interfaces*/) {
+      interface_types.size() == 3) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionVelocityTorquePID");
     return rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains;
   }
