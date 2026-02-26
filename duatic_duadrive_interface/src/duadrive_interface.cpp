@@ -102,18 +102,11 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->setControlword(RSL_DRIVE_CW_ID_CLEAR_ERRORS_TO_STANDBY);
     drive_->updateWrite();
     drive_->updateRead();
-    if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1, 10)) {
-      RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " did not go into ControlOP");
-    } else {
-      RCLCPP_INFO_STREAM(logger_, "Drive: " << get_name() << " went into ControlOp successfully");
-    }
   }
 
   // Put into controlOP, in blocking mode.
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1, 10)) {
-    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name()
-                                           << " did not go into ControlOP - this is trouble some and a reason to "
-                                              "abort. Try to reboot the hardware");
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, false, 1, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -253,6 +246,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
+  } else {
+    RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP");
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
