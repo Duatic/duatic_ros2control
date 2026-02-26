@@ -130,6 +130,17 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains);
 
+  // We need to give the drive a bit of time otherwise we do not get valid readings
+  int retries = 0;
+  while (!drive_->goalStateHasBeenReached()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    retries++;
+    if (retries > 100) {
+      RCLCPP_ERROR_STREAM(logger_, "Drive hasn't reach goal state within 100ms - trying to continue nevertheless - "
+                                   "usually it reaches the goal state afterwards");
+      break;
+    }
+  }
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
     RCLCPP_ERROR_STREAM(logger_, "Initial readout failed for: " << get_name() << " - this is critical!");
