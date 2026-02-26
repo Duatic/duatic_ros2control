@@ -214,7 +214,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = reading.getCommanded().getJointTorque();
   state_.current_q_commanded = reading.getCommanded().getCurrent();
+  // Some control mode information
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
+  state_.current_control_mode = static_cast<double>(active_mode_);
 
   return hardware_interface::return_type::OK;
 }

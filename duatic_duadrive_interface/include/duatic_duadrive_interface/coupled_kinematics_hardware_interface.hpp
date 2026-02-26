@@ -346,6 +346,14 @@ public:
       command.joint_freeze_mode = enforced_freeze;
 
       drive->stage_command(command);
+
+      // In case we are in a mode that does not control the position we feedback the current position as command to
+      // avoid jumps in certain controller constellations
+      const auto modes = modes_without_position_control();
+      if (modes.find(drive->get_active_drive_mode()) != modes.end()) {
+        this->set_command(get_interface_name(drive->get_name(), hardware_interface::HW_IF_POSITION),
+                          state_serial_kinematics_[i].position);
+      }
     }
 
     // Perform actual write action

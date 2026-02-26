@@ -71,9 +71,15 @@ struct interface_type_to_string<bool>
 };
 
 template <>
-struct interface_type_to_string<int>
+struct interface_type_to_string<int32_t>
 {
-  static constexpr std::string_view value = "int";
+  static constexpr std::string_view value = "int32";
+};
+
+template <>
+struct interface_type_to_string<uint32_t>
+{
+  static constexpr std::string_view value = "uint32";
 };
 
 /**

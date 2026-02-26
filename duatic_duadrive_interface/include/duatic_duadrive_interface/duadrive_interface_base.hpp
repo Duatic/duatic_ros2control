@@ -84,6 +84,9 @@ struct DuaDriveInterfaceState
   double temperature_coil_C{};
   double bus_voltage{};
 
+  // This should be int32_t but the joint_state_broadcaster will otherwise break...
+  double current_control_mode{};
+
   // This is what the drive tells us (as feedback) what we commanded
   double joint_position_commanded{};
   double joint_velocity_commanded{};
@@ -167,8 +170,12 @@ public:
     // Configure the current position as target position to avoid sudden jumps
     command_.joint_position = state_.joint_position;
   }
+  rsl_drive_sdk::mode::ModeEnum get_active_drive_mode() const
+  {
+    return active_mode_;
+  }
 
-  const DuaDriveInterfaceInfo get_drive_info() const
+  const DuaDriveInterfaceInfo& get_drive_info() const
   {
     return drive_info_;
   }

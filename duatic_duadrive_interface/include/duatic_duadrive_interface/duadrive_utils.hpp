@@ -151,5 +151,14 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   }
   return rsl_drive_sdk::mode::ModeEnum::Freeze;
 }
+/**
+ * @brief A list with all modes that do not use the commanded position (e.g. velocity control)
+ * TODO(firesurfer) this is not constepxr friendly at the moment
+ */
+inline std::set<rsl_drive_sdk::mode::ModeEnum> modes_without_position_control()
+{
+  using Modes = rsl_drive_sdk::mode::ModeEnum;
+  return std::set{ Modes::Freeze, Modes::Current, Modes::JointTorque, Modes::JointVelocity, Modes::MotorVelocity };
+};
 
 }  // namespace duatic::duadrive_interface

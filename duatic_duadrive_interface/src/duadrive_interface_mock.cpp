@@ -75,6 +75,7 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.joint_velocity_commanded = command_.joint_velocity;
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = command_.joint_torque;
+  state_.current_control_mode = static_cast<double>(active_mode_);
 
   if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
     return hardware_interface::return_type::OK;
