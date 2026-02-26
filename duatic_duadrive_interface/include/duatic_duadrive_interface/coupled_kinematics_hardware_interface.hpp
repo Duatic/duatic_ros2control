@@ -372,13 +372,14 @@ public:
                               [[maybe_unused]] const std::vector<std::string>& stop_interfaces) override
   {
     // Prepare command mode switch by selecting the write drive mode depending on the selected interfaces
-    for (const auto& interface : start_interfaces) {
-      currently_active_interfaces_.insert(interface);
-    }
 
     for (const auto& interface : stop_interfaces) {
       currently_active_interfaces_.erase(interface);
     }
+    for (const auto& interface : start_interfaces) {
+      currently_active_interfaces_.insert(interface);
+    }
+
     // This is now staged and will be applied in the "perform_command_mode_switch" method
     current_active_drive_mode_ = select_mode(currently_active_interfaces_, logger_);
     RCLCPP_INFO_STREAM(logger_, "Staging new control mode: " << current_active_drive_mode_);
