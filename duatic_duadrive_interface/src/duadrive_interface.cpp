@@ -57,7 +57,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
   const ecat_master::EthercatMasterConfiguration ecat_master_config = {
-    .name = "DuaDriveHardwareInterface", .networkInterface = ethercat_bus, .timeStep = 0.001
+    .name = "DuaDriveHardwareInterface", .networkInterface = ethercat_bus, .timeStep = 0.002
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
 
   // Obtain an instance of the bus from the singleton - if there is no instance it will be created
