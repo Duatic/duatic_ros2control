@@ -104,10 +104,10 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->updateRead();
   }
 
-  // Put into controlOP, in blocking mode.
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, false, 1, 10)) {
+  // Put into controlOP
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 0.5, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
-    return hardware_interface::CallbackReturn::ERROR;
+   // return hardware_interface::CallbackReturn::ERROR;
   }
 
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
@@ -141,6 +141,10 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
       break;
     }
   }
+
+
+
+
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
     RCLCPP_ERROR_STREAM(logger_, "Initial readout failed for: " << get_name() << " - this is critical!");
