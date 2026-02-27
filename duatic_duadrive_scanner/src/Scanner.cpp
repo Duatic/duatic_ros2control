@@ -70,4 +70,10 @@ std::string Scanner::get_device_name(const uint16_t device_id)
   return ethercat::read_device_name(ecat_context, device_id).value();
 }
 
+bool Scanner::is_duadrive(const uint16_t device_id)
+{
+  const auto device_name = ethercat::read_device_name(ecat_context, device_id).value();
+  return device_name.find("Drive") != std::string::npos;
+}
+
 }  // namespace duadrive_scanner

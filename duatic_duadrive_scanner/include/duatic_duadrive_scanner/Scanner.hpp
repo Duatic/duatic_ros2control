@@ -79,7 +79,7 @@ public:
    */
   firmware::DriveInfo get_firmware_drive_info(const uint16_t device_id);
 
-  const std::string& getInterface() const
+  const std::string& get_interface_name() const
   {
     return interface_;
   }

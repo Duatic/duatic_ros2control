@@ -29,11 +29,27 @@
 
 void handle_scan(duadrive_scanner::Scanner& scanner)
 {
-  std::cout << "Found: " << scanner.device_count() << " devices on the bus" << std::endl;
-
-  for (int i = 0; i < scanner.device_count(); i++) {
+  std::cout << "Found: " << scanner.device_count() << " devices on the bus: " << scanner.get_interface_name() << std::endl;
+  // id 0 is always the master
+  for (int i = 1; i < scanner.device_count() + 1; i++) {
     std::cout << "Device: " << i << std::endl;
     std::cout << "  Name: " << scanner.get_device_name(i) << std::endl;
+
+    if (scanner.is_duadrive(i)) {
+      std::cout << "  Device is a DuaDrive:" << std::endl;
+
+      const auto drive_info = scanner.get_firmware_drive_info(i);
+      const auto build_info = scanner.get_firmware_build_info(i);
+
+      std::cout << "  Type: " << drive_info.drive_type << std::endl;
+      std::cout << "  Model: " << drive_info.drive_model << std::endl;
+      std::cout << "  Name: " << drive_info.drive_name << std::endl;
+
+      std::cout << "  Build: " << std::endl;
+      std::cout << "    Date: " << build_info.build_date << std::endl;
+      std::cout << "    git tag: " << build_info.git_tag << std::endl;
+      std::cout << "    git hash: " << build_info.git_hash << std::endl;
+    }
   }
 }
 void handle_list_adapters()
@@ -82,15 +98,16 @@ int main(int argc, char** argv)
     if (verb == "list_adapters") {
       handle_list_adapters();
       return 0;
-
-      const auto bus = args["bus"].as<std::string>();
-
-      duadrive_scanner::Scanner scanner(bus);
-
-      if (verb == "scan") {
-        handle_scan(scanner);
-      }
     }
+    const auto bus = args["bus"].as<std::string>();
+
+    duadrive_scanner::Scanner scanner(bus);
+    scanner.connect();
+    if (verb == "scan") {
+      handle_scan(scanner);
+      return 0;
+    }
+
   } catch (const std::exception& ex) {
     std::cerr << "Error: " << ex.what() << std::endl;
     return -2;
