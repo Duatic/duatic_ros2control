@@ -29,7 +29,8 @@
 
 void handle_scan(duadrive_scanner::Scanner& scanner)
 {
-  std::cout << "Found: " << scanner.device_count() << " devices on the bus: " << scanner.get_interface_name() << std::endl;
+  std::cout << "Found: " << scanner.device_count() << " devices on the bus: " << scanner.get_interface_name()
+            << std::endl;
   // id 0 is always the master
   for (int i = 1; i < scanner.device_count() + 1; i++) {
     std::cout << "Device: " << i << std::endl;
@@ -107,7 +108,6 @@ int main(int argc, char** argv)
       handle_scan(scanner);
       return 0;
     }
-
   } catch (const std::exception& ex) {
     std::cerr << "Error: " << ex.what() << std::endl;
     return -2;
