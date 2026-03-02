@@ -236,7 +236,6 @@ public:
   hardware_interface::CallbackReturn
   on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state) override
   {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
     for (auto& drive : drives_) {
       // Call activate for each drive and propagate errors if necessary
       // We currently treat every error that can happen in this stage as fatal
