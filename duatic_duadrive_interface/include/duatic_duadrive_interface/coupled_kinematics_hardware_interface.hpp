@@ -189,6 +189,7 @@ public:
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
                                                         .device_address = ethercat_address });
+      current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
     // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
@@ -374,15 +375,20 @@ public:
     // Prepare command mode switch by selecting the write drive mode depending on the selected interfaces
 
     for (const auto& interface : stop_interfaces) {
-      currently_active_interfaces_.erase(interface);
+      const auto joint_name = extract_interface_name(interface);
+      currently_active_interfaces_[joint_name].erase(interface);
     }
     for (const auto& interface : start_interfaces) {
-      currently_active_interfaces_.insert(interface);
+      const auto joint_name = extract_interface_name(interface);
+      currently_active_interfaces_[joint_name].insert(interface);
     }
 
     // This is now staged and will be applied in the "perform_command_mode_switch" method
-    current_active_drive_mode_ = select_mode(currently_active_interfaces_, logger_);
-    RCLCPP_INFO_STREAM(logger_, "Staging new control mode: " << current_active_drive_mode_);
+    for(const auto & drive: drives_){
+      current_active_drive_modes_[drive->get_name()] = select_mode(currently_active_interfaces_[drive->get_name()],logger_);
+      RCLCPP_INFO_STREAM(logger_, "Staging new control mode for drive: " << drive->get_name() << "  " << current_active_drive_modes_[drive->get_name()]);
+    }
+
     return hardware_interface::return_type::OK;
   }
 
@@ -391,10 +397,10 @@ public:
   {
     // This is run in the realtime context -> We now configure each drive to use the new mode
     // Will be applied in the next "write" run
-    for (auto& drive : drives_) {
+    /*for (auto& drive : drives_) {
       drive->configure_drive_mode(current_active_drive_mode_);
     }
-    RCLCPP_INFO_STREAM(logger_, "Configured new control mode: " << current_active_drive_mode_);
+    RCLCPP_INFO_STREAM(logger_, "Configured new control mode: " << current_active_drive_mode_);*/
     return hardware_interface::return_type::OK;
   }
 
@@ -422,8 +428,8 @@ protected:
 
   rclcpp::Logger logger_;
 
-  std::set<std::string> currently_active_interfaces_;
-  rsl_drive_sdk::mode::ModeEnum current_active_drive_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
+  std::unordered_map<std::string, std::set<std::string>> currently_active_interfaces_;
+  std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)
