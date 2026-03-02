@@ -110,9 +110,9 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->updateRead();
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  // Put into Standby
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Standby, true, 1.0, 10)) {
-    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
+  // Put into Configure
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, true, 1.5, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into configure");
     // return hardware_interface::CallbackReturn::ERROR;
   }
 
