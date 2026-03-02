@@ -397,10 +397,10 @@ public:
   {
     // This is run in the realtime context -> We now configure each drive to use the new mode
     // Will be applied in the next "write" run
-    /*for (auto& drive : drives_) {
-      drive->configure_drive_mode(current_active_drive_mode_);
+    for (auto& drive : drives_) {
+      drive->configure_drive_mode(current_active_drive_modes_[drive->get_name()]);
     }
-    RCLCPP_INFO_STREAM(logger_, "Configured new control mode: " << current_active_drive_mode_);*/
+
     return hardware_interface::return_type::OK;
   }
 
