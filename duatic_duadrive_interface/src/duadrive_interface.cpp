@@ -97,6 +97,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::configure()
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
+  RCLCPP_INFO_STREAM(logger_, "Activate drive: " <<  drive_->getName());
   // We are now in the realtime loop
   // In case we are in error state clear the error and try again
   rsl_drive_sdk::Statusword status_word;
