@@ -93,5 +93,8 @@ private:
   rsl_drive_sdk::DriveEthercatDevice::SharedPtr drive_;
 
   rsl_drive_sdk::Statusword last_status_word_;
+
+  // Gets called when the bus startup has been finished but before going into the RT loop
+  void on_bus_startup_finished();
 };
 }  // namespace duatic::duadrive_interface
