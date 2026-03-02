@@ -109,8 +109,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->updateRead();
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  // Put into controlOP
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1.0, 10)) {
+  // Put into Standby
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Standby, true, 1.0, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     // return hardware_interface::CallbackReturn::ERROR;
   }
@@ -169,6 +169,11 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
+
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, false, 1.0, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
+    // return hardware_interface::CallbackReturn::ERROR;
+  }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
