@@ -384,9 +384,11 @@ public:
     }
 
     // This is now staged and will be applied in the "perform_command_mode_switch" method
-    for(const auto & drive: drives_){
-      current_active_drive_modes_[drive->get_name()] = select_mode(currently_active_interfaces_[drive->get_name()],logger_);
-      RCLCPP_INFO_STREAM(logger_, "Staging new control mode for drive: " << drive->get_name() << "  " << current_active_drive_modes_[drive->get_name()]);
+    for (const auto& drive : drives_) {
+      current_active_drive_modes_[drive->get_name()] =
+          select_mode(currently_active_interfaces_[drive->get_name()], logger_);
+      RCLCPP_INFO_STREAM(logger_, "Staging new control mode for drive: "
+                                      << drive->get_name() << "  " << current_active_drive_modes_[drive->get_name()]);
     }
 
     return hardware_interface::return_type::OK;
@@ -399,6 +401,8 @@ public:
     // Will be applied in the next "write" run
     for (auto& drive : drives_) {
       drive->configure_drive_mode(current_active_drive_modes_[drive->get_name()]);
+      RCLCPP_INFO_STREAM(logger_, "Activating drive mode: " << current_active_drive_modes_[drive->get_name()]
+                                                            << " for drive: " << drive->get_name());
     }
 
     return hardware_interface::return_type::OK;

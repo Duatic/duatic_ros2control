@@ -113,8 +113,10 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
 
-  const auto gains=  drive_->getConfiguration().getMode(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains)->getPidGains();
-  if(!gains){
+  const auto gains = drive_->getConfiguration()
+                         .getMode(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains)
+                         ->getPidGains();
+  if (!gains) {
     RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << " failed to obtain pid gains");
   }
   command_.p_gain = gains->getP();
