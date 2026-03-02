@@ -171,7 +171,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
 
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, false, 1.0, 10)) {
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1.0, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     // return hardware_interface::CallbackReturn::ERROR;
   }
