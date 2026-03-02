@@ -57,7 +57,11 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
   const ecat_master::EthercatMasterConfiguration ecat_master_config = {
-    .name = "DuaDriveHardwareInterface", .networkInterface = ethercat_bus, .timeStep = 0.002,.doBusDiagnosis = false, .logErrorCounters = false
+    .name = "DuaDriveHardwareInterface",
+    .networkInterface = ethercat_bus,
+    .timeStep = 0.002,
+    .doBusDiagnosis = false,
+    .logErrorCounters = false
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
 
   // Obtain an instance of the bus from the singleton - if there is no instance it will be created
@@ -103,47 +107,50 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->updateWrite();
     drive_->updateRead();
   }
-
   // Put into controlOP
   if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1.0, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
-   // return hardware_interface::CallbackReturn::ERROR;
+    // return hardware_interface::CallbackReturn::ERROR;
   }
 
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
   rsl_drive_sdk::common::BuildInfo info;
-  drive_->getBuildInfo(info);
+  if (!drive_->getBuildInfo(info)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'build info' from driver");
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
   std::string drive_model;
-  drive_->getDriveModel(drive_model);
+  if (!drive_->getDriveModel(drive_model)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'drive model' from driver");
+  }
   RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model << " Build date: "
                                              << info.buildDate << " tag: " << info.gitTag << " hash: " << info.gitHash);
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
-
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   // Update the command with the current state (avoid weird motions)
   rsl_drive_sdk::mode::PidGainsF gains;
-  drive_->getControlGains(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains, gains);
+  if (!drive_->getControlGains(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains, gains)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'pid gains' from driver");
+  }
   command_.p_gain = gains.getP();
   command_.i_gain = gains.getI();
   command_.d_gain = gains.getD();
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains);
-
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   // We need to give the drive a bit of time otherwise we do not get valid readings
   int retries = 0;
   while (!drive_->goalStateHasBeenReached()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
     retries++;
     if (retries > 100) {
-      RCLCPP_ERROR_STREAM(logger_, "Drive hasn't reach goal state within 100ms - trying to continue nevertheless - "
-                                   "usually it reaches the goal state afterwards");
+      RCLCPP_WARN_STREAM(logger_, "Drive hasn't reach goal state within 100ms - trying to continue nevertheless - "
+                                  "usually it reaches the goal state afterwards");
       break;
     }
   }
-
-
-
 
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
