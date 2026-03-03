@@ -252,6 +252,12 @@ public:
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
+    for (std::size_t i = 0; i < drives_.size(); i++) {
+      const auto& drive = drives_[i];
+      RCLCPP_INFO_STREAM(logger_, drive->get_name() << " initial values: " << state_serial_kinematics_[i].position
+                                                    << " " << state_serial_kinematics_[i].velocity);
+    }
+
     // Now the internal fields are updated an we can update the externally exposed commands
     update_write_command_interfaces(command_interface_mapping_, *this);
     // Explicitly handle the joint position case !
@@ -347,7 +353,6 @@ public:
       command.joint_freeze_mode = enforced_freeze;
 
       drive->stage_command(command);
-
       // In case we are in a mode that does not control the position we feedback the current position as command to
       // avoid jumps in certain controller constellations
       const auto modes = modes_without_position_control();
