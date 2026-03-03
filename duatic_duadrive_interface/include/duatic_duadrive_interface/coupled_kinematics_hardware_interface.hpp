@@ -49,7 +49,7 @@
 #include <duatic_duadrive_interface/interface_utils.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_base.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_mock.hpp>
-#include <duatic_duadrive_interface/coupled_kinematics_translation_traits.hpp>
+#include <duatic_duadrive_interface/coupled_kinematics_translator.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
 
@@ -61,10 +61,12 @@ namespace duatic::duadrive_interface
  * @tparam kinematics_translator - translation class for translation serial to coupled kinematics and vice versa
  * @tparam enable_advanced_command_limit - Enable the advanced position command limiting algorithm
  */
-template <typename DriveTypeT, kinematics::KinematicsTranslator kinematics_translator,
+template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false>
 class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
+  using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
+
 public:
   CoupledKinematicsHardwareInterfaceBase() : logger_(rclcpp::get_logger("CoupledKinematicsHardwareInterfaceBase"))
   {
@@ -189,6 +191,7 @@ public:
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
                                                         .device_address = ethercat_address });
+      current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
     // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
@@ -249,6 +252,12 @@ public:
     if (read(rclcpp::Time(), rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
       RCLCPP_FATAL_STREAM(logger_, "Failed to perform initial 'read'. Aborting startup!");
       return hardware_interface::CallbackReturn::FAILURE;
+    }
+
+    for (std::size_t i = 0; i < drives_.size(); i++) {
+      const auto& drive = drives_[i];
+      RCLCPP_INFO_STREAM(logger_, drive->get_name() << " initial values: " << state_serial_kinematics_[i].position
+                                                    << " " << state_serial_kinematics_[i].velocity);
     }
 
     // Now the internal fields are updated an we can update the externally exposed commands
@@ -346,7 +355,6 @@ public:
       command.joint_freeze_mode = enforced_freeze;
 
       drive->stage_command(command);
-
       // In case we are in a mode that does not control the position we feedback the current position as command to
       // avoid jumps in certain controller constellations
       const auto modes = modes_without_position_control();
@@ -374,15 +382,22 @@ public:
     // Prepare command mode switch by selecting the write drive mode depending on the selected interfaces
 
     for (const auto& interface : stop_interfaces) {
-      currently_active_interfaces_.erase(interface);
+      const auto joint_name = extract_interface_name(interface);
+      currently_active_interfaces_[joint_name].erase(interface);
     }
     for (const auto& interface : start_interfaces) {
-      currently_active_interfaces_.insert(interface);
+      const auto joint_name = extract_interface_name(interface);
+      currently_active_interfaces_[joint_name].insert(interface);
     }
 
     // This is now staged and will be applied in the "perform_command_mode_switch" method
-    current_active_drive_mode_ = select_mode(currently_active_interfaces_, logger_);
-    RCLCPP_INFO_STREAM(logger_, "Staging new control mode: " << current_active_drive_mode_);
+    for (const auto& drive : drives_) {
+      current_active_drive_modes_[drive->get_name()] =
+          select_mode(currently_active_interfaces_[drive->get_name()], logger_);
+      RCLCPP_INFO_STREAM(logger_, "Staging new control mode for drive: "
+                                      << drive->get_name() << "  " << current_active_drive_modes_[drive->get_name()]);
+    }
+
     return hardware_interface::return_type::OK;
   }
 
@@ -392,9 +407,11 @@ public:
     // This is run in the realtime context -> We now configure each drive to use the new mode
     // Will be applied in the next "write" run
     for (auto& drive : drives_) {
-      drive->configure_drive_mode(current_active_drive_mode_);
+      drive->configure_drive_mode(current_active_drive_modes_[drive->get_name()]);
+      RCLCPP_INFO_STREAM(logger_, "Activating drive mode: " << current_active_drive_modes_[drive->get_name()]
+                                                            << " for drive: " << drive->get_name());
     }
-    RCLCPP_INFO_STREAM(logger_, "Configured new control mode: " << current_active_drive_mode_);
+
     return hardware_interface::return_type::OK;
   }
 
@@ -422,8 +439,8 @@ protected:
 
   rclcpp::Logger logger_;
 
-  std::set<std::string> currently_active_interfaces_;
-  rsl_drive_sdk::mode::ModeEnum current_active_drive_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
+  std::unordered_map<std::string, std::set<std::string>> currently_active_interfaces_;
+  std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)

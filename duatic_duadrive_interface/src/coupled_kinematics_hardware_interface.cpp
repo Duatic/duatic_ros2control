@@ -23,7 +23,7 @@
  */
 
 #include "duatic_duadrive_interface/coupled_kinematics_hardware_interface.hpp"
-#include "duatic_duadrive_interface/coupled_kinematics_invariant_translator.hpp"
+#include "duatic_duadrive_interface/coupled_kinematics_invariant_mapping.hpp"
 
 #include "duatic_duadrive_interface/duadrive_interface.hpp"
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
@@ -33,8 +33,8 @@ namespace duatic::duadrive_interface
 
 // Define concrete types to force the compiler to compile the interface
 using CoupledKinematicsHardwareInterfaceReal =
-    CoupledKinematicsHardwareInterfaceBase<DuaDriveInterface, kinematics::InvariantKinematicsTranslator>;
+    CoupledKinematicsHardwareInterfaceBase<DuaDriveInterface, kinematics::InvariantKinematicsMapping<1>>;
 using CoupledKinematicsHardwareInterfaceMock =
-    CoupledKinematicsHardwareInterfaceBase<DuaDriveInterfaceMock, kinematics::InvariantKinematicsTranslator>;
+    CoupledKinematicsHardwareInterfaceBase<DuaDriveInterfaceMock, kinematics::InvariantKinematicsMapping<1>>;
 
 }  // namespace duatic::duadrive_interface

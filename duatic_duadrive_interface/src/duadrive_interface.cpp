@@ -57,11 +57,16 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
   const ecat_master::EthercatMasterConfiguration ecat_master_config = {
-    .name = "DuaDriveHardwareInterface", .networkInterface = ethercat_bus, .timeStep = 0.001
+    .name = "DuaDriveHardwareInterface",
+    .networkInterface = ethercat_bus,
+    .timeStep = 0.001,
+    .doBusDiagnosis = false,
+    .logErrorCounters = false
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
 
   // Obtain an instance of the bus from the singleton - if there is no instance it will be created
-  ecat_master_handle_ = ecat_master::EthercatMasterSingleton::instance().aquireMaster(ecat_master_config);
+  ecat_master_handle_ = ecat_master::EthercatMasterSingleton::instance().aquireMaster(
+      ecat_master_config, std::bind(&DuaDriveInterface::on_bus_startup_finished, this));
 
   const auto joint_name = params.joint_name;
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterface_" + joint_name);
@@ -91,51 +96,67 @@ hardware_interface::CallbackReturn DuaDriveInterface::configure()
   ecat_master::EthercatMasterSingleton::instance().markAsReady(ecat_master_handle_);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
-hardware_interface::CallbackReturn DuaDriveInterface::activate()
+
+void DuaDriveInterface::on_bus_startup_finished()
 {
-  // We are now in the realtime loop
-  // In case we are in error state clear the error and try again
-  rsl_drive_sdk::Statusword status_word;
-  drive_->getStatuswordSdo(status_word);
-  if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error) {
-    RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");
-    drive_->setControlword(RSL_DRIVE_CW_ID_CLEAR_ERRORS_TO_STANDBY);
-    drive_->updateWrite();
-    drive_->updateRead();
-    if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1, 10)) {
-      RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " did not go into ControlOP");
-    } else {
-      RCLCPP_INFO_STREAM(logger_, "Drive: " << get_name() << " went into ControlOp successfully");
-    }
-  }
-
-  // Put into controlOP, in blocking mode.
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1, 10)) {
-    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name()
-                                           << " did not go into ControlOP - this is trouble some and a reason to "
-                                              "abort. Try to reboot the hardware");
-    return hardware_interface::CallbackReturn::ERROR;
-  }
-
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
   rsl_drive_sdk::common::BuildInfo info;
-  drive_->getBuildInfo(info);
-
+  if (!drive_->getBuildInfo(info)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'build info' from driver");
+  }
   std::string drive_model;
-  drive_->getDriveModel(drive_model);
+  if (!drive_->getDriveModel(drive_model)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'drive model' from driver");
+  }
   RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model << " Build date: "
                                              << info.buildDate << " tag: " << info.gitTag << " hash: " << info.gitHash);
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
 
-  // Update the command with the current state (avoid weird motions)
-  rsl_drive_sdk::mode::PidGainsF gains;
-  drive_->getControlGains(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains, gains);
-  command_.p_gain = gains.getP();
-  command_.i_gain = gains.getI();
-  command_.d_gain = gains.getD();
+  const auto gains = drive_->getConfiguration()
+                         .getMode(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains)
+                         ->getPidGains();
+  if (!gains) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << " failed to obtain pid gains");
+  }
+  command_.p_gain = gains->getP();
+  command_.i_gain = gains->getI();
+  command_.d_gain = gains->getD();
 
-  RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains);
+  RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains.value());
+}
+hardware_interface::CallbackReturn DuaDriveInterface::activate()
+{
+  RCLCPP_INFO_STREAM(logger_, "Activate drive: " << drive_->getName());
+  // We are now in the realtime loop
+  // In case we are in error state clear the error and try again
+  rsl_drive_sdk::Statusword status_word;
+  drive_->getStatuswordSdo(status_word);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error) {
+    RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");
+    drive_->setControlword(RSL_DRIVE_CW_ID_CLEAR_ERRORS_TO_STANDBY);
+    drive_->updateWrite();
+    drive_->updateRead();
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  // Put into Configure
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, true, 1.5, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into configure");
+    // return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  // We need to give the drive a bit of time otherwise we do not get valid readings
+  int retries = 0;
+  while (!drive_->goalStateHasBeenReached()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    retries++;
+    if (retries > 100) {
+      RCLCPP_WARN_STREAM(logger_, "Drive hasn't reach goal state within 100ms - trying to continue nevertheless - "
+                                  "usually it reaches the goal state afterwards");
+      break;
+    }
+  }
 
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
@@ -152,6 +173,11 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
+
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 1.0, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
+    // return hardware_interface::CallbackReturn::ERROR;
+  }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
@@ -253,6 +279,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
+  } else {
+    RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP");
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
