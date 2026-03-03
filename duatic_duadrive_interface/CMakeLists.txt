@@ -25,7 +25,6 @@ add_library(duatic_duadrive_interface
   src/duadrive_interface_base.cpp
   src/duadrive_interface_mock.cpp
   src/coupled_kinematics_hardware_interface.cpp
-  src/coupled_kinematics_invariant_translator.cpp
 )
 add_library(duatic_duadrive_interface::duatic_duadrive_interface ALIAS duatic_duadrive_interface)
 target_compile_features(duatic_duadrive_interface PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20

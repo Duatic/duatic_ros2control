@@ -23,34 +23,47 @@
  */
 
 #pragma once
+
 #include <span>
 
-#include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
+#include <eigen3/Eigen/Core>
+#include <eigen3/Eigen/Dense>
+
+#include "duatic_duadrive_interface/coupled_kinematics_translator.hpp"
 
 namespace duatic::duadrive_interface::kinematics
 {
-// Concept every class that wants to act as KinematicsTranslator needs to fulfill
-template <typename T>
-concept KinematicsTranslator = requires(std::span<const CoupledJointState> cjs_in, std::span<SerialJointState> sjs_out,
-                                        std::span<const SerialJointState> sjs_in, std::span<CoupledJointState> cjs_out,
-                                        std::span<const CoupledCommand> cc_in, std::span<SerialCommand> sc_out,
-                                        std::span<const SerialCommand> sc_in, std::span<CoupledCommand> cc_out)
+/**
+ * @brief InvariantKinematicsTranslator - simple dummy translator which simply copies input to output
+ */
+template <std::size_t expected_input_size>
+struct InvariantKinematicsMapping
 {
-  // JointState mappings
+  using VectorType = Eigen::VectorXd;
+  static VectorType map_from_coupled_to_serial_coordinates(const VectorType& in)
   {
-    T::map_from_coupled_to_serial(cjs_in, sjs_out)
-    } -> std::same_as<void>;
-  {
-    T::map_from_serial_to_coupled(sjs_in, cjs_out)
-    } -> std::same_as<void>;
+    return in;
+  }
 
-  // Command mappings
+  static VectorType map_from_coupled_to_serial_torques(const VectorType& in)
   {
-    T::map_from_coupled_to_serial(cc_in, sc_out)
-    } -> std::same_as<void>;
+    return in;
+  }
+
+  static VectorType map_from_serial_to_coupled_coordinates(const VectorType& in)
   {
-    T::map_from_serial_to_coupled(sc_in, cc_out)
-    } -> std::same_as<void>;
+    return in;
+  }
+
+  static VectorType map_from_serial_to_coupled_torques(const VectorType& in)
+  {
+    return in;
+  }
+
+  static constexpr std::size_t input_size()
+  {
+    return expected_input_size;
+  }
 };
 
 }  // namespace duatic::duadrive_interface::kinematics

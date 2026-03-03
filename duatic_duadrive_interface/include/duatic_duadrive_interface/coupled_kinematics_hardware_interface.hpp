@@ -49,7 +49,7 @@
 #include <duatic_duadrive_interface/interface_utils.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_base.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_mock.hpp>
-#include <duatic_duadrive_interface/coupled_kinematics_translation_traits.hpp>
+#include <duatic_duadrive_interface/coupled_kinematics_translator.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
 
@@ -61,10 +61,12 @@ namespace duatic::duadrive_interface
  * @tparam kinematics_translator - translation class for translation serial to coupled kinematics and vice versa
  * @tparam enable_advanced_command_limit - Enable the advanced position command limiting algorithm
  */
-template <typename DriveTypeT, kinematics::KinematicsTranslator kinematics_translator,
+template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false>
 class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
+  using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
+
 public:
   CoupledKinematicsHardwareInterfaceBase() : logger_(rclcpp::get_logger("CoupledKinematicsHardwareInterfaceBase"))
   {
