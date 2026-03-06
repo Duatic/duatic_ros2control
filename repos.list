@@ -5,7 +5,7 @@ repositories:
     version: master
   message_logger:
     type: git
-    url: https://github.com/leggedrobotics/message_logger.git
+    url: https://github.com/Duatic/message_logger.git
     version: main
   rsl_drive_sdk:
     type: git
