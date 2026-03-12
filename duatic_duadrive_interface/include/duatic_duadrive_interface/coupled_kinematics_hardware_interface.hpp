@@ -120,6 +120,9 @@ public:
       RCLCPP_INFO_STREAM(logger_, "size: " << drive_command_interfaces.size());
       command_interfaces.insert(command_interfaces.end(), drive_command_interfaces.begin(),
                                 drive_command_interfaces.end());
+      // Create on this level a freeze_mode interface per drive. We do not actually care about the value
+      // but if it is claimed the freeze mode for the specific drive will be activated
+      command_interfaces.emplace_back(create_interface_description<bool>(drive->get_name(), "freeze_mode", false));
     }
     // Append the arm wide freeze mode field
     command_interfaces.emplace_back(
