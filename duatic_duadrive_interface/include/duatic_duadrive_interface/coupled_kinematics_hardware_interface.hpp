@@ -336,7 +336,11 @@ public:
     // a position limit
     if constexpr (enable_advanced_command_limit) {
       for (std::size_t i = 0; i < drives_.size(); i++) {
-        position_limiters_[i].limit(commands_serial_kinematics_[i], state_serial_kinematics_[i]);
+        if (position_limiters_[i].limit(commands_serial_kinematics_[i], state_serial_kinematics_[i])) {
+          auto& clock = *this->get_clock();
+          RCLCPP_WARN_STREAM_THROTTLE(logger_, clock, 1000,
+                                      "Limiting command for joint: " << position_limiters_[i].get_joint_name());
+        }
       }
     }
 

@@ -25,6 +25,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -62,26 +63,36 @@ public:
 
   constexpr double limit(double cmd, const double current_position)
   {
+    if (std::abs(limit_lower_) > 1e300 || std::abs(limit_upper_) > 1e300) {
+      // std::cout << "Infinite limit detected for joint: " << joint_name_ << " - bypassing limiter" << std::endl;
+      return cmd;
+    }
+
     if (current_position >= limit_lower_ && current_position <= limit_upper_) {
       // The if statements below make sure that the arm is not moving towards collision with itself
       // First checking if it is within limits, if yes it works under normal circumstances
       cmd = std::clamp(cmd, limit_lower_, limit_upper_);
-      last_valid_position_ = current_position;
+      last_valid_position_ = cmd;
     } else if (current_position < limit_lower_ && cmd >= current_position) {
       // If we are lower than the low_limit but the joint is moving away from collision we accept the move
       // Then it is safe to move and we Accept the new position to be commanded
       // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
       cmd = std::clamp(cmd, current_position, limit_upper_);
-      last_valid_position_ = current_position;
+      last_valid_position_ = cmd;
     } else if (current_position > limit_upper_ && cmd <= current_position) {
       // Same for the upper limmit
       cmd = std::clamp(cmd, limit_lower_, current_position);
-      last_valid_position_ = current_position;
+      last_valid_position_ = cmd;
     } else {
       // Hold last valid position, this is why we need the last_valid_position_ variable.
       cmd = last_valid_position_.value();
     }
     return cmd;
+  }
+
+  const std::string& get_joint_name() const
+  {
+    return joint_name_;
   }
 
 private:
