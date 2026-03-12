@@ -25,6 +25,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -62,6 +63,11 @@ public:
 
   constexpr double limit(double cmd, const double current_position)
   {
+    if (std::abs(limit_lower_) > 1e300 || std::abs(limit_upper_) > 1e300) {
+      // std::cout << "Infinite limit detected for joint: " << joint_name_ << " - bypassing limiter" << std::endl;
+      return cmd;
+    }
+
     if (current_position >= limit_lower_ && current_position <= limit_upper_) {
       // The if statements below make sure that the arm is not moving towards collision with itself
       // First checking if it is within limits, if yes it works under normal circumstances
@@ -82,6 +88,11 @@ public:
       cmd = last_valid_position_.value();
     }
     return cmd;
+  }
+
+  const std::string& get_joint_name() const
+  {
+    return joint_name_;
   }
 
 private:
