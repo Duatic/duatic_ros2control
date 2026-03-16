@@ -63,8 +63,8 @@ public:
 
   constexpr double limit(double cmd, const double current_position)
   {
-    if (std::abs(limit_lower_) > 1e300 || std::abs(limit_upper_) > 1e300) {
-      // std::cout << "Infinite limit detected for joint: " << joint_name_ << " - bypassing limiter" << std::endl;
+    // in case both limits are zero we disable the check
+    if (limit_lower_ == 0.0 && limit_upper_ == 0.0) {
       return cmd;
     }
 
