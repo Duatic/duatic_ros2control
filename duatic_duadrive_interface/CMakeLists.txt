@@ -70,6 +70,13 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_coupled_kinematics_position_limiter
+    test/test_coupled_kinematics_position_limiter.cpp
+  )
+  target_link_libraries(test_coupled_kinematics_position_limiter
+    duatic_duadrive_interface
+  )
 endif()
 
 ament_export_include_directories(

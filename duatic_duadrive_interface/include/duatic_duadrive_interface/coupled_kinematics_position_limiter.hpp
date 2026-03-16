@@ -69,22 +69,25 @@ public:
     }
 
     if (current_position >= limit_lower_ && current_position <= limit_upper_) {
-      // The if statements below make sure that the arm is not moving towards collision with itself
-      // First checking if it is within limits, if yes it works under normal circumstances
+      // Case 1: Current joint position is within safe limits but incoming command is outside of limits
+      // Action: Clamp the command to ensure it does not exceed the allowed range.
       cmd = std::clamp(cmd, limit_lower_, limit_upper_);
       last_valid_position_ = cmd;
     } else if (current_position < limit_lower_ && cmd >= current_position) {
-      // If we are lower than the low_limit but the joint is moving away from collision we accept the move
-      // Then it is safe to move and we Accept the new position to be commanded
+      // Case 2: Current joint position is below lower limit but incoming command is above lower limit
+      // Action: Accept the new position to be commanded
       // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
       cmd = std::clamp(cmd, current_position, limit_upper_);
       last_valid_position_ = cmd;
     } else if (current_position > limit_upper_ && cmd <= current_position) {
-      // Same for the upper limmit
+      // Case 3: Current joint position is above upper limit but incoming command is below upper limit
+      // Action: Accept the new position to be commanded
+      // Note that we clamp the maximum joint position value to the current position, this way we avoid jumps
       cmd = std::clamp(cmd, limit_lower_, current_position);
       last_valid_position_ = cmd;
     } else {
-      // Hold last valid position, this is why we need the last_valid_position_ variable.
+      // Case 4: Current joint position is out of bounds and incoming command would move it further into the collision
+      // zone. Action: Reject the new command and hold the last valid commanded position to prevent damage.
       cmd = last_valid_position_.value();
     }
     return cmd;
