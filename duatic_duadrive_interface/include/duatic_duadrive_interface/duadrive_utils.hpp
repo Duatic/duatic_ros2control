@@ -107,6 +107,10 @@ inline void print_drive_status(const std::string& drive_name, const rsl_drive_sd
   for (const auto& msg : fatals) {
     RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:" << msg);
   }
+  if (infos.empty() && warnings.empty() && errors.empty() && fatals.empty()) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:"
+                                   << "Drive status: OK");
+  }
 }
 
 /**
