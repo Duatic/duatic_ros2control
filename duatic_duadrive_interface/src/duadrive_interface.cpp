@@ -132,6 +132,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   // In case we are in error state clear the error and try again
   rsl_drive_sdk::Statusword status_word;
   drive_->getStatuswordSdo(status_word);
+  // Print the current drive state (e.g. warnings, errors, fatals)
+  print_drive_status(drive_->getName(), status_word, logger_);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
   if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error) {
     RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");

@@ -85,6 +85,37 @@ inline void print_drive_status_changes(
   }
 }
 
+inline void print_drive_status(const std::string& drive_name, const rsl_drive_sdk::Statusword& current_status_word,
+                               rclcpp::Logger& logger)
+{
+  std::vector<std::string> infos;
+  std::vector<std::string> warnings;
+  std::vector<std::string> errors;
+  std::vector<std::string> fatals;
+
+  current_status_word.getMessages(infos, warnings, errors, fatals);
+
+  for (const auto& msg : infos) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:" << msg);
+  }
+  for (const auto& msg : warnings) {
+    RCLCPP_WARN_STREAM(logger, "[" << drive_name << "]:" << msg);
+  }
+  for (const auto& msg : errors) {
+    RCLCPP_ERROR_STREAM(logger, "[" << drive_name << "]:" << msg);
+  }
+  for (const auto& msg : fatals) {
+    RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:" << msg);
+  }
+  if (infos.empty() && warnings.empty() && errors.empty() && fatals.empty()) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:"
+                                   << "Drive status: OK");
+  }
+}
+
+/**
+ * @brief select the new drive mode from the selected (claimed) drive interfaces
+ */
 inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_,
                                                  bool remove_gain_interfaces = true)
 {
