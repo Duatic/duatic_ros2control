@@ -316,6 +316,13 @@ public:
       state.velocity_commanded = latest_reading.joint_velocity_commanded;
       state.acceleration_commanded = latest_reading.joint_acceleration_commanded;
       state.torque_commanded = latest_reading.joint_torque_commanded;
+
+      if (latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Error ||
+          latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Fatal) {
+        RCLCPP_ERROR_STREAM_ONCE(logger_,
+                                 "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
+        error_active_ = true;
+      }
     }
 
     // Now comes the interesting part. We need to take the data from each drive and apply the serial linkage
@@ -347,7 +354,7 @@ public:
     // Translated commands to coupled kinematics
     kinematics_translator::map_from_serial_to_coupled(commands_serial_kinematics_, commands_coupled_kinematics_);
 
-    const bool enforced_freeze = freeze_mode_interface_->get_optional<bool>().value();
+    const bool enforced_freeze = freeze_mode_interface_->get_optional<bool>().value() || error_active_;
     // Stage all commands with the coupled
     for (std::size_t i = 0; i < drives_.size(); i++) {
       auto& drive = drives_[i];
@@ -448,6 +455,8 @@ protected:
 
   std::unordered_map<std::string, std::set<std::string>> currently_active_interfaces_;
   std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
+
+  bool error_active_{ false };
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)

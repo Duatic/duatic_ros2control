@@ -84,8 +84,10 @@ struct DuaDriveInterfaceState
   double temperature_coil_C{};
   double bus_voltage{};
 
-  // This should be int32_t but the joint_state_broadcaster will otherwise break...
-  double current_control_mode{};
+  // These 2 fields are not exported to the outside but are just intended to be used within the coupled kinematics
+  // hardware interface
+  rsl_drive_sdk::fsm::StateEnum current_drive_state{};
+  rsl_drive_sdk::mode::ModeEnum current_drive_mode{};
 
   // This is what the drive tells us (as feedback) what we commanded
   double joint_position_commanded{};
