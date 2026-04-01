@@ -284,6 +284,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
   } else {
     RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: "
                                             << drive_->getActiveStateEnum());
+    drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, false, 0, 0);
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
