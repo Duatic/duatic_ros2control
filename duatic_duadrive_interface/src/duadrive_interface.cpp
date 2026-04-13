@@ -244,7 +244,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.current_q_commanded = reading.getCommanded().getCurrent();
   // Some control mode information
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
-  state_.current_control_mode = static_cast<double>(active_mode_);
+  state_.current_drive_mode = active_mode_;
+  state_.current_drive_state = state.getStatusword().getStateEnum();
 
   return hardware_interface::return_type::OK;
 }
