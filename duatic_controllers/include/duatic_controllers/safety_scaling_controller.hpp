@@ -44,6 +44,10 @@
 
 namespace duatic::controllers
 {
+/**
+ * @brief SafetyScalingController - a simple controller which allows to scale down at runtime the maximum allowed torque
+ * and velocity
+ */
 class SafetyScalingController : public controller_interface::ControllerInterface
 {
 public:
