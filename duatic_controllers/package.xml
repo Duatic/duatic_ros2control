@@ -4,13 +4,20 @@
   <name>duatic_controllers</name>
   <version>0.0.0</version>
   <description>Collection of ros2 controllers to be used with various Duatic products</description>
-  <maintainer email="lnachtigall@duatic">Lennart Nachtigall</maintainer>
+  <maintainer email="lnachtigall@duatic.de">Lennart Nachtigall</maintainer>
   <license>BSD3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+
+  <depend>controller_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>generate_parameter_library</depend>
+  <depend>realtime_tools</depend>
+  <depend>duatic_controller_msgs</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

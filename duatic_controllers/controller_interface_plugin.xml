@@ -1,0 +1,13 @@
+<library path="duatic_controllers">
+
+  <class name="duatic_controllers/SafetyScalingController"
+         type="duatic_controllers::SafetyScalingController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic Safety Scaling Controller. Allows to scale down torque / velocity limits of all drives
+    </description>
+  </class>
+
+
+
+</library>
