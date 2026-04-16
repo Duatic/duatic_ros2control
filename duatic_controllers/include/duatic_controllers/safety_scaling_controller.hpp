@@ -68,6 +68,12 @@ private:
   // Access to controller parameters via generate_parameter_library
   std::unique_ptr<safety_scaling_controller::ParamListener> param_listener_;
   safety_scaling_controller::Params params_;
+
+  CommandInterfaceReferences max_torque_scaling_factor_command_interfaces_;
+  CommandInterfaceReferences max_velocity_scaling_factor_command_interfaces_;
+
+  const std::string max_torque_name{ "scaling_factor_max_torque" };
+  const std::string max_velocity_name{ "scaling_factor_max_velocity" };
 };
 
 }  // namespace duatic::controllers

@@ -37,15 +37,17 @@ SafetyScalingController::SafetyScalingController()
 controller_interface::InterfaceConfiguration SafetyScalingController::command_interface_configuration() const
 {
   // Claim the necessary command interfaces
-
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  const auto joints = params_.joints;
-  for (auto& joint : joints) {
-    config.names.emplace_back(joint + "/" + "p_gain");
-    config.names.emplace_back(joint + "/" + "i_gain");
-    config.names.emplace_back(joint + "/" + "d_gain");
+  for (const auto& joint : params_.joints) {
+    config.names.push_back(joint + "/" + max_torque_name);
+    config.names.push_back(joint + "/" + max_velocity_name);
   }
+
+  if (config.names.empty()) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "No joint passed - this controller cannot operate on this base");
+  }
+
   return config;
 }
 
@@ -93,6 +95,55 @@ SafetyScalingController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 controller_interface::CallbackReturn
 SafetyScalingController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
+  max_torque_scaling_factor_command_interfaces_.clear();
+  max_velocity_scaling_factor_command_interfaces_.clear();
+
+  // Obtain a sorted list of the interfaces
+  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, max_torque_name,
+                                                    max_torque_scaling_factor_command_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - scaling_factor_max_torque");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
+  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, max_velocity_name,
+                                                    max_velocity_scaling_factor_command_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - scaling_factor_max_velocity");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
+  // Expose it as ros2 parameters
+  // We do this on purpose instead of a topic or a service call
+  // as setting this parameter interrupts the realtime data communication
+  auto set_param = [this](const std::string& name, const CommandInterfaceReference& interface) {
+    const double current = duatic::controllers::compat::require_value(interface.get());
+
+    if (!get_node()->has_parameter(name)) {
+      get_node()->declare_parameter(name, current);
+    } else {
+      get_node()->set_parameter(rclcpp::Parameter(name, current));
+    }
+    return true;
+  };
+
+  for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    const std::string joint_name = params_.joints[i];
+
+    const std::string param_name_base = joint_name + "/";
+    const std::string scaling_factor_max_torque_param = param_name_base + max_torque_name;
+    const std::string scaling_factor_max_velocity_param = param_name_base + max_velocity_name;
+
+    try {
+      set_param(scaling_factor_max_torque_param, max_torque_scaling_factor_command_interfaces_.at(i));
+      set_param(scaling_factor_max_velocity_param, max_velocity_scaling_factor_command_interfaces_.at(i));
+
+    } catch (const duatic::controllers::exceptions::MissingInterfaceValue& ex) {
+      RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                          "Failed to read command interface value while initializing scaling params for joint: "
+                              << joint_name << "   " << ex.what());
+      return controller_interface::CallbackReturn::ERROR;
+    }
+  }
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -107,6 +158,33 @@ controller_interface::return_type SafetyScalingController::update([[maybe_unused
 {
   if (get_lifecycle_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE) {
     return controller_interface::return_type::OK;
+  }
+
+  auto&& node = get_node();
+  for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    const std::string joint_name = params_.joints[i];
+
+    const std::string param_name_base = joint_name + "/";
+    const std::string scaling_factor_max_torque_param = param_name_base + max_torque_name;
+    const std::string scaling_factor_max_velocity_param = param_name_base + max_velocity_name;
+
+    // Read the parameter and clamp it to a sensible range (do not allow "overscaling")
+    const auto max_torque_factor =
+        std::clamp(node->get_parameter(scaling_factor_max_torque_param).as_double(), 0.0, 1.0);
+    const auto max_velocity_factor =
+        std::clamp(node->get_parameter(scaling_factor_max_velocity_param).as_double(), 0.0, 1.0);
+
+    if (!max_torque_scaling_factor_command_interfaces_[i].get().set_value(max_torque_factor)) {
+      // use .at(i) on purpose as this will throw an exception even if we had "luck" and [i] was successful
+      RCLCPP_ERROR_STREAM(
+          node->get_logger(),
+          "Failed to set scaling factor for: " << max_torque_scaling_factor_command_interfaces_.at(i).get().get_name());
+    }
+    if (!max_velocity_scaling_factor_command_interfaces_[i].get().set_value(max_velocity_factor)) {
+      RCLCPP_ERROR_STREAM(node->get_logger(),
+                          "Failed to set scaling factor for: "
+                              << max_velocity_scaling_factor_command_interfaces_.at(i).get().get_name());
+    }
   }
 
   return controller_interface::return_type::OK;
