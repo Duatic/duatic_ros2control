@@ -314,6 +314,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
         std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_ * configured_gear_ratio_;
 
     // In case the changed enough -> perform an sdo write of the new maximum values
+
     if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
       current_max_torque_ = new_max_torque;
       drive_->setMaxJointTorque(current_max_torque_);
