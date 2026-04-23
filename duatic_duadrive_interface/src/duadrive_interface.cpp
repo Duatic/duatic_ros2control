@@ -283,9 +283,12 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
   } else {
-    RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: "
-                                            << drive_->getActiveStateEnum()
-                                            << " Raw status word: " << drive_->getStatusword().getData());
+    rsl_drive_sdk::ReadingExtended reading;
+    drive_->getReading(reading);
+    RCLCPP_ERROR_STREAM(
+        logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: " << drive_->getActiveStateEnum()
+                            << " Raw status word: " << drive_->getStatusword().getData()
+                            << " raw status word from reading: " << reading.getState().getStatusword().getData());
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
