@@ -325,8 +325,12 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     }
 
   } else {
-    RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: "
-                                            << drive_->getActiveStateEnum());
+    rsl_drive_sdk::ReadingExtended reading;
+    drive_->getReading(reading);
+    RCLCPP_ERROR_STREAM(
+        logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: " << drive_->getActiveStateEnum()
+                            << " Raw status word: " << drive_->getStatusword().getData()
+                            << " raw status word from reading: " << reading.getState().getStatusword().getData());
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
