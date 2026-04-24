@@ -12,6 +12,10 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DriveState.msg"
+  "msg/DriveStateCollection.msg"
+  "msg/MeasuredTorques.msg"
+  "msg/PIDGains.msg"
+  "msg/GravityCompensationControllerStatus.msg"
   DEPENDENCIES std_msgs
 )
 

@@ -113,12 +113,7 @@ inline void print_drive_status(const std::string& drive_name, const rsl_drive_sd
   }
 }
 
-inline const std::set<std::string> relevant_interface_types {
-  "position",
-  "velocity",
-  "effort",
-  "freeze"
-};
+inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
@@ -131,7 +126,7 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
     const auto interface_type = extract_interface_type(interface);
 
     // For the drive mode selection only certain interface types are relevant
-    if(relevant_interface_types.contains(interface_type)){
+    if (relevant_interface_types.contains(interface_type)) {
       interface_types.insert(interface_type);
     }
   }

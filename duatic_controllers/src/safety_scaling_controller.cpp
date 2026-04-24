@@ -135,7 +135,6 @@ SafetyScalingController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     try {
       set_param(scaling_factor_max_torque_param, max_torque_scaling_factor_command_interfaces_.at(i));
       set_param(scaling_factor_max_velocity_param, max_velocity_scaling_factor_command_interfaces_.at(i));
-
     } catch (const duatic::controllers::exceptions::MissingInterfaceValue& ex) {
       RCLCPP_ERROR_STREAM(get_node()->get_logger(),
                           "Failed to read command interface value while initializing scaling params for joint: "
