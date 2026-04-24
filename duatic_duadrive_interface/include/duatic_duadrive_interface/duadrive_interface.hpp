@@ -94,6 +94,13 @@ private:
 
   rsl_drive_sdk::Statusword last_status_word_;
 
+  double configured_max_torque_{ 0.0 };
+  double configured_max_velocity_{ 0.0 };
+  float configured_gear_ratio_{ 0.0 };
+
+  double current_max_torque_{ 0.0 };
+  double current_max_velocity_{ 0.0 };
+
   // Gets called when the bus startup has been finished but before going into the RT loop
   void on_bus_startup_finished();
 };
