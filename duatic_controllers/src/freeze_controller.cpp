@@ -22,7 +22,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <duatic_dynaarm_controllers/freeze_controller.hpp>
+#include <duatic_controllers/freeze_controller.hpp>
 
 #include <fmt/format.h>
 
@@ -30,7 +30,7 @@
 #include <controller_interface/helpers.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 
-namespace duatic_dynaarm_controllers
+namespace duatic::controllers
 {
 FreezeController::FreezeController()
 {
@@ -138,8 +138,8 @@ controller_interface::return_type FreezeController::update([[maybe_unused]] cons
 {
   return controller_interface::return_type::OK;
 }
-}  // namespace duatic_dynaarm_controllers
+}  // namespace duatic::controllers
 
 #include "pluginlib/class_list_macros.hpp"
 
-PLUGINLIB_EXPORT_CLASS(duatic_dynaarm_controllers::FreezeController, controller_interface::ControllerInterface)
+PLUGINLIB_EXPORT_CLASS(duatic::controllers::FreezeController, controller_interface::ControllerInterface)

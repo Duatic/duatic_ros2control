@@ -38,10 +38,10 @@
 #include <rclcpp/logging.hpp>
 
 /*project*/
-#include <duatic_dynaarm_controllers/freeze_controller_parameters.hpp>
-#include <duatic_dynaarm_controllers/interface_utils.hpp>
+#include <duatic_controllers/freeze_controller_parameters.hpp>
+#include <duatic_controllers/interface_utils.hpp>
 
-namespace duatic_dynaarm_controllers
+namespace duatic::controllers
 {
 class FreezeController : public controller_interface::ControllerInterface
 {
@@ -70,4 +70,4 @@ private:
 
   std::vector<CommandInterfaceReferences> freeze_mode_interfaces;
 };
-}  // namespace duatic_dynaarm_controllers
+}  // namespace duatic::controllers
