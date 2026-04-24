@@ -35,6 +35,7 @@
 #include <deque>
 
 // Pinocchio
+#include <Eigen/Dense>
 #include <pinocchio/algorithm/compute-all-terms.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
@@ -64,6 +65,16 @@ namespace duatic::controllers
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
+  struct PinocchioState
+  {
+    Eigen::VectorXd q;
+    Eigen::VectorXd v;
+    Eigen::VectorXd a;
+  };
+  struct IKResult
+  {
+    Eigen::VectorXd q_out;
+  };
   CartesianPoseController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -96,20 +107,29 @@ private:
 
   std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
   realtime_tools::RealtimeBuffer<geometry_msgs::msg::PoseStamped> buffer_pose_cmd_;
-  // Cached IK result to avoid recomputing IK every update
-  Eigen::VectorXd last_q_out_;
-  bool have_last_q_out_{ false };
-  // Async IK worker
-  std::mutex ik_mutex_;  // protects last_* members
-  // Queue for incoming non-RT target poses
-  std::mutex queue_mutex_;
-  std::condition_variable queue_cv_;
-  std::deque<geometry_msgs::msg::PoseStamped> ik_request_queue_;
-  std::thread ik_worker_thread_;
-  std::atomic<bool> ik_worker_running_{ false };
-  // Snapshot of most recent q (updated in update()) for worker to use
-  Eigen::VectorXd q_snapshot_;
-  // IK worker main
-  void ikWorkerMain();
+  std::vector<pinocchio::JointIndex> joint_indices_;
+  pinocchio::FrameIndex endeffector_frame_id_;
+  pinocchio::FrameIndex base_frame_id_;
+
+  std::optional<PinocchioState> last_system_state_;
+  std::optional<PinocchioState> next_target_state_;
+
+  std::optional<PinocchioState> build_current_state();
+  std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
+  std::optional<pinocchio::SE3> get_current_ee_pose();
+  std::optional<IKResult> compute_ik(const pinocchio::Model& model, pinocchio::Data& data,
+                                     const pinocchio::SE3& target_pose,
+                                     const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
+                                     rclcpp::Logger logger);
 };
+
+inline std::ostream& operator<<(std::ostream& os, const CartesianPoseController::PinocchioState& s)
+{
+  os << "{\n";
+  os << "  q: " << s.q.transpose() << "\n";
+  os << "  v: " << s.v.transpose() << "\n";
+  os << "  a: " << s.a.transpose() << "\n";
+  os << "}";
+  return os;
+}
 }  // namespace duatic::controllers

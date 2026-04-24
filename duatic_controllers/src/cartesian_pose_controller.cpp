@@ -50,89 +50,181 @@
 namespace duatic::controllers
 {
 
-bool computeIK(const pinocchio::Model& model, pinocchio::Data& data, const pinocchio::SE3& target_pose,
-               const Eigen::VectorXd& q_in, const pinocchio::FrameIndex frame_id, Eigen::VectorXd& q_out)
+std::optional<CartesianPoseController::IKResult> CartesianPoseController::compute_ik(
+    const pinocchio::Model& model, pinocchio::Data& data, const pinocchio::SE3& target_pose,
+    const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in, rclcpp::Logger logger)
 {
-  const double eps = 1e-4;
-  const int IT_MAX = 1000;
-  const double DT = 1e-1;
-  const double damp = 1e-6;
+  // Update once
+  pinocchio::forwardKinematics(model, data, q_in);
+  pinocchio::updateFramePlacement(model, data, target_pose_frame_id);
+  const pinocchio::SE3 desired_pose_world = data.oMf[target_pose_frame_id] * target_pose;
+
+  Eigen::VectorXd q_out = q_in;
+
+  // Tunable parameters
+  const double eps = 1e-5;  // Convergence threshold
+  const int IT_MAX = 4000;  // Max iterations
+  const double DT = 5e-2;   // Step size
+  const double w_rot = 0.5;
+  const double w_trans = 1.0;
+  const double w_q = 0.1;
+
   pinocchio::Data::Matrix6x J(6, model.nv);
   J.setZero();
+  Eigen::VectorXd v(model.nv);
+  Eigen::Matrix<double, 6, 1> err;
+  bool success = false;
 
-  // Create a copy if the input data that we can work on
-  Eigen::VectorXd q = q_in;
+  for (int i = 0; i < IT_MAX; i++) {
+    // Update kinematics
+    pinocchio::forwardKinematics(model, data, q_out);
+    pinocchio::updateFramePlacement(model, data, target_pose_frame_id);
 
-  for (std::size_t i = 0; i < IT_MAX; i++) {
-    // Compute the forward kinematics with the current configuration and check if it is close enough to where we want
-    pinocchio::forwardKinematics(model, data, q);
-    pinocchio::updateFramePlacements(model, data);
-    const pinocchio::SE3 iMf = data.oMf[frame_id].actInv(target_pose);
-    Eigen::Matrix<double, 6, 1> err = log6(iMf).toVector();
+    // Compute error (target_pose vs current end-effector pose)
+    const pinocchio::SE3 dMi = desired_pose_world.actInv(data.oMf[target_pose_frame_id]);
+    err = pinocchio::log6(dMi).toVector();
+    err.head<3>() *= w_rot;
+    err.tail<3>() *= w_trans;
+    // Log error for debugging
+    /*if (i % 100 == 0) {
+      RCLCPP_INFO_STREAM(logger, "q " << q_out.transpose());
+      RCLCPP_INFO_STREAM(logger, "error" << err.transpose());
+      RCLCPP_INFO(logger, "Iteration %d: error norm = %f", i, err.norm());
+    }*/
 
+    // Check convergence
     if (err.norm() < eps) {
-      q_out = q;
-      return true;
+      success = true;
+      RCLCPP_INFO_STREAM(logger, "Converged after: " << i << " iteration with error: " << err.norm());
+      break;
     }
 
-    // Use frame Jacobian for the specified frame so the IK is solved at the end-effector frame
-    pinocchio::computeFrameJacobian(model, data, q, frame_id, J);
-    pinocchio::Data::Matrix6 Jlog;
-    pinocchio::Jlog6(iMf.inverse(), Jlog);
-    J = -Jlog * J;
-    pinocchio::Data::Matrix6 JJt;
-    JJt.noalias() = J * J.transpose();
-    JJt.diagonal().array() += damp;
+    // Compute Jacobian at the end-effector
+    pinocchio::computeFrameJacobian(model, data, q_out, target_pose_frame_id, pinocchio::LOCAL, J);
 
-    Eigen::VectorXd v(model.nv);
-    v.noalias() = -J.transpose() * JJt.ldlt().solve(err);
-    q = pinocchio::integrate(model, q, v * DT);
+    // Check if Jacobian is ill-conditioned
+    if (J.isZero(1e-10)) {
+      RCLCPP_ERROR(logger, "Jacobian is ill-conditioned at iteration %d.", i);
+      return std::nullopt;
+    }
+    // SVD solver
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+    auto U = svd.matrixU();
+    auto V = svd.matrixV();
+    auto S = svd.singularValues();
+
+    // Dynamic lambda
+    double sigma_max = S(0);
+    double sigma_min = S(S.size() - 1);
+
+    if (sigma_min < 1e-4)  // near singularity
+      std::cout << "sigma_min: " << sigma_min << std::endl;
+
+    double kappa = sigma_max / (sigma_min + 1e-12);
+
+    double lambda = 1e-3 * kappa;
+    lambda = std::clamp(lambda, 1e-4, 1e-1);
+
+    Eigen::VectorXd Sinv = S;
+    for (int j = 0; j < S.size(); j++) {
+      Sinv(j) = S(j) / (S(j) * S(j) + lambda * lambda);
+    }
+    v = -V * Sinv.asDiagonal() * U.transpose() * err;
+
+    Eigen::MatrixXd J_pinv = V * Sinv.asDiagonal() * U.transpose();
+    Eigen::MatrixXd N = Eigen::MatrixXd::Identity(model.nv, model.nv) - J_pinv * J;
+
+    Eigen::VectorXd q_err = q_in - q_out;
+    v += w_q * N * q_err;
+
+    // Update joint configuration
+    q_out = pinocchio::integrate(model, q_out, v * DT);
   }
-
-  // We where not successful - set the output to the original input. Which avoid accidental motions
-  q_out = q_in;
-
-  return false;
+  success = true;
+  if (success) {
+    RCLCPP_INFO_STREAM(logger, err.norm());
+    CartesianPoseController::IKResult result;
+    result.q_out = q_out;
+    return result;
+  } else {
+    RCLCPP_ERROR_STREAM(logger, "Inverse kinematics did not converge within: " << IT_MAX
+                                                                               << " iterations. Error: " << err.norm());
+    return std::nullopt;
+  }
 }
-
-pinocchio::SE3 rosPoseToSE3(const geometry_msgs::msg::Pose& pose)
+static pinocchio::SE3 ROS_pose_to_SE3(const geometry_msgs::msg::Pose& pose)
 {
   Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+  q.normalize();
   Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
   return pinocchio::SE3(q.normalized(), t);
 }
 
-std::pair<pinocchio::SE3, bool> transformPoseToModelBaseFrame(const geometry_msgs::msg::PoseStamped& pose_msg,
-                                                              const pinocchio::SE3& target_pose,
-                                                              const pinocchio::Model& model, pinocchio::Data& data,
-                                                              const Eigen::VectorXd& q_current, rclcpp::Logger logger)
+static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
+    const std::string& frame_id, const pinocchio::FrameIndex& base_frame_idx, const pinocchio::SE3& target_pose,
+    const pinocchio::Model& model, pinocchio::Data& data, const Eigen::VectorXd& q_current, rclcpp::Logger logger)
 {
   // If no frame_id specified or it's "world", assume pose is already in model base frame
-  if (pose_msg.header.frame_id.empty() || pose_msg.header.frame_id == "world" || pose_msg.header.frame_id == "") {
-    return { target_pose, true };
+  if (frame_id.empty() || frame_id == "world") {
+    return target_pose;
   }
 
   // Get the transformation from the target frame to the model base frame
   pinocchio::FrameIndex target_frame_id;
   try {
-    target_frame_id = model.getFrameId(pose_msg.header.frame_id);
+    target_frame_id = model.getFrameId(frame_id);
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(logger, "Frame '%s' not found in Pinocchio model: %s", pose_msg.header.frame_id.c_str(), e.what());
+    RCLCPP_ERROR(logger, "Frame '%s' not found in Pinocchio model: %s", frame_id.c_str(), e.what());
     // Return original pose with failure flag
-    return { target_pose, false };
+    return std::nullopt;
   }
 
   // Compute forward kinematics to get the transformation
   pinocchio::forwardKinematics(model, data, q_current);
   pinocchio::updateFramePlacements(model, data);
 
+  const pinocchio::SE3& world_T_base = data.oMf[base_frame_idx];
+  const pinocchio::SE3& world_T_ref = data.oMf[target_frame_id];
+
   // Get the pose of the target frame in model base frame
-  const pinocchio::SE3 target_frame_pose = data.oMf[target_frame_id];
+  pinocchio::SE3 base_T_ref = world_T_base.inverse() * world_T_ref;
+  pinocchio::SE3 base_T_target = base_T_ref * target_pose;
 
-  // Transform the target pose: pose_in_base = target_frame_pose * pose_in_target
-  const pinocchio::SE3 transformed_target_pose = target_frame_pose * target_pose;
+  return base_T_target;
+}
+std::optional<CartesianPoseController::IKResult>
+CartesianPoseController::run_ik(const geometry_msgs::msg::PoseStamped& msg)
+{
+  const auto start_time = std::chrono::system_clock::now();
+  // Run IK in the non rt thread
+  const auto pose_for_ik = transform_pose_to_model_base_frame(
+      msg.header.frame_id, endeffector_frame_id_, ROS_pose_to_SE3(msg.pose), pinocchio_model_, pinocchio_data_,
+      last_system_state_->q, get_node()->get_logger());
 
-  return { transformed_target_pose, true };
+  if (!pose_for_ik) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to transform pose to IK chain base frame");
+    return std::nullopt;
+  }
+
+  const auto ik_result = compute_ik(pinocchio_model_, pinocchio_data_, pose_for_ik.value(), endeffector_frame_id_,
+                                    last_system_state_->q, get_node()->get_logger());
+  const auto ik_duration = std::chrono::system_clock::now() - start_time;
+  RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                     "IK took: " << std::chrono::duration_cast<std::chrono::milliseconds>(ik_duration));
+  return ik_result;
+}
+std::optional<pinocchio::SE3> CartesianPoseController::get_current_ee_pose()
+{
+  // Compute forward kinematics to get the transformation
+  pinocchio::forwardKinematics(pinocchio_model_, pinocchio_data_, last_system_state_->q);
+  pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
+
+  const pinocchio::SE3& oM_ee = pinocchio_data_.oMf[endeffector_frame_id_];
+  const pinocchio::SE3& oM_ref = pinocchio_data_.oMf[base_frame_id_];
+  pinocchio::SE3 refM_ee = oM_ref.inverse() * oM_ee;
+
+  return refM_ee;
 }
 
 CartesianPoseController::CartesianPoseController() : controller_interface::ControllerInterface()
@@ -186,56 +278,6 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
   // IK worker will be started in on_activate after Pinocchio model is built
 
   return controller_interface::CallbackReturn::SUCCESS;
-}
-
-void CartesianPoseController::ikWorkerMain()
-{
-  // Each worker maintains its own Pinocchio Data to avoid races
-  pinocchio::Data local_data(pinocchio_model_);
-
-  while (ik_worker_running_) {
-    geometry_msgs::msg::PoseStamped req;
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex_);
-      queue_cv_.wait(lock, [&] { return !ik_request_queue_.empty() || !ik_worker_running_; });
-      if (!ik_worker_running_) {
-        break;
-      }
-      req = ik_request_queue_.front();
-      ik_request_queue_.pop_front();
-    }
-
-    // Convert pose to SE3
-    const pinocchio::SE3 target_pose = rosPoseToSE3(req.pose);
-
-    // Snapshot q for IK
-    Eigen::VectorXd q_snapshot;
-    {
-      std::lock_guard<std::mutex> qlock(ik_mutex_);
-      if (q_snapshot_.size() == 0) {
-        // no snapshot available yet; skip
-        continue;
-      }
-      q_snapshot = q_snapshot_;
-    }
-
-    // Transform pose into model base using local_data
-    auto [pose_for_ik, transform_success] = transformPoseToModelBaseFrame(
-        req, target_pose, pinocchio_model_, local_data, q_snapshot, get_node()->get_logger());
-    if (!transform_success) {
-      continue;
-    }
-
-    Eigen::VectorXd q_out_local = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-    bool ik_ok = computeIK(pinocchio_model_, local_data, pose_for_ik, q_snapshot,
-                           pinocchio_model_.getFrameId(params_.end_effector_frame), q_out_local);
-
-    if (ik_ok) {
-      std::lock_guard<std::mutex> lock(ik_mutex_);
-      last_q_out_ = q_out_local;
-      have_last_q_out_ = true;
-    }
-  }
 }
 
 controller_interface::CallbackReturn
@@ -340,39 +382,38 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     RCLCPP_INFO(get_node()->get_logger(),
                 "Successfully configured controller with %zu joints and end effector frame '%s'", params_.joints.size(),
                 params_.end_effector_frame.c_str());
-    // Initialize q_snapshot_ now that model size is known
-    {
-      std::lock_guard<std::mutex> lock(ik_mutex_);
-      q_snapshot_ = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-      have_last_q_out_ = false;
-    }
+
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
+
+  // Build joint index cache
+  joint_indices_.clear();
+  for (const auto& joint : params_.joints) {
+    RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                       "Joint: " << joint << " pinnochio id: " << pinocchio_model_.getJointId(joint));
+    joint_indices_.push_back(pinocchio_model_.getJointId(joint));
+  }
+
+  for (auto& val : joint_indices_) {
+    RCLCPP_INFO_STREAM(get_node()->get_logger(), val);
+  }
+  // Cache end effector frame id:
+  endeffector_frame_id_ = pinocchio_model_.getFrameId(params_.end_effector_frame);
+  base_frame_id_ = pinocchio_model_.getFrameId(params_.base_frame);
 
   // Setup the pose listener
   pose_cmd_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
       "~/target_pose", 10, [&](const geometry_msgs::msg::PoseStamped& msg) {
         // Write raw to RT buffer for real-time consumers
         buffer_pose_cmd_.writeFromNonRT(msg);
-
-        // Non-RT: push to IK request queue if it's a new target (ignore duplicates)
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        bool duplicate = false;
-        if (!ik_request_queue_.empty()) {
-          const auto& back = ik_request_queue_.back();
-          if (back.header.frame_id == msg.header.frame_id && back.pose.position.x == msg.pose.position.x &&
-              back.pose.position.y == msg.pose.position.y && back.pose.position.z == msg.pose.position.z &&
-              back.pose.orientation.w == msg.pose.orientation.w && back.pose.orientation.x == msg.pose.orientation.x &&
-              back.pose.orientation.y == msg.pose.orientation.y && back.pose.orientation.z == msg.pose.orientation.z) {
-            duplicate = true;
-          }
+        const auto ik_result = run_ik(msg);
+        if (!ik_result) {
+          RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to solve IK");
+          return;
         }
-        if (!duplicate) {
-          ik_request_queue_.push_back(msg);
-          queue_cv_.notify_one();
-        }
+        next_target_state_ = PinocchioState{ .q = ik_result->q_out };
       });
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -421,91 +462,15 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  // Start IK worker thread now that model and q_snapshot_ are initialized
-  // Clear any stale requests before starting the worker
-  {
-    std::lock_guard<std::mutex> qlock(queue_mutex_);
-    ik_request_queue_.clear();
+  last_system_state_ = build_current_state();
+  if (!last_system_state_) {
+    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during activation - "
+                                                  "this is fatal, aborting");
+    return controller_interface::CallbackReturn::FAILURE;
   }
+  next_target_state_ = last_system_state_;
 
-  if (!ik_worker_running_) {
-    ik_worker_running_ = true;
-    ik_worker_thread_ = std::thread(&CartesianPoseController::ikWorkerMain, this);
-  }
-
-  // Ensure the current robot pose becomes the target immediately to avoid any transient motion
-  // Build full-size vectors for all robot joints (Pinocchio expects this)
-  {
-    const std::size_t joint_count = joint_position_state_interfaces_.size();
-    Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-    Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-
-    for (std::size_t i = 0; i < joint_count; i++) {
-      const std::string& joint_name = params_.joints[i];
-      const auto idx = pinocchio_model_.getJointId(joint_name);
-      if (idx == 0) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-        return controller_interface::CallbackReturn::FAILURE;
-      }
-
-      try {
-        q[pinocchio_model_.joints[idx].idx_q()] =
-            duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-
-        v[pinocchio_model_.joints[idx].idx_v()] =
-            duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-      } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
-        return controller_interface::CallbackReturn::ERROR;
-      }
-    }
-
-    // Update snapshot for worker
-    {
-      std::lock_guard<std::mutex> lock(ik_mutex_);
-      q_snapshot_ = q;
-    }
-
-    // Compute current EE pose and set it as the current target (in base frame)
-    pinocchio::forwardKinematics(pinocchio_model_, pinocchio_data_, q);
-    pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
-    pinocchio::FrameIndex frame_id = pinocchio_model_.getFrameId(params_.end_effector_frame);
-    const pinocchio::SE3 current_ee_pose = pinocchio_data_.oMf[frame_id];
-
-    // Fill PoseStamped (use empty frame_id to indicate base frame)
-    geometry_msgs::msg::PoseStamped pmsg;
-    pmsg.header.stamp = get_node()->now();
-    pmsg.header.frame_id = "";
-    const Eigen::Vector3d t = current_ee_pose.translation();
-    const Eigen::Quaterniond qrot(current_ee_pose.rotation());
-    pmsg.pose.position.x = t.x();
-    pmsg.pose.position.y = t.y();
-    pmsg.pose.position.z = t.z();
-    pmsg.pose.orientation.x = qrot.x();
-    pmsg.pose.orientation.y = qrot.y();
-    pmsg.pose.orientation.z = qrot.z();
-    pmsg.pose.orientation.w = qrot.w();
-
-    // Write into RT buffer so update() will see the current pose as target
-    buffer_pose_cmd_.writeFromNonRT(pmsg);
-
-    // Cache IK results as the current configuration so update() won't trigger motion
-    {
-      std::lock_guard<std::mutex> lock(ik_mutex_);
-      last_q_out_ = q;
-      have_last_q_out_ = true;
-    }
-
-    // Sync command interfaces to current positions to avoid jumps when the controller starts commanding
-    for (std::size_t i = 0; i < joint_count; i++) {
-      double q_val = q[pinocchio_model_.joints[pinocchio_model_.getJointId(params_.joints[i])].idx_q()];
-      // set the commanded position to current position
-      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(q_val)) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set initial command for joint '%s'",
-                    params_.joints[i].c_str());
-      }
-    }
-  }
+  RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial system state: " << last_system_state_.value());
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -513,173 +478,67 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 controller_interface::CallbackReturn
 CartesianPoseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  // Stop IK worker thread
-  ik_worker_running_ = false;
-  queue_cv_.notify_all();
-  if (ik_worker_thread_.joinable()) {
-    ik_worker_thread_.join();
-  }
-
-  // Clear any remaining requests after worker stopped
-  {
-    std::lock_guard<std::mutex> qlock(queue_mutex_);
-    ik_request_queue_.clear();
-  }
-
   active_ = false;
-
   return controller_interface::CallbackReturn::SUCCESS;
+}
+
+std::optional<CartesianPoseController::PinocchioState> CartesianPoseController::build_current_state()
+{
+  const std::size_t joint_count = joint_position_state_interfaces_.size();
+
+  // Build full-size vectors for all robot joints (Pinocchio expects this)
+  PinocchioState state{ .q = Eigen::VectorXd::Zero(pinocchio_model_.nq),
+                        .v = Eigen::VectorXd::Zero(pinocchio_model_.nv),
+                        .a = Eigen::VectorXd::Zero(pinocchio_model_.nv) };
+
+  // Map: Pinocchio joint name -> index in q/v
+  for (std::size_t i = 0; i < joint_count; i++) {
+    const std::string& joint_name = params_.joints[i];
+    const auto idx = joint_indices_[i];
+
+    try {
+      state.q[pinocchio_model_.joints[idx].idx_q()] =
+          duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
+
+      state.v[pinocchio_model_.joints[idx].idx_v()] =
+          duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
+
+      state.a[pinocchio_model_.joints[idx].idx_v()] =
+          duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
+    } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
+      return std::nullopt;
+    }
+  }
+  return state;
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
                                                                   [[maybe_unused]] const rclcpp::Duration& period)
 {
-  using pinocchio::CollisionPair;
-
   if (get_lifecycle_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE || !active_) {
     return controller_interface::return_type::OK;
   }
 
-  const std::size_t joint_count = joint_position_state_interfaces_.size();
-
-  // Build full-size vectors for all robot joints (Pinocchio expects this)
-  Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-  Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  // Map: Pinocchio joint name -> index in q/v
-  for (std::size_t i = 0; i < joint_count; i++) {
-    const std::string& joint_name = params_.joints[i];
-    auto idx = pinocchio_model_.getJointId(joint_name);
-    if (idx == 0) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-      return controller_interface::return_type::ERROR;
-    }
-
-    try {
-      q[pinocchio_model_.joints[idx].idx_q()] =
-          duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-
-      v[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-
-      a[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-    } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
-      return controller_interface::return_type::ERROR;
-    }
-  }
-  // Make a snapshot of q for the IK worker
-  {
-    std::lock_guard<std::mutex> lock(ik_mutex_);
-    q_snapshot_ = q;
-  }
-
-  pinocchio::FrameIndex frame_id = pinocchio_model_.getFrameId(params_.end_effector_frame);
-
-  // Use the frame id directly for IK (solve for the end-effector frame)
-
-  const auto pose_msg = buffer_pose_cmd_.readFromRT();
-  const auto target_pose = rosPoseToSE3(pose_msg->pose);
-
-  // Transform pose to model base frame if necessary
-  auto [pose_for_ik, transform_success] = transformPoseToModelBaseFrame(*pose_msg, target_pose, pinocchio_model_,
-                                                                        pinocchio_data_, q, get_node()->get_logger());
-
-  if (!transform_success) {
+  last_system_state_ = build_current_state();
+  if (!last_system_state_) {
+    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
+                                                  "operation...wtf");
     return controller_interface::return_type::ERROR;
   }
 
-  // Declare variables for IK result
-  Eigen::VectorXd q_out = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-  bool ik_success = false;
-
-  // Worker-only IK: do not compute IK in the hot update loop.
-  // Rely on the async worker to fill `last_q_out_`. If no cached solution is available yet,
-  // avoid commanding anything (safe fallback) until the worker produces a q_out.
-  if (!have_last_q_out_) {
-    // No IK solution available yet from the worker -> skip commanding this cycle
-    return controller_interface::return_type::OK;
-  }
-
-  // Use cached q_out computed by the worker
-  q_out = last_q_out_;
-  ik_success = true;
-
-  // Compute current FK for the end-effector to evaluate error (cheap compared to IK)
-  pinocchio::forwardKinematics(pinocchio_model_, pinocchio_data_, q);
-  pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
-  const pinocchio::SE3 current_ee_pose = pinocchio_data_.oMf[frame_id];
-
-  // Compute 6D error (translation + rotation) current -> target
-  const pinocchio::SE3 ee_err_se3 = current_ee_pose.actInv(pose_for_ik);
-  Eigen::Matrix<double, 6, 1> ee_err6 = log6(ee_err_se3).toVector();
-  const double trans_err = ee_err6.head<3>().norm();
-  const double rot_err = ee_err6.tail<3>().norm();
-
-  // Thresholds to avoid tiny commanded motions (tolerances can be tuned)
-  const double TRANSLATION_TOL = 5e-4;  // 0.5 mm
-  const double ROTATION_TOL = 1e-3;     // ~0.057 deg in axis-angle magnitude
-
-  if (trans_err < TRANSLATION_TOL && rot_err < ROTATION_TOL) {
-    return controller_interface::return_type::OK;
-  }
-
-  pinocchio::GeometryData geom_data(pinocchio_geom_);
-  const auto collides =
-      pinocchio::computeCollisions(pinocchio_model_, pinocchio_data_, pinocchio_geom_, geom_data, q_out);
-
-  if (!collides) {
-    // Compute joint-space delta and optionally clamp per-update joint changes to avoid jumps
-    const double MAX_JOINT_STEP = 0.01;  // radians per update (~0.57 deg). Tune if needed.
-    double max_delta_norm = 0.0;
-    for (std::size_t i = 0; i < joint_count; i++) {
+  if (next_target_state_) {
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
       const std::string& joint_name = params_.joints[i];
-      auto idx = pinocchio_model_.getJointId(joint_name);
-      if (idx == 0) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-        return controller_interface::return_type::ERROR;
-      }
-
-      const double q_current_joint = q[pinocchio_model_.joints[idx].idx_q()];
-      const double q_target_joint = q_out[pinocchio_model_.joints[idx].idx_q()];
-      const double delta = q_target_joint - q_current_joint;
-      max_delta_norm = std::max(max_delta_norm, std::abs(delta));
-
-      double cmd_current;
-      try {
-        // Read currently commanded position (may be last commanded value)
-        cmd_current = duatic::controllers::compat::require_value(joint_position_command_interfaces_.at(i).get());
-      } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to read commanded position for joint '%s': %s",
-                     joint_name.c_str(), e.what());
-        return controller_interface::return_type::ERROR;
-      }
-      // Clamp change per update to MAX_JOINT_STEP to avoid instantaneous jumps
-      double applied = q_target_joint;
-      if (std::abs(q_target_joint - cmd_current) > MAX_JOINT_STEP) {
-        applied = cmd_current + std::copysign(MAX_JOINT_STEP, q_target_joint - cmd_current);
-      }
-
-      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(applied)) {
+      const auto idx = joint_indices_[i];
+      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
+              next_target_state_->q[pinocchio_model_.joints[idx].idx_q()])) {
         RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
       }
     }
-  } else {
-    // Print the status of all the collision pairs
-    for (size_t k = 0; k < pinocchio_geom_.collisionPairs.size(); ++k) {
-      const CollisionPair& cp = pinocchio_geom_.collisionPairs[k];
-      const hpp::fcl::CollisionResult& cr = geom_data.collisionResults[k];
-
-      RCLCPP_WARN(get_node()->get_logger(), "Collision pair: %s , %s - collision: %s",
-                  pinocchio_geom_.geometryObjects[cp.first].name.c_str(),
-                  pinocchio_geom_.geometryObjects[cp.second].name.c_str(), cr.isCollision() ? "yes" : "no");
-    }
   }
-
   return controller_interface::return_type::OK;
 }
-
 controller_interface::CallbackReturn
 CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {

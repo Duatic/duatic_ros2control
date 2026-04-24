@@ -24,4 +24,8 @@ cartesian_pose_controller:
   end_effector_frame:
     type: string
     default_value: "flange"
-    description: "The full srdf"
+    description: "Name of the end_effector_frame"
+  base_frame:
+    type: string
+    default_value: "base"
+    description: "Name of the base frame"
