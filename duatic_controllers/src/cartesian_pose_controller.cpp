@@ -50,6 +50,68 @@
 namespace duatic::controllers
 {
 
+static Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const Eigen::VectorXd& target_state,
+                                     rclcpp::Time start_time, rclcpp::Time current_time, double duration_sec)
+{
+  // Handle edge cases
+  if (duration_sec <= 0.0) {
+    return target_state;
+  }
+
+  // Compute elapsed time
+  double elapsed = (current_time - start_time).seconds();
+
+  // Compute interpolation factor
+  double alpha = elapsed / duration_sec;
+
+  // Clamp between 0 and 1
+  alpha = std::min(1.0, std::max(0.0, alpha));
+
+  // Linear interpolation
+  return (1.0 - alpha) * start_state + alpha * target_state;
+  ;
+}
+static pinocchio::SE3 ROS_pose_to_SE3(const geometry_msgs::msg::Pose& pose)
+{
+  Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+  q.normalize();
+  Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
+  return pinocchio::SE3(q.normalized(), t);
+}
+
+static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
+    const std::string& frame_id, const pinocchio::FrameIndex& base_frame_idx, const pinocchio::SE3& target_pose,
+    const pinocchio::Model& model, pinocchio::Data& data, const Eigen::VectorXd& q_current, rclcpp::Logger logger)
+{
+  // If no frame_id specified or it's "world", assume pose is already in model base frame
+  if (frame_id.empty() || frame_id == "world") {
+    return target_pose;
+  }
+
+  // Get the transformation from the target frame to the model base frame
+  pinocchio::FrameIndex target_frame_id;
+  try {
+    target_frame_id = model.getFrameId(frame_id);
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(logger, "Frame '%s' not found in Pinocchio model: %s", frame_id.c_str(), e.what());
+    // Return original pose with failure flag
+    return std::nullopt;
+  }
+
+  // Compute forward kinematics to get the transformation
+  pinocchio::forwardKinematics(model, data, q_current);
+  pinocchio::updateFramePlacements(model, data);
+
+  const pinocchio::SE3& world_T_base = data.oMf[base_frame_idx];
+  const pinocchio::SE3& world_T_ref = data.oMf[target_frame_id];
+
+  // Get the pose of the target frame in model base frame
+  pinocchio::SE3 base_T_ref = world_T_base.inverse() * world_T_ref;
+  pinocchio::SE3 base_T_target = base_T_ref * target_pose;
+
+  return base_T_target;
+}
+
 std::optional<CartesianPoseController::IKResult> CartesianPoseController::compute_ik(
     const pinocchio::Model& model, pinocchio::Data& data, const pinocchio::SE3& target_pose,
     const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in, rclcpp::Logger logger)
@@ -68,6 +130,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
   const double w_rot = 0.5;
   const double w_trans = 1.0;
   const double w_q = 0.1;
+  const double w_limits = 0.02;
 
   pinocchio::Data::Matrix6x J(6, model.nv);
   J.setZero();
@@ -137,11 +200,40 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
     Eigen::MatrixXd N = Eigen::MatrixXd::Identity(model.nv, model.nv) - J_pinv * J;
 
     Eigen::VectorXd q_err = q_in - q_out;
-    v += w_q * N * q_err;
+
+    // Joint limit avoidance term
+    // Currently does not work. Probably needs a different approach
+    Eigen::VectorXd q_limit_err = Eigen::VectorXd::Zero(model.nv);
+    for (int j = 0; j < model.nv; ++j) {
+      const double lower = model.lowerPositionLimit[j];
+      const double upper = model.upperPositionLimit[j];
+
+      if (!std::isfinite(lower) || !std::isfinite(upper))
+        continue;
+
+      const double range = upper - lower;
+      if (range < 1e-6)
+        continue;
+
+      const double dist_lower = q_out(j) - lower;
+      const double dist_upper = upper - q_out(j);
+
+      // Activate only near limits
+      const double activation = 0.2 * range;
+      const double w = std::clamp(1.0 - std::min(dist_lower, dist_upper) / activation, 0.0, 1.0);
+      const double eps = 1e-3;
+
+      q_limit_err(j) = w * std::clamp(((1.0 / (dist_lower + eps) - 1.0 / (dist_upper + eps)) / range), -5.0, 5.0);
+    }
+    // RCLCPP_INFO_STREAM(logger, q_limit_err.transpose());
+
+    Eigen::VectorXd q_secondary = w_q * q_err + w_limits * q_limit_err;
+    v += N * q_secondary;
 
     // Update joint configuration
     q_out = pinocchio::integrate(model, q_out, v * DT);
   }
+  // For testing we currently accept all solutions. This allows us to push through singularities
   success = true;
   if (success) {
     RCLCPP_INFO_STREAM(logger, err.norm());
@@ -154,46 +246,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
     return std::nullopt;
   }
 }
-static pinocchio::SE3 ROS_pose_to_SE3(const geometry_msgs::msg::Pose& pose)
-{
-  Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
-  q.normalize();
-  Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
-  return pinocchio::SE3(q.normalized(), t);
-}
 
-static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
-    const std::string& frame_id, const pinocchio::FrameIndex& base_frame_idx, const pinocchio::SE3& target_pose,
-    const pinocchio::Model& model, pinocchio::Data& data, const Eigen::VectorXd& q_current, rclcpp::Logger logger)
-{
-  // If no frame_id specified or it's "world", assume pose is already in model base frame
-  if (frame_id.empty() || frame_id == "world") {
-    return target_pose;
-  }
-
-  // Get the transformation from the target frame to the model base frame
-  pinocchio::FrameIndex target_frame_id;
-  try {
-    target_frame_id = model.getFrameId(frame_id);
-  } catch (const std::exception& e) {
-    RCLCPP_ERROR(logger, "Frame '%s' not found in Pinocchio model: %s", frame_id.c_str(), e.what());
-    // Return original pose with failure flag
-    return std::nullopt;
-  }
-
-  // Compute forward kinematics to get the transformation
-  pinocchio::forwardKinematics(model, data, q_current);
-  pinocchio::updateFramePlacements(model, data);
-
-  const pinocchio::SE3& world_T_base = data.oMf[base_frame_idx];
-  const pinocchio::SE3& world_T_ref = data.oMf[target_frame_id];
-
-  // Get the pose of the target frame in model base frame
-  pinocchio::SE3 base_T_ref = world_T_base.inverse() * world_T_ref;
-  pinocchio::SE3 base_T_target = base_T_ref * target_pose;
-
-  return base_T_target;
-}
 std::optional<CartesianPoseController::IKResult>
 CartesianPoseController::run_ik(const geometry_msgs::msg::PoseStamped& msg)
 {
@@ -388,7 +441,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // Build joint index cache
+  // Build joint index cache (needed because pinnochio uses a different index scheme)
   joint_indices_.clear();
   for (const auto& joint : params_.joints) {
     RCLCPP_INFO_STREAM(get_node()->get_logger(),
@@ -396,9 +449,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     joint_indices_.push_back(pinocchio_model_.getJointId(joint));
   }
 
-  for (auto& val : joint_indices_) {
-    RCLCPP_INFO_STREAM(get_node()->get_logger(), val);
-  }
   // Cache end effector frame id:
   endeffector_frame_id_ = pinocchio_model_.getFrameId(params_.end_effector_frame);
   base_frame_id_ = pinocchio_model_.getFrameId(params_.base_frame);

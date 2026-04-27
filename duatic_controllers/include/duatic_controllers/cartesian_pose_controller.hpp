@@ -79,6 +79,7 @@ public:
     PinocchioState system_state_of_staging;
     IKResult target;
   };
+
   CartesianPoseController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -111,12 +112,12 @@ private:
 
   std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
   realtime_tools::RealtimeBuffer<PinocchioState> buffer_target_cmd_;
+  // Mapping between -> ros2control index and pinnochio index
   std::vector<pinocchio::JointIndex> joint_indices_;
   pinocchio::FrameIndex endeffector_frame_id_;
   pinocchio::FrameIndex base_frame_id_;
 
   std::optional<PinocchioState> last_system_state_;
-
   std::optional<StagingState> staged_target_;
 
   std::optional<PinocchioState> build_current_state();
@@ -141,27 +142,6 @@ private:
     staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
                                    .system_state_of_staging = last_system_state_.value(),
                                    .target = new_target };
-  }
-  Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const Eigen::VectorXd& target_state,
-                                rclcpp::Time start_time, rclcpp::Time current_time, double duration_sec)
-  {
-    // Handle edge cases
-    if (duration_sec <= 0.0) {
-      return target_state;
-    }
-
-    // Compute elapsed time
-    double elapsed = (current_time - start_time).seconds();
-
-    // Compute interpolation factor
-    double alpha = elapsed / duration_sec;
-
-    // Clamp between 0 and 1
-    alpha = std::min(1.0, std::max(0.0, alpha));
-
-    // Linear interpolation
-    return (1.0 - alpha) * start_state + alpha * target_state;
-    ;
   }
 };
 
