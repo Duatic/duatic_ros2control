@@ -132,6 +132,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
     }
     v = -V * Sinv.asDiagonal() * U.transpose() * err;
 
+    // add a target which makes configuration that deviate less from the initial position better
     Eigen::MatrixXd J_pinv = V * Sinv.asDiagonal() * U.transpose();
     Eigen::MatrixXd N = Eigen::MatrixXd::Identity(model.nv, model.nv) - J_pinv * J;
 
@@ -382,7 +383,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     RCLCPP_INFO(get_node()->get_logger(),
                 "Successfully configured controller with %zu joints and end effector frame '%s'", params_.joints.size(),
                 params_.end_effector_frame.c_str());
-
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -407,13 +407,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   pose_cmd_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
       "~/target_pose", 10, [&](const geometry_msgs::msg::PoseStamped& msg) {
         // Write raw to RT buffer for real-time consumers
-        buffer_pose_cmd_.writeFromNonRT(msg);
         const auto ik_result = run_ik(msg);
         if (!ik_result) {
           RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to solve IK");
           return;
         }
-        next_target_state_ = PinocchioState{ .q = ik_result->q_out };
+        stage_new_target(ik_result.value());
       });
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -468,7 +467,10 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
                                                   "this is fatal, aborting");
     return controller_interface::CallbackReturn::FAILURE;
   }
-  next_target_state_ = last_system_state_;
+
+  staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
+                                 .system_state_of_staging = last_system_state_.value(),
+                                 .target = IKResult{ .q_out = last_system_state_->q } };
 
   RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial system state: " << last_system_state_.value());
 
@@ -527,12 +529,17 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
     return controller_interface::return_type::ERROR;
   }
 
-  if (next_target_state_) {
+  if (staged_target_) {
+    // Perform linear interpolation of the configured interpolation time
+    const auto next_position_cmd =
+        sample_target(staged_target_->system_state_of_staging.q, staged_target_->target.q_out,
+                      staged_target_->time_of_staging, time, params_.interpolation_time);
+
     for (std::size_t i = 0; i < params_.joints.size(); i++) {
       const std::string& joint_name = params_.joints[i];
       const auto idx = joint_indices_[i];
       if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
-              next_target_state_->q[pinocchio_model_.joints[idx].idx_q()])) {
+              next_position_cmd[pinocchio_model_.joints[idx].idx_q()])) {
         RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
       }
     }

@@ -29,3 +29,9 @@ cartesian_pose_controller:
     type: string
     default_value: "base"
     description: "Name of the base frame"
+  interpolation_time:
+    type: double
+    default_value: 0.1
+    description: "Interpolation time between joint target commands"
+    validation:
+      bounds<>: [0.0,2.0]

@@ -29,13 +29,10 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <deque>
+#include <algorithm>
 
 // Pinocchio
-#include <Eigen/Dense>
+#include <Eigen/Dense>  // NOLINT(build/include_order)
 #include <pinocchio/algorithm/compute-all-terms.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
@@ -75,6 +72,13 @@ public:
   {
     Eigen::VectorXd q_out;
   };
+
+  struct StagingState
+  {
+    rclcpp::Time time_of_staging;
+    PinocchioState system_state_of_staging;
+    IKResult target;
+  };
   CartesianPoseController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -106,13 +110,14 @@ private:
   std::atomic_bool active_{ false };
 
   std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
-  realtime_tools::RealtimeBuffer<geometry_msgs::msg::PoseStamped> buffer_pose_cmd_;
+  realtime_tools::RealtimeBuffer<PinocchioState> buffer_target_cmd_;
   std::vector<pinocchio::JointIndex> joint_indices_;
   pinocchio::FrameIndex endeffector_frame_id_;
   pinocchio::FrameIndex base_frame_id_;
 
   std::optional<PinocchioState> last_system_state_;
-  std::optional<PinocchioState> next_target_state_;
+
+  std::optional<StagingState> staged_target_;
 
   std::optional<PinocchioState> build_current_state();
   std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
@@ -121,6 +126,43 @@ private:
                                      const pinocchio::SE3& target_pose,
                                      const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
                                      rclcpp::Logger logger);
+
+  /**
+   * @brief stage a new target which is eventually commanded and store its time of staging for
+   */
+  void stage_new_target(const IKResult& new_target)
+  {
+    if (!last_system_state_) {
+      RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Cannot stage new target as there is currently no system state "
+                                                    "available");
+      return;
+    }
+
+    staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
+                                   .system_state_of_staging = last_system_state_.value(),
+                                   .target = new_target };
+  }
+  Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const Eigen::VectorXd& target_state,
+                                rclcpp::Time start_time, rclcpp::Time current_time, double duration_sec)
+  {
+    // Handle edge cases
+    if (duration_sec <= 0.0) {
+      return target_state;
+    }
+
+    // Compute elapsed time
+    double elapsed = (current_time - start_time).seconds();
+
+    // Compute interpolation factor
+    double alpha = elapsed / duration_sec;
+
+    // Clamp between 0 and 1
+    alpha = std::min(1.0, std::max(0.0, alpha));
+
+    // Linear interpolation
+    return (1.0 - alpha) * start_state + alpha * target_state;
+    ;
+  }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const CartesianPoseController::PinocchioState& s)
