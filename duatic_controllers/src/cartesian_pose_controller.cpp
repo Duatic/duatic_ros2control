@@ -352,9 +352,40 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   try {
     // 1. build the pinocchio model from the urdf
     RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
-    pinocchio::urdf::buildModelFromXML(get_robot_description(), pinocchio_model_);
-    pinocchio_data_ = pinocchio::Data(pinocchio_model_);
-    RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints", pinocchio_model_.joints.size() - 1);
+    {
+      pinocchio::Model full_model;
+      pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
+
+      // So pinocchio is very counter intuitive. We specify joints that are marked as FIXED in the reduced model
+      // We we built an inversed list
+      // This is needed so that the controller will only do the IK for the specified joint list
+      std::unordered_set<pinocchio::JointIndex> keep;
+
+      for (const auto& joint : params_.joints) {
+        pinocchio::JointIndex id = full_model.getJointId(joint);
+        keep.insert(id);
+
+        RCLCPP_INFO_STREAM(get_node()->get_logger(), "keeping joint: " << joint << " id=" << id);
+      }
+
+      std::vector<pinocchio::JointIndex> indices;
+
+      for (pinocchio::JointIndex j = 1; j < full_model.njoints; ++j) {
+        if (keep.find(j) == keep.end()) {
+          indices.push_back(j);
+          RCLCPP_INFO_STREAM(get_node()->get_logger(), "locking joint: " << full_model.names[j] << " id=" << j);
+        }
+      }
+      Eigen::VectorXd q0 = pinocchio::neutral(full_model);
+      pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
+      for (pinocchio::JointIndex j = 0; j < pinocchio_model_.njoints; ++j) {
+        RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
+      }
+      pinocchio_data_ = pinocchio::Data(pinocchio_model_);
+      RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
+                  pinocchio_model_.joints.size() - 1);
+    }
 
     // 2. Build the collision model from urdf and srdf (only if SRDF is provided)
     if (!params_.srdf.empty()) {
