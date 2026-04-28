@@ -113,6 +113,7 @@ inline void print_drive_status(const std::string& drive_name, const rsl_drive_sd
   }
 }
 
+inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
@@ -123,9 +124,9 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   std::set<std::string> interface_types;
   for (const auto& interface : interfaces) {
     const auto interface_type = extract_interface_type(interface);
-    // Remove p_gain/d_gain/i_gain interfaces - they should not change which mode we select
-    // TODO(firesurfer) this is incorrect if we have a "strict view on this" but makes life easier
-    if (interface_type.find("_gain") == std::string::npos || !remove_gain_interfaces) {
+
+    // For the drive mode selection only certain interface types are relevant
+    if (relevant_interface_types.contains(interface_type)) {
       interface_types.insert(interface_type);
     }
   }

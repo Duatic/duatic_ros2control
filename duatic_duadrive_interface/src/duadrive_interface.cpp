@@ -124,6 +124,31 @@ void DuaDriveInterface::on_bus_startup_finished()
   command_.d_gain = gains->getD();
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains.value());
+
+  // Maximum torque/velocity values
+  // We use this to provide the possibility to scale down the safety values
+
+  if (!drive_->getMaxJointTorque(configured_max_torque_)) {
+    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain maximum joint torque");
+  }
+
+  if (!drive_->getGearboxRatio(configured_gear_ratio_)) {
+    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain gear ratio");
+  }
+
+  double max_motor_velocity{};
+  if (!drive_->getMaxMotorVelocity(max_motor_velocity)) {
+    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain maximum motor velocity");
+  }
+  // Actually store the velocity in joint coordinates
+  configured_max_velocity_ = max_motor_velocity / configured_gear_ratio_;
+
+  current_max_torque_ = configured_max_torque_;
+  current_max_velocity_ = configured_max_velocity_;
+
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << configured_max_torque_ << "Nm "
+                                                       << " maximum joint velocity: " << configured_max_velocity_
+                                                       << " rad/s");
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
@@ -282,6 +307,23 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
+
+    // Given the current scaling values calculate the maximum torque/maximum velocity values
+    const double new_max_torque = std::clamp(command_.scaling_factor_max_torque, 0.0, 1.0) * configured_max_torque_;
+    const double new_max_velocity =
+        std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_ * configured_gear_ratio_;
+
+    // In case the changed enough -> perform an sdo write of the new maximum values
+
+    if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
+      current_max_torque_ = new_max_torque;
+      drive_->setMaxJointTorque(current_max_torque_);
+    }
+    if (std::abs(new_max_velocity - current_max_velocity_) > 1.0) {
+      current_max_velocity_ = new_max_velocity;
+      drive_->setMaxMotorVelocity(current_max_velocity_);
+    }
+
   } else {
     rsl_drive_sdk::ReadingExtended reading;
     drive_->getReading(reading);

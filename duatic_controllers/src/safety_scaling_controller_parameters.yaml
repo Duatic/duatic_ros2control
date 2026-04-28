@@ -1,0 +1,5 @@
+safety_scaling_controller:
+  joints:
+    type: string_array
+    default_value: []
+    description: Names of joints used by the controller.

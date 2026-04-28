@@ -1,0 +1,9 @@
+freeze_controller:
+  names:
+    type: string_array
+    default_value: ["DynaarmSystem"]
+    description: "list of names to control freeze mode for"
+  disable_at_deactivate:
+    type: bool
+    default_value: true
+    description: "disable freeze mode at controller deactivation"
