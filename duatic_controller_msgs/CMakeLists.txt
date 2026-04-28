@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DriveState.msg"
@@ -16,7 +17,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MeasuredTorques.msg"
   "msg/PIDGains.msg"
   "msg/GravityCompensationControllerStatus.msg"
-  DEPENDENCIES std_msgs
+  "msg/PoseTarget.msg"
+  "msg/MultiPoseTarget.msg"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_package()
