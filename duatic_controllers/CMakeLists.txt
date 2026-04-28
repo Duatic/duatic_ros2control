@@ -79,8 +79,9 @@ target_compile_options(${PROJECT_NAME} PRIVATE
   -Werror=return-type
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE
-    include # Make them private for the moment as it is unlikely that someone wants to use them downstream
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 # Link against the controller parameter targets
 target_link_libraries(${PROJECT_NAME}
@@ -113,8 +114,33 @@ pluginlib_export_plugin_description_file(controller_interface controller_interfa
 
 # Install the resulting library
 install(
-  TARGETS  ${PROJECT_NAME}
-  DESTINATION lib/
+  TARGETS
+    ${PROJECT_NAME}
+    safety_scaling_controller_parameters
+    duadrive_status_broadcaster_parameters
+    force_torque_broadcaster_parameters
+    freedrive_controller_parameters
+    duadrive_pid_tuner_parameters
+    gravity_compensation_controller_parameters
+    freeze_controller_parameters
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+install(
+  DIRECTORY include/
+  DESTINATION include/${PROJECT_NAME}
+)
+# Export this as a usable library
+ament_export_include_directories(
+  "include/${PROJECT_NAME}"
+)
+ament_export_libraries(
+  duatic_controllers
+)
+ament_export_targets(
+  export_${PROJECT_NAME}
 )
 
 
