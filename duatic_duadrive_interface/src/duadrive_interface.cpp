@@ -239,7 +239,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.joint_position = state.getJointPosition();
   state_.joint_velocity = state.getJointVelocity();
   state_.joint_acceleration = state.getJointAcceleration();
-  state_.joint_torque = state.getJointVelocity();
+  state_.joint_torque = state.getJointTorque();
 
   state_.current_q = state.getMeasuredCurrentQ();
   state_.current_d = state.getMeasuredCurrentD();
