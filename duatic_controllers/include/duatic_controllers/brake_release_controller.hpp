@@ -80,6 +80,10 @@ private:
   std::unique_ptr<brake_release_controller::ParamListener> param_listener_;
   brake_release_controller::Params params_;
 
+  // pinocchio representation of the world
+  pinocchio::Model pinocchio_model_;
+  pinocchio::Data pinocchio_data_;
+
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
 
