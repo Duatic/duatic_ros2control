@@ -48,7 +48,10 @@ generate_parameter_library(
     freeze_controller_parameters
     src/freeze_controller_parameters.yaml
 )
-
+generate_parameter_library(
+    brake_release_controller_parameters
+    src/brake_release_controller_parameters.yaml
+)
 
 
 # The actual controller library
@@ -61,6 +64,7 @@ add_library(${PROJECT_NAME} SHARED
     src/gravity_compensation_controller.cpp
     src/cartesian_pose_controller.cpp
     src/freeze_controller.cpp
+    src/brake_release_controller.cpp
 )
 # Require C99 and C++20
 target_compile_features(${PROJECT_NAME} PUBLIC c_std_99 cxx_std_20)
@@ -92,6 +96,7 @@ target_link_libraries(${PROJECT_NAME}
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    brake_release_controller_parameters
     pinocchio::pinocchio
 )
 # Use ament_target_dependencies for external deps
@@ -123,6 +128,7 @@ install(
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    brake_release_controller_parameters
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
