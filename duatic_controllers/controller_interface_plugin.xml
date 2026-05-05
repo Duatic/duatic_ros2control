@@ -24,6 +24,14 @@
     </description>
   </class>
 
+  <class name="duatic_controllers/BrakeReleaseController"
+         type="duatic::controllers::BrakeReleaseController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic Brake Release Controller which is used to help unlocking the brakes during startup
+    </description>
+  </class>
+
   <class name="duatic_controllers/StatusBroadcaster"
          type="duatic::controllers::StatusBroadcaster"
          base_class_type="controller_interface::ControllerInterface">
