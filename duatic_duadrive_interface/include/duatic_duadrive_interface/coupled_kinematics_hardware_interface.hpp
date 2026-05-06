@@ -230,8 +230,17 @@ public:
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
                                                                                                         "positions"));
         if (positions.size() == drives_.size()) {
+          std::vector<CoupledCommand> positions_coupled;
+          std::vector<SerialCommand> positions_serial;
           for (std::size_t i = 0; i < drives_.size(); i++) {
-            drives_[i]->enforce_position(positions[i]);
+            positions_coupled.push_back(CoupledCommand{ positions[i], 0, 0, 0 });
+            positions_serial.push_back(SerialCommand{ positions[i], 0, 0, 0 });
+          }
+          kinematics_translator::map_from_serial_to_coupled(positions_serial, positions_coupled);
+
+          for (std::size_t i = 0; i < drives_.size(); i++) {
+            RCLCPP_INFO_STREAM(logger_, "Initial position: " << drives_[i]->get_name() << ": " << positions[i]);
+            drives_[i]->enforce_position(positions_coupled[i].position);
           }
         } else {
           RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("

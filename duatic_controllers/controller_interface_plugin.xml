@@ -1,0 +1,75 @@
+<library path="duatic_controllers">
+
+  <class name="duatic_controllers/SafetyScalingController"
+         type="duatic::controllers::SafetyScalingController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic Safety Scaling Controller. Allows to scale down torque / velocity limits of all drives
+    </description>
+  </class>
+
+  <class name="duatic_controllers/GravityCompensationController"
+         type="duatic::controllers::GravityCompensationController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic gravity compensation controller.
+    </description>
+  </class>
+
+  <class name="duatic_controllers/CartesianPoseController"
+         type="duatic::controllers::CartesianPoseController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic cartesian pose controller.
+    </description>
+  </class>
+
+  <class name="duatic_controllers/BrakeReleaseController"
+         type="duatic::controllers::BrakeReleaseController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic Brake Release Controller which is used to help unlocking the brakes during startup
+    </description>
+  </class>
+
+  <class name="duatic_controllers/StatusBroadcaster"
+         type="duatic::controllers::StatusBroadcaster"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic status broadcaster.
+    </description>
+  </class>
+
+  <class name="duatic_controllers/FreeDriveController"
+         type="duatic::controllers::FreeDriveController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic freedrive controller - to be used in combination with the gravity compensation controller.
+    </description>
+  </class>
+
+  <class name="duatic_controllers/PIDTuner"
+         type="duatic::controllers::PIDTuner"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic pid tuner - tune the drive pid parameters.
+    </description>
+  </class>
+
+  <class name="duatic_controllers/FreezeController"
+         type="duatic::controllers::FreezeController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Freeze the Drive in its current configuration.
+    </description>
+  </class>
+  <class name="duatic_controllers/ForceTorqueBroadcaster"
+         type="duatic::controllers::ForceTorqueBroadcaster"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Calculate the estimated endeffector wrench from the measured torques of the drives
+    </description>
+  </class>
+
+
+</library>

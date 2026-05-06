@@ -1,0 +1,13 @@
+brake_release_controller:
+  joints:
+    type: string_array
+    default_value: []
+    description: Names of joints used by the controller
+    validation:
+      unique<>: null
+  position_kick:
+    type: double
+    default_value: 0.005
+    description: "Distance to move the actuator in order to move the brake in [rad]"
+    validation:
+      bounds<>: [0.0,0.2]

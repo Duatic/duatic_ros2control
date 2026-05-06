@@ -108,6 +108,10 @@ struct DuaDriveInterfaceCommands
   double p_gain{};
   double i_gain{};
   double d_gain{};
+
+  // Scaling factors which allow to scale down the maximum torque/velocity settings of a drive
+  double scaling_factor_max_torque{ 1.0 };
+  double scaling_factor_max_velocity{ 1.0 };
 };
 
 class DuaDriveInterfaceBase

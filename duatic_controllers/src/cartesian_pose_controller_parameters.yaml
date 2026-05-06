@@ -1,0 +1,37 @@
+cartesian_pose_controller:
+  joints:
+    type: string_array
+    default_value: []
+    description: Names of joints used by the controller
+    validation:
+      unique<>: null
+  command_interfaces:
+    {
+      type: string_array,
+      description: "Specifies which command interfaces the controller will claim.",
+      read_only: true
+    }
+  enable_state_topic:
+    type: bool
+    default_value: true
+    description: "Publish a status message on the ~/state topic"
+
+  srdf:
+    type: string
+    default_value: ""
+    description: "The full srdf"
+
+  end_effector_frame:
+    type: string
+    default_value: "flange"
+    description: "Name of the end_effector_frame"
+  base_frame:
+    type: string
+    default_value: "base"
+    description: "Name of the base frame"
+  interpolation_time:
+    type: double
+    default_value: 0.1
+    description: "Interpolation time between joint target commands"
+    validation:
+      bounds<>: [0.0,2.0]
