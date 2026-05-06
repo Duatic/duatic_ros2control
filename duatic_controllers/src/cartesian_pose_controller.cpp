@@ -146,8 +146,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
     // Compute error (target_pose vs current end-effector pose)
     const pinocchio::SE3 dMi = desired_pose_world.actInv(data.oMf[target_pose_frame_id]);
     err = pinocchio::log6(dMi).toVector();
-    err.head<3>() *= w_rot;
-    err.tail<3>() *= w_trans;
+
     // Log error for debugging
     /*if (i % 100 == 0) {
       RCLCPP_INFO_STREAM(logger, "q " << q_out.transpose());
@@ -170,6 +169,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
       RCLCPP_ERROR(logger, "Jacobian is ill-conditioned at iteration %d.", i);
       return std::nullopt;
     }
+
     // SVD solver
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
