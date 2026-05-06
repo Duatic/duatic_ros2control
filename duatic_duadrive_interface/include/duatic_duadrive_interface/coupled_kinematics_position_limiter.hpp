@@ -63,9 +63,8 @@ public:
 
   constexpr double limit(double cmd, const double current_position)
   {
-    // Bypass the limiter if the limits are set to infinity (effectively unconfigured / continuous joint)
-    if (std::abs(limit_lower_) > 1e300 || std::abs(limit_upper_) > 1e300) {
-      // std::cout << "Infinite limit detected for joint: " << joint_name_ << " - bypassing limiter" << std::endl;
+    // in case both limits are zero we disable the check
+    if (limit_lower_ == 0.0 && limit_upper_ == 0.0) {
       return cmd;
     }
 
@@ -74,27 +73,23 @@ public:
       // Action: Clamp the command to ensure it does not exceed the allowed range.
       cmd = std::clamp(cmd, limit_lower_, limit_upper_);
       last_valid_position_ = cmd;
-
     } else if (current_position < limit_lower_ && cmd >= current_position) {
       // Case 2: Current joint position is below lower limit but incoming command is above lower limit
       // Action: Accept the new position to be commanded
       // Note that we clamp the minimum joint position value to the current position, this way we avoid jumps
       cmd = std::clamp(cmd, current_position, limit_upper_);
       last_valid_position_ = cmd;
-
     } else if (current_position > limit_upper_ && cmd <= current_position) {
       // Case 3: Current joint position is above upper limit but incoming command is below upper limit
       // Action: Accept the new position to be commanded
       // Note that we clamp the maximum joint position value to the current position, this way we avoid jumps
       cmd = std::clamp(cmd, limit_lower_, current_position);
       last_valid_position_ = cmd;
-
     } else {
       // Case 4: Current joint position is out of bounds and incoming command would move it further into the collision
       // zone. Action: Reject the new command and hold the last valid commanded position to prevent damage.
       cmd = last_valid_position_.value();
     }
-
     return cmd;
   }
 
