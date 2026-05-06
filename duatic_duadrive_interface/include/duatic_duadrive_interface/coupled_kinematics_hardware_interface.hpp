@@ -38,7 +38,7 @@
 #include "hardware_interface/hardware_info.hpp"
 #include "hardware_interface/system_interface.hpp"
 #include "hardware_interface/types/hardware_interface_return_values.hpp"
-
+#include <urdf/model.h>  // NOLINT(build/include_order)
 // ROS
 #include <rclcpp/macros.hpp>
 #include <rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp>
@@ -156,6 +156,13 @@ public:
     // The logger is now a child logger with a more descriptive name
     logger_ = rclcpp::get_logger(system_name + "_hardware_interface");
 
+    // Parse the urdf (we need it for the joint types)
+    urdf::Model urdf_model;
+    if (!urdf_model.initString(system_info.hardware_info.original_xml)) {
+      RCLCPP_FATAL_STREAM(logger_, "Failed to parse URDF");
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
     RCLCPP_INFO_STREAM(logger_, "Start with drives");
     // We obtain information about configured joints and create DuaDriveInterface instances from them
     // and initialize them
@@ -164,6 +171,12 @@ public:
       const auto ethercat_bus = joint.parameters.at("ethercat_bus");
       const auto joint_name = joint.name;
       const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
+      const auto urdf_joint = urdf_model.getJoint(joint_name);
+
+      if (!urdf_joint) {
+        RCLCPP_FATAL_STREAM(logger_, "Failed to obtain joint from urdf: " << joint_name);
+        return hardware_interface::CallbackReturn::FAILURE;
+      }
 
       RCLCPP_INFO_STREAM(logger_, "Setup drive instance for joint: " << joint_name
                                                                      << " on ethercat bus:" << ethercat_bus
@@ -182,8 +195,20 @@ public:
       state_serial_kinematics_.emplace_back(SerialJointState{});
 
       const auto position_limits = system_info.hardware_info.limits.at(joint_name);
-      RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
-                                                           << " max: " << position_limits.max_position);
+
+      // Disable position limits for joint types where it does not make sense
+      auto limit_lower = position_limits.min_position;
+      auto limit_upper = position_limits.max_position;
+
+      if (urdf_joint->type != urdf::Joint::REVOLUTE && urdf_joint->type != urdf::Joint::PRISMATIC) {
+        limit_lower = 0.0;
+        limit_upper = 0.0;
+        RCLCPP_INFO_STREAM(logger_, "Disable advanced position limiter for: " << joint_name);
+      } else {
+        RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
+                                                             << " max: " << position_limits.max_position);
+      }
+
       position_limiters_.emplace_back(
           AdvancedPositionCommandLimiter{ joint_name, position_limits.min_position, position_limits.max_position });
 
