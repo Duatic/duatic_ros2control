@@ -117,8 +117,7 @@ inline const std::set<std::string> relevant_interface_types{ "position", "veloci
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
-inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_,
-                                                 bool remove_gain_interfaces = true)
+inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_)
 {
   // 1. extract the types of all selected new interfaces
   std::set<std::string> interface_types;
