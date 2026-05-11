@@ -105,5 +105,7 @@ void DuaDriveInterfaceMock::enforce_position(const double position)
   state_.joint_velocity = 0;
   state_.joint_velocity_commanded = 0;
   command_.joint_velocity = 0;
+
+  
 }
 }  // namespace duatic::duadrive_interface

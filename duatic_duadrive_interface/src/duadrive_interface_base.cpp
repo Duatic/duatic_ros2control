@@ -113,7 +113,9 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
     create_interface_description<double>(get_name(), "i_gain", 0.0),
     create_interface_description<double>(get_name(), "d_gain", 0.0),
     create_interface_description<double>(get_name(), "scaling_factor_max_torque", 1.0),
-    create_interface_description<double>(get_name(), "scaling_factor_max_velocity", 1.0)
+    create_interface_description<double>(get_name(), "scaling_factor_max_velocity", 1.0),
+    create_interface_description<bool>(get_name(), "brake_excite", false),
+    create_interface_description<bool>(get_name(), "brake_hold", false)
   };
 
   command_interface_mapping_.insert({ command_interface_descriptions_[0].get_name(), &command_.joint_position });
@@ -127,7 +129,8 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
       { command_interface_descriptions_[7].get_name(), &command_.scaling_factor_max_torque });
   command_interface_mapping_.insert(
       { command_interface_descriptions_[8].get_name(), &command_.scaling_factor_max_velocity });
-
+  command_interface_mapping_.insert({ command_interface_descriptions_[9].get_name(), &command_.brake_excite });
+  command_interface_mapping_.insert({ command_interface_descriptions_[10].get_name(), &command_.brake_hold });
   if (command_interface_mapping_.size() != command_interface_mapping_.size()) {
     throw std::logic_error("Error in interface mapping sizes");
   }
