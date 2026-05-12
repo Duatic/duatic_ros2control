@@ -128,7 +128,7 @@ void DuaDriveInterface::on_bus_startup_finished()
   // Maximum torque/velocity values
   // We use this to provide the possibility to scale down the safety values
 
-  if (!drive_->getMaxJointTorque(configured_max_torque_)) {
+  /*if (!drive_->getMaxJointTorque(configured_max_torque_)) {
     RCLCPP_ERROR_STREAM(logger_, "Failed to obtain maximum joint torque");
   }
 
@@ -148,7 +148,7 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << configured_max_torque_ << "Nm "
                                                        << " maximum joint velocity: " << configured_max_velocity_
-                                                       << " rad/s");
+                                                       << " rad/s");*/
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
@@ -315,7 +315,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // In case the changed enough -> perform an sdo write of the new maximum values
 
-    if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
+    /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
       current_max_torque_ = new_max_torque;
       RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
       drive_->setMaxJointTorque(current_max_torque_);
@@ -324,7 +324,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       RCLCPP_INFO_STREAM(logger_, "New maximum velocity: " << new_max_velocity << "rad/s");
       current_max_velocity_ = new_max_velocity;
       drive_->setMaxMotorVelocity(current_max_velocity_);
-    }
+    }*/
 
     if (command_.target_brake_state != current_target_brake_state) {
       current_target_brake_state = command_.target_brake_state;
