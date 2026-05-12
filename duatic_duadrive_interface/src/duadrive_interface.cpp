@@ -211,6 +211,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 {
   // Put drive into freeze mode at shutdown
   if (drive_) {
+    drive_->setBrakeTargetState(rsl_drive_sdk::BrakeState::Engaged);
+
     drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 3.0, 0.01);
 
     rsl_drive_sdk::Command cmd;
