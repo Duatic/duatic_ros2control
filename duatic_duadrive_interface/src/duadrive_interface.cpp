@@ -326,24 +326,15 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       drive_->setMaxMotorVelocity(current_max_velocity_);
     }
 
-    if (command_.brake_excite != current_brake_excite_state || command_.brake_hold != current_brake_hold_state) {
-      rsl_drive_sdk::BrakeState target_brake_state = rsl_drive_sdk::BrakeState::Holding;
-      if (command_.brake_hold) {
-        target_brake_state = rsl_drive_sdk::BrakeState::Holding;
+    if (command_.target_brake_state != current_target_brake_state) {
+      current_target_brake_state = command_.target_brake_state;
+      // Safety check that only valid values are commanded
+      if (current_target_brake_state >= 0 && current_target_brake_state < 3) {
+        rsl_drive_sdk::BrakeState target_brake_state =
+            static_cast<rsl_drive_sdk::BrakeState>(current_target_brake_state);
+        RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
+        drive_->setBrakeTargetState(target_brake_state);
       }
-      // excite state has a higher prio
-      if (command_.brake_excite) {
-        target_brake_state = rsl_drive_sdk::BrakeState::Excited;
-      }
-
-      if (!command_.brake_hold && !command_.brake_excite) {
-        target_brake_state = rsl_drive_sdk::BrakeState::Engaged;
-      }
-
-      current_brake_excite_state = command_.brake_excite;
-      current_brake_hold_state = command_.brake_hold;
-      RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
-      drive_->setBrakeTargetState(target_brake_state);
     }
 
   } else {

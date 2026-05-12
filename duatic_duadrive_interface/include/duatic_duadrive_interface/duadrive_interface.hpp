@@ -101,8 +101,7 @@ private:
   double current_max_torque_{ 0.0 };
   double current_max_velocity_{ 0.0 };
 
-  bool current_brake_excite_state{ false };
-  bool current_brake_hold_state{ false };
+  bool current_target_brake_state{ 0 };
 
   // Gets called when the bus startup has been finished but before going into the RT loop
   void on_bus_startup_finished();

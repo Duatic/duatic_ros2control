@@ -113,8 +113,7 @@ struct DuaDriveInterfaceCommands
   double scaling_factor_max_torque{ 1.0 };
   double scaling_factor_max_velocity{ 1.0 };
 
-  bool brake_excite{ false };
-  bool brake_hold{ false };
+  int target_brake_state{ 0 };  // 0 engaged, 1 excite, 2 hold
 };
 
 class DuaDriveInterfaceBase
