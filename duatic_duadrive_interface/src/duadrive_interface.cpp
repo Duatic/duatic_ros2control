@@ -317,9 +317,11 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
       current_max_torque_ = new_max_torque;
+      RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
       drive_->setMaxJointTorque(current_max_torque_);
     }
     if (std::abs(new_max_velocity - current_max_velocity_) > 1.0) {
+      RCLCPP_INFO_STREAM(logger_, "New maximum velocity: " << new_max_velocity << "rad/s");
       current_max_velocity_ = new_max_velocity;
       drive_->setMaxMotorVelocity(current_max_velocity_);
     }
@@ -335,12 +337,12 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       }
 
       if (!command_.brake_hold && !command_.brake_excite) {
-        target_brake_state == rsl_drive_sdk::BrakeState::Engaged;
+        target_brake_state = rsl_drive_sdk::BrakeState::Engaged;
       }
 
       current_brake_excite_state = command_.brake_excite;
       current_brake_hold_state = command_.brake_hold;
-
+      RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
       drive_->setBrakeTargetState(target_brake_state);
     }
 
