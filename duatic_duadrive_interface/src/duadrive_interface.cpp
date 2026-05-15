@@ -317,8 +317,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
         std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_;
 
     // In case the changed enough -> perform an sdo write of the new maximum values
-
-    if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
+    // DISABLED at the moment as we run into issues with sending these values via ethercat
+    /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
       current_max_torque_ = new_max_torque;
       RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
       drive_->setMaxJointTorque(current_max_torque_);
@@ -329,7 +329,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       current_max_velocity_ = new_max_velocity;
       // Convert to motor velocity
       drive_->setMaxMotorVelocity(current_max_velocity_ * configured_gear_ratio_);
-    }
+    }*/
 
     if (command_.target_brake_state != current_target_brake_state) {
       current_target_brake_state = command_.target_brake_state;
