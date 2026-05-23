@@ -47,6 +47,7 @@ target_compile_options(duatic_duadrive_interface PRIVATE
   -Wsign-conversion
   -Wnull-dereference
   -Werror=return-type
+  -fPIC
 )
 
 # Causes the visibility macros to use dllexport rather than dllimport,
