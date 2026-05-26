@@ -6,7 +6,7 @@ Please note that product specific controllers are still contained in the product
 
 ## License
 
-The same BSD-3-Clause license as for the whole `duatic_ros2control` repository applies.
+The same BSD-3-Clause license as for the whole [duatic_ros2control](github.com/Duatic/duatic_ros2control) repository applies.
 
 
 ## Overview
@@ -18,12 +18,12 @@ In the following we always use the exported name without the `duatic_controllers
 
 | Name | Description |
 | ---- | ----------- |
-| PIDTuner | Allows to tune at runtime the DuaDrive actuator PID gains|
+| [PIDTuner](./doc/PIDTuner.md) | Allows to tune at runtime the DuaDrive actuator PID gains|
 | StatusBroadcaster| Publish DuaDrive specific information as ROS2 topic |
-| BrakeReleaseController | Controller which is used to disengage the brakes on some DuaDrive models |
+| [BrakeReleaseController](./doc/BrakeReleaseController.md) | Controller which is used to disengage the brakes on some DuaDrive models |
 | SafetyScalingController | Allows at runtime to scale down maximum velocity and maximum torque by a configurable factor |
 | FreeDriveController | Supporting controller for freedrive mode |
-| FreezeController | Instantly freezes all drives (Safe Operating Stop) |
+| [FreezeController](./doc/FreezeController.md) | Instantly freezes all drives (Safe Operating Stop) |
 
 ### General purpose controllers
 
