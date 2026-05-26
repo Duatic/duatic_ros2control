@@ -25,9 +25,11 @@ In the following we always use the exported name without the `duatic_controllers
 | FreeDriveController | Supporting controller for freedrive mode |
 | [FreezeController](./doc/FreezeController.md) | Instantly freezes all drives (Safe Operating Stop) |
 
+
 ### General purpose controllers
 
 | Name | Description |
 | ---- | ----------- |
 | ForceTorqueBroadcaster | A virtual FTS sensor calculating a wrench at the TCP using the joint torques |
 | CartesianPoseController | A cartesian pose controller which handles the DynaArm kinematics more joyfully |
+| [GravityCompensationController](./doc/GravityCompensationController.md) | A feed forward controller which tries to keep the current dynamics |
