@@ -22,7 +22,13 @@ All dependencies with their corresponding version are listed in the [repos.list]
 
 # Usage
 
-For more detailed information please refer to the DynaArm [documentation](https://docs.duatic.com)
+For more detailed information please refer to the Duatic [documentation](https://docs.duatic.com)
+
+### Package documentation
+
+| Package | Description |
+| ------- | ----------- |
+| [duatic_controllers](./duatic_controllers/README.md) | Variety of controllers for any Duatic product |
 
 # Contributing
 
