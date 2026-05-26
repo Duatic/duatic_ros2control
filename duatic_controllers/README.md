@@ -19,10 +19,10 @@ In the following we always use the exported name without the `duatic_controllers
 | Name | Description |
 | ---- | ----------- |
 | [PIDTuner](./doc/PIDTuner.md) | Allows to tune at runtime the DuaDrive actuator PID gains|
-| StatusBroadcaster| Publish DuaDrive specific information as ROS2 topic |
+| [StatusBroadcaster](./doc/StatusBroadcaster.md)| Publish DuaDrive specific information as ROS2 topic |
 | [BrakeReleaseController](./doc/BrakeReleaseController.md) | Controller which is used to disengage the brakes on some DuaDrive models |
 | SafetyScalingController | Allows at runtime to scale down maximum velocity and maximum torque by a configurable factor |
-| FreeDriveController | Supporting controller for freedrive mode |
+| [FreeDriveController](./doc/FreeDriveController.md) | Supporting controller for freedrive mode |
 | [FreezeController](./doc/FreezeController.md) | Instantly freezes all drives (Safe Operating Stop) |
 
 
@@ -30,6 +30,6 @@ In the following we always use the exported name without the `duatic_controllers
 
 | Name | Description |
 | ---- | ----------- |
-| ForceTorqueBroadcaster | A virtual FTS sensor calculating a wrench at the TCP using the joint torques |
+| [ForceTorqueBroadcaster](./doc/ForceTorqueBroadcaster.md) | A virtual FTS sensor calculating a wrench at the TCP using the joint torques |
 | CartesianPoseController | A cartesian pose controller which handles the DynaArm kinematics more joyfully |
 | [GravityCompensationController](./doc/GravityCompensationController.md) | A feed forward controller which tries to keep the current dynamics |

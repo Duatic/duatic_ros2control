@@ -29,7 +29,7 @@ None, only activate, deactivate
 | Name | Description | Default | Bounds |
 | ---- | ----------- | ------  | ------ |
 | `joints` | List of joint names as described in the URDF the controller shall handle | - | may not be empty |
-| `position_kick | Distance each actuator shall move against gravity in [rad]. | 0.005 | [0.0, 0.2] <>
+| `position_kick | Distance each actuator shall move against gravity in [rad]. | 0.005 | [0.0, 0.2] |
 
 
 ## Notes
