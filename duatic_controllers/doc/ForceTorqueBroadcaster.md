@@ -45,3 +45,4 @@ Activate the controller an subscribe to the following topics:
 
 * The quality of the reading vastly depends on the accuracy of the torque readings and especially of the URDF
 * During our tests the virtual FTS readings proved to be way less drifting around compared to direct measurement approaches
+* The SVD solver approach has proved more stable during our tests
