@@ -32,6 +32,14 @@
     </description>
   </class>
 
+  <class name="duatic_controllers/PinReleaseController"
+         type="duatic::controllers::PinReleaseController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Duatic Pin Release Controller - sets target_brake_state to 1 without influencing joint control mode.
+    </description>
+  </class>
+
   <class name="duatic_controllers/StatusBroadcaster"
          type="duatic::controllers::StatusBroadcaster"
          base_class_type="controller_interface::ControllerInterface">

@@ -1,0 +1,13 @@
+pin_release_controller:
+  joints:
+    type: string_array
+    default_value: []
+    description: Names of joints used by the controller
+    validation:
+      unique<>: null
+  hold_timeout:
+    type: double
+    default_value: 20.0
+    description: "Time in seconds to keep pins released before switching to State::Holding"
+    validation:
+      bounds<>: [0.0, 30.0]
