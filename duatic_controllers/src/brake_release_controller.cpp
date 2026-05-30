@@ -151,7 +151,7 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
       Eigen::VectorXd q0 = pinocchio::neutral(full_model);
       pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
       RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
-      for (pinocchio::JointIndex j = 0; j < static_cast<pinocchio::JointIndex>(full_model.njoints); ++j) {
+      for (pinocchio::JointIndex j = 0; j < static_cast<pinocchio::JointIndex>(pinocchio_model_.njoints); ++j) {
         RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
       }
       pinocchio_data_ = pinocchio::Data(pinocchio_model_);
