@@ -171,47 +171,11 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
       controller_joint_indices.push_back(joint_id);
       RCLCPP_INFO(get_node()->get_logger(), "Joint '%s' found with index %ld", joint_name.c_str(), joint_id);
     }
-
-    // 3. Validate kinematic chain structure (only if more than one joint)
-    if (params_.joints.size() > 1) {
-      RCLCPP_INFO(get_node()->get_logger(), "Validating kinematic chain structure...");
-      for (size_t i = 1; i < controller_joint_indices.size(); ++i) {
-        auto current_joint_id = controller_joint_indices[i];
-        auto previous_joint_id = controller_joint_indices[i - 1];
-
-        // Check if current joint is a descendant of the previous joint in the kinematic tree
-        bool is_valid_chain = false;
-        auto parent_id = pinocchio_model_.parents[current_joint_id];
-
-        // Traverse up the kinematic tree to see if we find the previous joint
-        while (parent_id != 0) {
-          if (parent_id == previous_joint_id) {
-            is_valid_chain = true;
-            break;
-          }
-          parent_id = pinocchio_model_.parents[parent_id];
-        }
-
-        RCLCPP_INFO(get_node()->get_logger(), "Chain validation for joint '%s' (id %ld) -> '%s' (id %ld): %s",
-                    params_.joints[i].c_str(), current_joint_id, params_.joints[i - 1].c_str(), previous_joint_id,
-                    is_valid_chain ? "VALID" : "INVALID");
-
-        if (!is_valid_chain) {
-          RCLCPP_ERROR(get_node()->get_logger(),
-                       "Invalid kinematic chain: Joint '%s' (index %zu) is not a descendant of joint '%s' (index %zu) "
-                       "in the kinematic tree.",
-                       params_.joints[i].c_str(), i, params_.joints[i - 1].c_str(), i - 1);
-          RCLCPP_ERROR(get_node()->get_logger(), "Please check that the 'joints' parameter lists the joints in the "
-                                                 "correct kinematic order.");
-          return controller_interface::CallbackReturn::ERROR;
-        }
-      }
-    }
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
-
+  RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial setup done");
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
