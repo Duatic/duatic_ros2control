@@ -108,8 +108,14 @@ void DuaDriveInterface::on_bus_startup_finished()
   if (!drive_->getDriveModel(drive_model)) {
     RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'drive model' from driver");
   }
-  RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model << " Build date: "
-                                             << info.buildDate << " tag: " << info.gitTag << " hash: " << info.gitHash);
+
+  rsl_drive_sdk::common::FirmwareInfo firmware_info;
+  if (!drive_->getDriveFirmwareInfo(firmware_info)) {
+    RCLCPP_ERROR_STREAM(logger_, "Failed to read 'firmware info' from driver");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model
+                                             << " Build date: " << info.buildDate << " tag: " << info.gitTag
+                                             << " hash: " << info.gitHash << " version: " << firmware_info.version);
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
 
