@@ -108,10 +108,16 @@ void DuaDriveInterface::on_bus_startup_finished()
   if (!drive_->getDriveModel(drive_model)) {
     RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'drive model' from driver");
   }
-  RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model << " Build date: "
-                                             << info.buildDate << " tag: " << info.gitTag << " hash: " << info.gitHash);
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
+
+  rsl_drive_sdk::common::Version fw_version;
+  if(!drive_->getDriveInfoFirmwareVersion(fw_version)){
+    RCLCPP_ERROR_STREAM(logger_,  "Drive: " << get_name() << "failed to read 'firmware version' from driver");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Drive info:\n   Name: " << get_name() << "\n   Drive model: " << drive_model
+                                             << "\n   Build date: " << info.buildDate << "\n   Git tag: " << info.gitTag
+                                             << "\n   Git hash: " << info.gitHash << "\n   Firmware version: " << fw_version);
 
   const auto gains = drive_->getConfiguration()
                          .getMode(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains)
