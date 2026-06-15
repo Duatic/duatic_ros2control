@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <type_traits>
 
 // ros2_control hardware_interface
 #include <rclcpp/rclcpp.hpp>
@@ -91,4 +92,11 @@ public:
 
 private:
 };
+
+/*
+ * type trait to simplify duadrive mock interface request
+ */
+template<typename T>
+constexpr inline bool is_dua_drive_interface_mock_v = std::is_base_of_v<DuaDriveInterfaceMock, T>;
+
 }  // namespace duatic::duadrive_interface

@@ -52,6 +52,7 @@
 #include <duatic_duadrive_interface/coupled_kinematics_translator.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
+#include <duatic_duadrive_interface/dynamic_model/dynamic_model.hpp>
 
 namespace duatic::duadrive_interface
 {
@@ -62,7 +63,9 @@ namespace duatic::duadrive_interface
  * @tparam enable_advanced_command_limit - Enable the advanced position command limiting algorithm
  */
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
-          bool enable_advanced_command_limit = false>
+          bool enable_advanced_command_limit = false,
+          dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>
+         >
 class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
@@ -225,7 +228,7 @@ public:
     // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
     // In case there are predefined positions for mock operation we enforce them
     // This is a pure compile time statement
-    if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
+    if constexpr (is_dua_drive_interface_mock_v<DriveTypeT>) {
       if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
                                                                                                         "positions"));
@@ -491,6 +494,8 @@ protected:
   std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   bool error_active_{ false };
+
+  DynamicModelT dynamic_model;
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)
