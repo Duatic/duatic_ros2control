@@ -27,9 +27,10 @@
 
 namespace duatic::duadrive_interface
 {
-DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger) : DuaDriveInterfaceBase(logger)
-{
-}
+DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
+  :DuaDriveInterfaceBase(logger)
+  ,mock_acceleration_(0.0)
+{}
 
 DuaDriveInterfaceMock::~DuaDriveInterfaceMock()
 {
@@ -78,24 +79,38 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
 
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
-    return hardware_interface::return_type::OK;
+  switch (active_mode_) {
+    case rsl_drive_sdk::mode::ModeEnum::Freeze:
+      break;
+    case rsl_drive_sdk::mode::ModeEnum::JointVelocity:
+      // Especially support the joint velocity mode where we calculate the position from the last position and the
+      // velocity
+      state_.joint_velocity = command_.joint_velocity;
+      state_.joint_position += command_.joint_velocity * period.to_chrono<std::chrono::duration<double>>().count();
+      break;
+    case rsl_drive_sdk::mode::ModeEnum::JointTorque:
+    {
+      // when there is no position/velocity commands given: integrate torque-induced acceleration
+      const double dt = period.to_chrono<std::chrono::duration<double>>().count();
+      state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) * dt; // 0.5 a t^2 + v t  <- using PREVIOUS velocity
+      state_.joint_velocity += mock_acceleration_ * dt;
+      state_.joint_acceleration = mock_acceleration_;
+      state_.joint_torque = command_.joint_torque;
+      break;
+    }
+    default:
+      state_.joint_torque = command_.joint_torque;
+      state_.joint_acceleration = command_.joint_acceleration;
+      state_.joint_velocity = command_.joint_velocity;
+      state_.joint_position = command_.joint_position;
   }
 
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::JointVelocity) {
-    // Especially support the joint velocity mode where we calculate the position from the last position and the
-    // velocity
-    state_.joint_velocity = command_.joint_velocity;
-    state_.joint_position += command_.joint_velocity * period.to_chrono<std::chrono::duration<float>>().count();
-  } else {
-    state_.joint_torque = command_.joint_torque;
-    state_.joint_acceleration = command_.joint_acceleration;
-    state_.joint_velocity = command_.joint_velocity;
-    state_.joint_position = command_.joint_position;
-  }
+  // reset mock acceleration in case of not being used
+  mock_acceleration_ = 0.0;
 
   return hardware_interface::return_type::OK;
 }
+
 void DuaDriveInterfaceMock::enforce_position(const double position)
 {
   state_.joint_position = position;
@@ -106,4 +121,10 @@ void DuaDriveInterfaceMock::enforce_position(const double position)
   state_.joint_velocity_commanded = 0;
   command_.joint_velocity = 0;
 }
+
+void DuaDriveInterfaceMock::stage_mock_acceleration(const double acceleration)
+{
+  mock_acceleration_ = acceleration;
+}
+
 }  // namespace duatic::duadrive_interface

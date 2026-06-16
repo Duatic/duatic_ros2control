@@ -11,6 +11,7 @@ set(PACKAGE_DEPENDENCIES
   pluginlib
   hardware_interface
   urdf
+  pinocchio
   ethercat_sdk_master
   rsl_drive_sdk
 )
@@ -35,7 +36,10 @@ target_include_directories(duatic_duadrive_interface PUBLIC
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
 ament_target_dependencies(duatic_duadrive_interface ${PACKAGE_DEPENDENCIES})
-target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES})
+target_link_libraries(duatic_duadrive_interface
+  ${YAML_CPP_LIBRARIES}
+  pinocchio::pinocchio
+)
 # enable additional warnings
 target_compile_options(duatic_duadrive_interface PRIVATE
   -Wall

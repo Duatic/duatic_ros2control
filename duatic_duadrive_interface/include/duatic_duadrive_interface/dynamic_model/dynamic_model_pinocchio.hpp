@@ -25,14 +25,32 @@
 
 #pragma once
 
+#include <tuple>
+
 #include "hardware_interface/system_interface.hpp"
+#include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
+
+#include "Eigen/Eigen"
+#include <pinocchio/multibody/data.hpp>
+#include <pinocchio/multibody/model.hpp>
 
 namespace duatic::duadrive_interface::dynamic_model
 {
 
 class DynamicModelPinocchio {
 public:
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info);
+  void on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info);
+
+  void mock_effort_accelerations(const std::span<SerialJointState> &serial_joint_state_span, const std::span<SerialCommand> serial_command_span);
+  
+  std::vector<double> &mocked_accelerations();
+
+private:
+  pinocchio::Model model_;
+  pinocchio::Data data_;
+  std::vector<std::tuple<Eigen::Index,Eigen::Index>> joint_model_map_; // tuple containing idx_q and idx_v
+
+  std::vector<double> mocked_accelerations_;
 };
 
 }  // namespace duatic::duadrive_interface::dynamic_model

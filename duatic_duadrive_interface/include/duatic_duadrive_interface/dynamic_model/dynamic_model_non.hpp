@@ -32,7 +32,7 @@ namespace duatic::duadrive_interface::dynamic_model
 
 class DynamicModelNon {
 public:
-  hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info) const;
+  void on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info) const noexcept;
 };
 
 }  // namespace duatic::duadrive_interface::dynamic_model

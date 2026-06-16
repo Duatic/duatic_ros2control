@@ -66,9 +66,12 @@ template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mappi
           bool enable_advanced_command_limit = false,
           dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>
          >
+requires (!is_dua_drive_interface_mock_v<DriveTypeT>) || dynamic_model::MockDynamicModel<DynamicModelT>
 class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
+
+  static constexpr bool IS_MOCK_ = is_dua_drive_interface_mock_v<DriveTypeT>;
 
 public:
   CoupledKinematicsHardwareInterfaceBase() : logger_(rclcpp::get_logger("CoupledKinematicsHardwareInterfaceBase"))
@@ -225,10 +228,18 @@ public:
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
+    // Initialize embedded dynamic model
+    try {
+      dynamic_model_.on_init(system_info);
+    } catch (const std::exception& e) {
+      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!", e.what());
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
     // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
     // In case there are predefined positions for mock operation we enforce them
     // This is a pure compile time statement
-    if constexpr (is_dua_drive_interface_mock_v<DriveTypeT>) {
+    if constexpr (IS_MOCK_) {
       if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
                                                                                                         "positions"));
@@ -388,6 +399,11 @@ public:
       }
     }
 
+    // calculate decoupled mock accelerations if mock interfaces are in use
+    if constexpr (IS_MOCK_) {
+      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_, commands_serial_kinematics_);
+    }
+
     // Translated commands to coupled kinematics
     kinematics_translator::map_from_serial_to_coupled(commands_serial_kinematics_, commands_coupled_kinematics_);
 
@@ -406,6 +422,9 @@ public:
       command.joint_freeze_mode = enforced_freeze;
 
       drive->stage_command(command);
+      if constexpr (IS_MOCK_) {
+        drive->stage_mock_acceleration(dynamic_model_.mocked_accelerations()[i]);
+      }
       // In case we are in a mode that does not control the position we feedback the current position as command to
       // avoid jumps in certain controller constellations
       const auto modes = modes_without_position_control();
@@ -495,7 +514,7 @@ protected:
 
   bool error_active_{ false };
 
-  DynamicModelT dynamic_model;
+  [[no_unique_address]] DynamicModelT dynamic_model_; // avoid memory overhead in the case of an empty model class
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)

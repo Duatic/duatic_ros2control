@@ -90,7 +90,14 @@ public:
    */
   void enforce_position(const double position);
 
+  /**
+   * @brief Stage additional acceleration commands derived from outside dynamics
+   */
+  void stage_mock_acceleration(const double acceleration);
+
 private:
+  double mock_acceleration_;
+
 };
 
 /*
