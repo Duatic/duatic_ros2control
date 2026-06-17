@@ -26,9 +26,9 @@
 #pragma once
 
 /* sys */
-#include <type_traits>
 #include <concepts>
 #include <span>
+#include <type_traits>
 
 /* ros */
 #include "hardware_interface/hardware_info.hpp"
@@ -58,7 +58,7 @@ concept DynamicModel = requires(DynamicModelT model,
  * Concepts specifying a mock-suitable DynamicModel Class
  */
 template <class MockDynamicModelT>
-concept MockDynamicModel = DynamicModel<MockDynamicModelT> and
+concept MockDynamicModel = DynamicModel<MockDynamicModelT> &&
     requires(MockDynamicModelT model, const std::span<const SerialJointState> serial_joint_state_span,
              const std::span<const SerialCommand> serial_command_span)
 {

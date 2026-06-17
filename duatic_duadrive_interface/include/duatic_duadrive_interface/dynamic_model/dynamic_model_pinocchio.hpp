@@ -26,6 +26,7 @@
 #pragma once
 
 #include <tuple>
+#include <vector>
 
 #include "hardware_interface/system_interface.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
