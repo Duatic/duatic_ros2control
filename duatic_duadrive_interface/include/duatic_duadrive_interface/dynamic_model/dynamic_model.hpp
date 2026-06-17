@@ -33,7 +33,8 @@
 /* ros */
 #include "hardware_interface/hardware_info.hpp"
 
-/* duatic */
+#include "Eigen/Dense"
+
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
 #include "duatic_duadrive_interface/dynamic_model/dynamic_model_pinocchio.hpp"
@@ -58,11 +59,11 @@ concept DynamicModel = requires(DynamicModelT model
  */
 template<class MockDynamicModelT>
 concept MockDynamicModel = DynamicModel<MockDynamicModelT> and requires(MockDynamicModelT model
-  ,const std::span<SerialJointState> serial_joint_state_span
-  ,const std::span<SerialCommand> serial_command_span
+  ,const std::span<const SerialJointState> serial_joint_state_span
+  ,const std::span<const SerialCommand> serial_command_span
 ) {
   model.mock_effort_accelerations(serial_joint_state_span, serial_command_span);
-  {model.mocked_accelerations()} -> std::convertible_to<std::span<double>>;
+  model.mocked_accelerations;
 };
 
 /*

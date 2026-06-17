@@ -401,7 +401,9 @@ public:
 
     // calculate decoupled mock accelerations if mock interfaces are in use
     if constexpr (IS_MOCK_) {
-      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_, commands_serial_kinematics_);
+      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_, commands_serial_kinematics_); // This also includes gravity simulation
+      const auto coupled_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(dynamic_model_.mocked_accelerations); // convert into coupled kinematics
+      dynamic_model_.mocked_accelerations = coupled_accelerations;
     }
 
     // Translated commands to coupled kinematics
@@ -423,7 +425,7 @@ public:
 
       drive->stage_command(command);
       if constexpr (IS_MOCK_) {
-        drive->stage_mock_acceleration(dynamic_model_.mocked_accelerations()[i]);
+        drive->stage_mock_acceleration(dynamic_model_.mocked_accelerations[i]);
       }
       // In case we are in a mode that does not control the position we feedback the current position as command to
       // avoid jumps in certain controller constellations

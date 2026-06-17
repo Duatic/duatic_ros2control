@@ -42,7 +42,7 @@ void DynamicModelPinocchio::on_init(const hardware_interface::HardwareComponentI
   // setup internal data storages
   const std::size_t drive_cnt = system_info.hardware_info.joints.size();
   joint_model_map_.resize(drive_cnt);
-  mocked_accelerations_.resize(drive_cnt, 0.0);
+  mocked_accelerations = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(drive_cnt));
 
   // build drive-index map
   for (std::size_t i = 0; i < drive_cnt; i++) {
@@ -56,7 +56,7 @@ void DynamicModelPinocchio::on_init(const hardware_interface::HardwareComponentI
   }
 }
 
-void DynamicModelPinocchio::mock_effort_accelerations(const std::span<SerialJointState> &serial_joint_state_span, const std::span<SerialCommand> serial_command_span) {
+void DynamicModelPinocchio::mock_effort_accelerations(const std::span<const SerialJointState> &serial_joint_state_span, const std::span<const SerialCommand> serial_command_span) {
   Eigen::VectorXd q(model_.nq);
   Eigen::VectorXd v(model_.nv);
   Eigen::VectorXd tau(model_.nv);
@@ -73,12 +73,8 @@ void DynamicModelPinocchio::mock_effort_accelerations(const std::span<SerialJoin
 
   // reverse map
   for (std::size_t i = 0; i < joint_model_map_.size(); i++) {
-    mocked_accelerations_[i] = data_.ddq[std::get<1>(joint_model_map_[i])];
+    mocked_accelerations[static_cast<Eigen::Index>(i)] = data_.ddq[std::get<1>(joint_model_map_[i])];
   }
-}
-  
-std::vector<double> &DynamicModelPinocchio::mocked_accelerations() {
-  return mocked_accelerations_;
 }
 
 }  // namespace duatic::duadrive_interface::dynamic_model
