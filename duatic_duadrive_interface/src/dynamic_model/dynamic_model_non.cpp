@@ -28,7 +28,9 @@
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-void DynamicModelNon::on_init([[maybe_unused]]const hardware_interface::HardwareComponentInterfaceParams& system_info) const noexcept
-{}
+void DynamicModelNon::on_init(
+    [[maybe_unused]] const hardware_interface::HardwareComponentInterfaceParams& system_info) const noexcept
+{
+}
 
 }  // namespace duatic::duadrive_interface::dynamic_model

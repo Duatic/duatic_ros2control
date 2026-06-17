@@ -30,7 +30,8 @@
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-class DynamicModelNon {
+class DynamicModelNon
+{
 public:
   void on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info) const noexcept;
 };

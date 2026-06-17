@@ -97,13 +97,12 @@ public:
 
 private:
   double mock_acceleration_;
-
 };
 
 /*
  * type trait to simplify duadrive mock interface request
  */
-template<typename T>
+template <typename T>
 constexpr inline bool is_dua_drive_interface_mock_v = std::is_base_of_v<DuaDriveInterfaceMock, T>;
 
 }  // namespace duatic::duadrive_interface

@@ -46,22 +46,22 @@ namespace duatic::duadrive_interface::dynamic_model
 /*
  * Concepts specifying a suitable DynamicModel Class
  */
-template<class DynamicModelT>
-concept DynamicModel = requires(DynamicModelT model
-  ,const hardware_interface::HardwareComponentInterfaceParams& system_info
-) {
-  DynamicModelT(); // default constructable
-  model.on_init(system_info); // initialize similar than a lifecycle node
+template <class DynamicModelT>
+concept DynamicModel = requires(DynamicModelT model,
+                                const hardware_interface::HardwareComponentInterfaceParams& system_info)
+{
+  DynamicModelT();             // default constructable
+  model.on_init(system_info);  // initialize similar than a lifecycle node
 };
 
 /*
  * Concepts specifying a mock-suitable DynamicModel Class
  */
-template<class MockDynamicModelT>
-concept MockDynamicModel = DynamicModel<MockDynamicModelT> and requires(MockDynamicModelT model
-  ,const std::span<const SerialJointState> serial_joint_state_span
-  ,const std::span<const SerialCommand> serial_command_span
-) {
+template <class MockDynamicModelT>
+concept MockDynamicModel = DynamicModel<MockDynamicModelT> and
+    requires(MockDynamicModelT model, const std::span<const SerialJointState> serial_joint_state_span,
+             const std::span<const SerialCommand> serial_command_span)
+{
   model.mock_effort_accelerations(serial_joint_state_span, serial_command_span);
   model.mocked_accelerations;
 };
@@ -69,9 +69,8 @@ concept MockDynamicModel = DynamicModel<MockDynamicModelT> and requires(MockDyna
 /*
  * type trait to evaluate a default DynamicModel implementation
  */
-template<typename DriveTypeT>
-using default_dynamic_model_t = std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>
-  ,DynamicModelPinocchio
-  ,DynamicModelNon>;
+template <typename DriveTypeT>
+using default_dynamic_model_t =
+    std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>, DynamicModelPinocchio, DynamicModelNon>;
 
 }  // namespace duatic::duadrive_interface::dynamic_model

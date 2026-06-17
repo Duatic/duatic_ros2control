@@ -64,10 +64,10 @@ namespace duatic::duadrive_interface
  */
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false,
-          dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>
-         >
-requires (!is_dua_drive_interface_mock_v<DriveTypeT>) || dynamic_model::MockDynamicModel<DynamicModelT>
-class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
+          dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>>
+requires(!is_dua_drive_interface_mock_v<DriveTypeT>) ||
+    dynamic_model::MockDynamicModel<DynamicModelT> class CoupledKinematicsHardwareInterfaceBase
+  : public hardware_interface::SystemInterface
 {
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
 
@@ -232,7 +232,8 @@ public:
     try {
       dynamic_model_.on_init(system_info);
     } catch (const std::exception& e) {
-      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!", e.what());
+      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!",
+                   e.what());
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
@@ -401,8 +402,10 @@ public:
 
     // calculate decoupled mock accelerations if mock interfaces are in use
     if constexpr (IS_MOCK_) {
-      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_, commands_serial_kinematics_); // This also includes gravity simulation
-      const auto coupled_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(dynamic_model_.mocked_accelerations); // convert into coupled kinematics
+      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_,
+                                               commands_serial_kinematics_);  // This also includes gravity simulation
+      const auto coupled_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(
+          dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
       dynamic_model_.mocked_accelerations = coupled_accelerations;
     }
 
@@ -516,7 +519,7 @@ protected:
 
   bool error_active_{ false };
 
-  [[no_unique_address]] DynamicModelT dynamic_model_; // avoid memory overhead in the case of an empty model class
+  [[no_unique_address]] DynamicModelT dynamic_model_;  // avoid memory overhead in the case of an empty model class
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)

@@ -37,16 +37,18 @@
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-class DynamicModelPinocchio {
+class DynamicModelPinocchio
+{
 public:
   void on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info);
 
-  void mock_effort_accelerations(const std::span<const SerialJointState> &serial_joint_state_span, const std::span<const SerialCommand> serial_command_span);
+  void mock_effort_accelerations(const std::span<const SerialJointState>& serial_joint_state_span,
+                                 const std::span<const SerialCommand> serial_command_span);
 
 private:
   pinocchio::Model model_;
   pinocchio::Data data_;
-  std::vector<std::tuple<Eigen::Index,Eigen::Index>> joint_model_map_; // tuple containing idx_q and idx_v
+  std::vector<std::tuple<Eigen::Index, Eigen::Index>> joint_model_map_;  // tuple containing idx_q and idx_v
 
 public:
   Eigen::VectorXd mocked_accelerations;

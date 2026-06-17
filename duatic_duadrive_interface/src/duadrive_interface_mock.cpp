@@ -28,9 +28,9 @@
 namespace duatic::duadrive_interface
 {
 DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
-  :DuaDriveInterfaceBase(logger)
-  ,mock_acceleration_(0.0)
-{}
+  : DuaDriveInterfaceBase(logger), mock_acceleration_(0.0)
+{
+}
 
 DuaDriveInterfaceMock::~DuaDriveInterfaceMock()
 {
@@ -80,7 +80,7 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
 
-  if (command_.joint_freeze_mode) { // enforce freeze if commanded
+  if (command_.joint_freeze_mode) {  // enforce freeze if commanded
     state_.joint_velocity = 0.0;
     state_.joint_acceleration = 0.0;
   } else {
@@ -98,8 +98,10 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
         break;
       case rsl_drive_sdk::mode::ModeEnum::JointTorque:
         // when there is no position/velocity commands given: integrate torque-induced acceleration
-        state_.joint_velocity *= 0.9999; // just always remove a tiny little bit of energy from the system before integrating
-        state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) * dt; // 0.5 a t^2 + v t  <- using PREVIOUS velocity
+        state_.joint_velocity *=
+            0.9999;  // just always remove a tiny little bit of energy from the system before integrating
+        state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) *
+                                 dt;  // 0.5 a t^2 + v t  <- using PREVIOUS velocity
         state_.joint_velocity += mock_acceleration_ * dt;
         state_.joint_acceleration = mock_acceleration_;
         state_.joint_torque = command_.joint_torque;
