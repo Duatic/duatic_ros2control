@@ -76,35 +76,40 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.joint_velocity_commanded = command_.joint_velocity;
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = command_.joint_torque;
+  state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
 
-  const double dt = period.to_chrono<std::chrono::duration<double>>().count();
-  switch (active_mode_) {
-    case rsl_drive_sdk::mode::ModeEnum::Freeze:
-      state_.joint_velocity = 0.0;
-      state_.joint_acceleration = 0.0;
-      state_.joint_freeze_mode_commanded = true;
-      break;
-    case rsl_drive_sdk::mode::ModeEnum::JointVelocity:
-      // Especially support the joint velocity mode where we calculate the position from the last position and the
-      // velocity
-      state_.joint_velocity = command_.joint_velocity;
-      state_.joint_position += command_.joint_velocity * dt;
-      break;
-    case rsl_drive_sdk::mode::ModeEnum::JointTorque:
-      // when there is no position/velocity commands given: integrate torque-induced acceleration
-      state_.joint_velocity *= 0.9999; // just always remove a tiny little bit of energy from the system before integrating
-      state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) * dt; // 0.5 a t^2 + v t  <- using PREVIOUS velocity
-      state_.joint_velocity += mock_acceleration_ * dt;
-      state_.joint_acceleration = mock_acceleration_;
-      state_.joint_torque = command_.joint_torque;
-      break;
-    default:
-      state_.joint_torque = command_.joint_torque;
-      state_.joint_acceleration = command_.joint_acceleration;
-      state_.joint_velocity = command_.joint_velocity;
-      state_.joint_position = command_.joint_position;
+  if (command_.joint_freeze_mode) { // enforce freeze if commanded
+    state_.joint_velocity = 0.0;
+    state_.joint_acceleration = 0.0;
+  } else {
+    const double dt = period.to_chrono<std::chrono::duration<double>>().count();
+    switch (active_mode_) {
+      case rsl_drive_sdk::mode::ModeEnum::Freeze:
+        state_.joint_velocity = 0.0;
+        state_.joint_acceleration = 0.0;
+        break;
+      case rsl_drive_sdk::mode::ModeEnum::JointVelocity:
+        // Especially support the joint velocity mode where we calculate the position from the last position and the
+        // velocity
+        state_.joint_velocity = command_.joint_velocity;
+        state_.joint_position += command_.joint_velocity * dt;
+        break;
+      case rsl_drive_sdk::mode::ModeEnum::JointTorque:
+        // when there is no position/velocity commands given: integrate torque-induced acceleration
+        state_.joint_velocity *= 0.9999; // just always remove a tiny little bit of energy from the system before integrating
+        state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) * dt; // 0.5 a t^2 + v t  <- using PREVIOUS velocity
+        state_.joint_velocity += mock_acceleration_ * dt;
+        state_.joint_acceleration = mock_acceleration_;
+        state_.joint_torque = command_.joint_torque;
+        break;
+      default:
+        state_.joint_torque = command_.joint_torque;
+        state_.joint_acceleration = command_.joint_acceleration;
+        state_.joint_velocity = command_.joint_velocity;
+        state_.joint_position = command_.joint_position;
+    }
   }
 
   // reset mock acceleration in case of not being used
