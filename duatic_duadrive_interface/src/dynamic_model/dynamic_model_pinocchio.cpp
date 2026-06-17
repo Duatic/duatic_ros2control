@@ -38,7 +38,7 @@ void DynamicModelPinocchio::on_init(const hardware_interface::HardwareComponentI
   // build robot model from urdf
   pinocchio::urdf::buildModelFromXML(system_info.hardware_info.original_xml, model_);
   data_ = pinocchio::Data(model_);
-  
+
   // setup internal data storages
   const std::size_t drive_cnt = system_info.hardware_info.joints.size();
   joint_model_map_.resize(drive_cnt);
