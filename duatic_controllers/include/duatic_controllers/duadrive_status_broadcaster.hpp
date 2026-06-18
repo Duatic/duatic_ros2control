@@ -100,5 +100,9 @@ private:
   StateInterfaceReferences joint_current_phase_a_interfaces_;
   StateInterfaceReferences joint_current_phase_b_interfaces_;
   StateInterfaceReferences joint_current_phase_c_interfaces_;
+
+  // Buffer message in order to avoid additional allocations
+  DriveStateCollection state_msg;
+
 };
 }  // namespace duatic::controllers

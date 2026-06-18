@@ -137,6 +137,9 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_current_phase_b_interfaces_.clear();
   joint_current_phase_c_interfaces_.clear();
 
+  state_msg.states.clear();
+  state_msg.states.resize(params_.joints.size());
+
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints,
                                                     hardware_interface::HW_IF_POSITION, joint_position_interfaces_)) {
@@ -239,12 +242,12 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
   }
 
   // create the status message for the whole arm
-  DriveStateCollection state_msg;
+
   state_msg.header.stamp = time;
 
   // now for every joint we create a drive state message
   for (std::size_t i = 0; i < params_.joints.size(); i++) {
-    DriveState drive_state_msg;
+    DriveState& drive_state_msg = state_msg.states.at(i);
 
     try {
       drive_state_msg.joint_position =
@@ -285,7 +288,7 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
       return controller_interface::return_type::ERROR;
     }
 
-    state_msg.states.emplace_back(drive_state_msg);
+
   }
 
   // and we try to have our realtime publisher publish the message
