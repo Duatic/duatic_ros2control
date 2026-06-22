@@ -55,6 +55,8 @@ namespace duatic::duadrive_interface
 class DuaDriveInterfaceMock : public DuaDriveInterfaceBase
 {
 public:
+  static constexpr double default_abs_velocity_limit = 2.0 * M_2_PI;// i.e. 2 rotations per second
+
   explicit DuaDriveInterfaceMock(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceMock();
   using UniquePtr = std::unique_ptr<DuaDriveInterfaceMock>;
@@ -85,10 +87,21 @@ public:
    * @brief perform a single write on the drive component
    */
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
+  
   /**
    * @brief Allow in the mocked hardware to explicitly enforce a specific position (e.g. at startup)
    */
   void enforce_position(const double position);
+  /**
+   * @brief Allow in the mocked hardware to explicitly enforce positive and negative velocity limits (e.g. during dynamic simulation)
+   */
+  void limit_velocity(const double max_velocity, const double min_velocity);
+  /**
+   * @brief Allow in the mocked hardware to explicitly enforce equal velocity limits (e.g. during dynamic simulation)
+   */
+  void limit_velocity(const double max_abs_velocity) {
+    limit_velocity(max_abs_velocity, -max_abs_velocity);
+  }
 
   /**
    * @brief Stage additional acceleration commands derived from outside dynamics
@@ -96,6 +109,8 @@ public:
   void stage_mock_acceleration(const double acceleration);
 
 private:
+  double min_velocity_;
+  double max_velocity_;
   double mock_acceleration_;
 };
 

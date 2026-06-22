@@ -34,15 +34,17 @@
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-void DynamicModelPinocchio::on_init(const hardware_interface::HardwareComponentInterfaceParams& system_info)
+void DynamicModelPinocchio::init(const hardware_interface::HardwareComponentInterfaceParams& system_info,
+                                 const std::shared_ptr<urdf::Model> urdf_model)
 {
   // build robot model from urdf
-  pinocchio::urdf::buildModelFromXML(system_info.hardware_info.original_xml, model_);
+  pinocchio::urdf::buildModel(urdf_model, model_);
   data_ = pinocchio::Data(model_);
 
   // setup internal data storages
   const std::size_t drive_cnt = system_info.hardware_info.joints.size();
-  joint_model_map_.resize(drive_cnt);
+  joint_model_map_q_.resize(drive_cnt);
+  joint_model_map_v_.resize(drive_cnt);
   mocked_accelerations = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(drive_cnt));
 
   // build drive-index map
@@ -50,33 +52,33 @@ void DynamicModelPinocchio::on_init(const hardware_interface::HardwareComponentI
     const std::string& joint_name = system_info.hardware_info.joints[i].name;
     if (model_.existJointName(joint_name)) {
       const auto& joint = model_.joints[model_.getJointId(joint_name)];
-      joint_model_map_[i] = std::make_tuple(joint.idx_q(), joint.idx_v());
+      joint_model_map_q_[i] = joint.idx_q();
+      joint_model_map_v_[i] = joint.idx_v();
     } else {
       throw std::runtime_error("Could not find drive name '" + joint_name + "' within the robot hardware model.");
     }
   }
 }
 
-void DynamicModelPinocchio::mock_effort_accelerations(const std::span<const SerialJointState>& serial_joint_state_span,
+void DynamicModelPinocchio::mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
                                                       const std::span<const SerialCommand> serial_command_span)
 {
   Eigen::VectorXd q(model_.nq);
   Eigen::VectorXd v(model_.nv);
   Eigen::VectorXd tau(model_.nv);
 
-  for (std::size_t i = 0; i < joint_model_map_.size(); i++) {
-    const auto& model_idx = joint_model_map_[i];
-    q[std::get<0>(model_idx)] = serial_joint_state_span[i].position;
-    v[std::get<1>(model_idx)] = serial_joint_state_span[i].velocity;
-    tau[std::get<1>(model_idx)] = serial_command_span[i].torque;
+  for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {
+    q[joint_model_map_q_[i]] = serial_joint_state_span[i].position;
+    v[joint_model_map_v_[i]] = serial_joint_state_span[i].velocity;
+    tau[joint_model_map_v_[i]] = serial_command_span[i].torque;
   }
 
   // simple forward dynamics with no collision or contact constraints being considered
   pinocchio::aba(model_, data_, q, v, tau);
 
   // reverse map
-  for (std::size_t i = 0; i < joint_model_map_.size(); i++) {
-    mocked_accelerations[static_cast<Eigen::Index>(i)] = data_.ddq[std::get<1>(joint_model_map_[i])];
+  for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {
+    mocked_accelerations[i] = data_.ddq[joint_model_map_v_[i]];
   }
 }
 

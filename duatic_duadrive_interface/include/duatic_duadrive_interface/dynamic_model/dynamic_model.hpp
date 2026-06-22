@@ -31,7 +31,8 @@
 #include <type_traits>
 
 /* ros */
-#include "hardware_interface/hardware_info.hpp"
+#include "hardware_interface/system_interface.hpp"
+#include <urdf/model.h> // NOLINT(build/include_order)
 
 #include "Eigen/Dense"
 
@@ -47,11 +48,12 @@ namespace duatic::duadrive_interface::dynamic_model
  * Concepts specifying a suitable DynamicModel Class
  */
 template <class DynamicModelT>
-concept DynamicModel = requires(DynamicModelT model,
-                                const hardware_interface::HardwareComponentInterfaceParams& system_info)
+concept DynamicModel = requires(DynamicModelT dynamic_model,
+                                const hardware_interface::HardwareComponentInterfaceParams& system_info,
+                                const std::shared_ptr<urdf::Model> urdf_model)
 {
   DynamicModelT();             // default constructable
-  model.on_init(system_info);  // initialize similar than a lifecycle node
+  dynamic_model.init(system_info, urdf_model); // initialize robot model
 };
 
 /*

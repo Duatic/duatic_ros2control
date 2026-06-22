@@ -22,7 +22,6 @@ endforeach()
 
 
 add_library(duatic_duadrive_interface
-  src/dynamic_model/dynamic_model_non.cpp
   src/dynamic_model/dynamic_model_pinocchio.cpp
   src/duadrive_interface.cpp
   src/duadrive_interface_base.cpp
