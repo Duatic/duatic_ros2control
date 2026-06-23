@@ -41,15 +41,20 @@ void DynamicModelPinocchio::init(const hardware_interface::HardwareComponentInte
   pinocchio::urdf::buildModel(urdf_model, model_);
   data_ = pinocchio::Data(model_);
 
+  // init data storages
+  q_ = Eigen::VectorXd::Zero(model_.nq);
+  v_ = Eigen::VectorXd::Zero(model_.nv);
+  tau_ = Eigen::VectorXd::Zero(model_.nv);
+
   // setup internal data storages
-  const std::size_t drive_cnt = system_info.hardware_info.joints.size();
+  const Eigen::Index drive_cnt = static_cast<Eigen::Index>(system_info.hardware_info.joints.size());
   joint_model_map_q_.resize(drive_cnt);
   joint_model_map_v_.resize(drive_cnt);
-  mocked_accelerations = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(drive_cnt));
+  mocked_accelerations = Eigen::VectorXd::Zero(drive_cnt);
 
   // build drive-index map
-  for (std::size_t i = 0; i < drive_cnt; i++) {
-    const std::string& joint_name = system_info.hardware_info.joints[i].name;
+  for (Eigen::Index i = 0; i < drive_cnt; i++) {
+    const std::string& joint_name = system_info.hardware_info.joints[static_cast<std::size_t>(i)].name;
     if (model_.existJointName(joint_name)) {
       const auto& joint = model_.joints[model_.getJointId(joint_name)];
       joint_model_map_q_[i] = joint.idx_q();
@@ -63,18 +68,14 @@ void DynamicModelPinocchio::init(const hardware_interface::HardwareComponentInte
 void DynamicModelPinocchio::mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
                                                       const std::span<const SerialCommand> serial_command_span)
 {
-  Eigen::VectorXd q(model_.nq);
-  Eigen::VectorXd v(model_.nv);
-  Eigen::VectorXd tau(model_.nv);
-
   for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {
-    q[joint_model_map_q_[i]] = serial_joint_state_span[i].position;
-    v[joint_model_map_v_[i]] = serial_joint_state_span[i].velocity;
-    tau[joint_model_map_v_[i]] = serial_command_span[i].torque;
+    q_[joint_model_map_q_[i]] = serial_joint_state_span[static_cast<std::size_t>(i)].position;
+    v_[joint_model_map_v_[i]] = serial_joint_state_span[static_cast<std::size_t>(i)].velocity;
+    tau_[joint_model_map_v_[i]] = serial_command_span[static_cast<std::size_t>(i)].torque;
   }
 
   // simple forward dynamics with no collision or contact constraints being considered
-  pinocchio::aba(model_, data_, q, v, tau);
+  pinocchio::aba(model_, data_, q_, v_, tau_);
 
   // reverse map
   for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {

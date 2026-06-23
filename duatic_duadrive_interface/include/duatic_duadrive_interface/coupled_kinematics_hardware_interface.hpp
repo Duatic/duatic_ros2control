@@ -170,6 +170,15 @@ public:
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
+    // Initialize embedded dynamic model
+    try {
+      dynamic_model_.init(system_info, urdf_model);
+    } catch (const std::exception& e) {
+      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!",
+                  e.what());
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
     RCLCPP_INFO_STREAM(logger_, "Start with drives");
     // We obtain information about configured joints and create DuaDriveInterface instances from them
     // and initialize them
@@ -229,16 +238,7 @@ public:
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
-    // Initialize embedded dynamic model
-    try {
-      dynamic_model_.init(system_info, urdf_model);
-    } catch (const std::exception& e) {
-      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!",
-                   e.what());
-      return hardware_interface::CallbackReturn::FAILURE;
-    }
-
-    // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
+    // TODO: Probably better to add c-time information on whether to accept position/velocity/dynamics-model or not (independent of being mock or not, e.g. to maybe also include other simulations if necessary)
     // In case there are predefined positions for mock operation we enforce them
     // This is a pure compile time statement
     if constexpr (is_mock) {
@@ -256,20 +256,24 @@ public:
 
           for (std::size_t i = 0; i < drives_.size(); i++) {
             const auto &drive_name = drives_[i]->get_name();
-            // init start position
-            RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_name << ": " << positions[i]);
-            drives_[i]->enforce_position(positions_coupled[i].position);
-            // limit velocities to urdf-defined values, if specified (required to keep dynamic simulation stable)
-            const auto model_joint = urdf_model->getJoint(drive_name);
-            if (model_joint) {
-              const double velocity_limit = model_joint->limits->velocity;
+            const auto urdf_joint = urdf_model->getJoint(drive_name);
+            if (urdf_joint) {
+              // init start position
+              RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_name << ": " << positions[i]);
+              drives_[i]->enforce_position(positions_coupled[i].position);
+              // limit velocities to urdf-defined values, if specified (required to keep dynamic simulation stable)
+              const double velocity_limit = urdf_joint->limits->velocity;
               if (velocity_limit > 0.0) {
                 drives_[i]->limit_velocity(velocity_limit);
                 RCLCPP_INFO_STREAM(logger_, "Limit Velocity: " << drive_name << ": " << velocity_limit);
               }
             } else {
-              RCLCPP_WARN_STREAM(logger_, "Drive " << drive_name << "not found in URDF model! Not applying velocity limits, but there are probably more serious issues!");
+              RCLCPP_ERROR_STREAM(logger_, "Unable to find URDF joint for drive: " << drive_name);
             }
+            // register mock dynamics model
+            drives_[i]->register_mock_dynamics([i, this](){
+              return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0);
+            });
           }
         } else {
           RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
@@ -418,9 +422,7 @@ public:
     if constexpr (is_mock) {
       dynamic_model_.mock_effort_accelerations(state_serial_kinematics_,
                                                commands_serial_kinematics_);  // This also includes gravity simulation
-      const auto coupled_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(
-          dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
-      dynamic_model_.mocked_accelerations = coupled_accelerations;
+      dynamic_model_.mocked_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
     }
 
     // Translated commands to coupled kinematics
@@ -441,9 +443,6 @@ public:
       command.joint_freeze_mode = enforced_freeze;
 
       drive->stage_command(command);
-      if constexpr (is_mock) {
-        drive->stage_mock_acceleration(dynamic_model_.mocked_accelerations[i]);
-      }
       // In case we are in a mode that does not control the position we feedback the current position as command to
       // avoid jumps in certain controller constellations
       const auto modes = modes_without_position_control();

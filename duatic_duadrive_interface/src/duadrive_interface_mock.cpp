@@ -31,7 +31,7 @@ DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
   : DuaDriveInterfaceBase(logger)
   , min_velocity_(-default_abs_velocity_limit)
   , max_velocity_(default_abs_velocity_limit)
-  , mock_acceleration_(0.0)
+  , mock_acceleration_callback_([]() { return 0.0; }) // default: NO ACCELERATION
 {
 }
 
@@ -100,14 +100,17 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
         state_.joint_position += command_.joint_velocity * dt;
         break;
       case rsl_drive_sdk::mode::ModeEnum::JointTorque:
-        // when there is no position/velocity commands given: integrate torque-induced acceleration
-        state_.joint_velocity *=
-            0.999;  // just always remove a tiny little bit of energy from the system before integrating
-        state_.joint_position += ((0.5 * mock_acceleration_ * dt) + state_.joint_velocity) *
-                                 dt;  // 0.5 a t^2 + v t  <- using PREVIOUS velocity
-        state_.joint_velocity += mock_acceleration_ * dt;
-        state_.joint_acceleration = mock_acceleration_;
-        state_.joint_torque = command_.joint_torque;
+        {
+          state_.joint_velocity *=
+              0.999;  // just always remove a tiny little bit of energy from the system before integrating  
+          // when there is no position/velocity commands given: integrate torque-induced acceleration
+          const double mock_acceleration = mock_acceleration_callback_();
+          state_.joint_position += ((0.5 * mock_acceleration * dt) + state_.joint_velocity) *
+                                   dt;  // 0.5 a t^2 + v t  <- using PREVIOUS velocity
+          state_.joint_velocity += mock_acceleration * dt;
+          state_.joint_acceleration = mock_acceleration;
+          state_.joint_torque = command_.joint_torque;
+        }
         break;
       default:
         state_.joint_torque = command_.joint_torque;
@@ -118,9 +121,6 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
     // LIMIT MOCK SIMULATION
     state_.joint_velocity = std::max(min_velocity_, std::min(max_velocity_, state_.joint_velocity));  // limit velocity to some reasonable value to avoid numeric instabilities
   }
-
-  // reset mock acceleration in case of not being used
-  mock_acceleration_ = 0.0;
 
   return hardware_interface::return_type::OK;
 }
@@ -140,11 +140,6 @@ void DuaDriveInterfaceMock::limit_velocity(const double max_velocity, const doub
 {
   min_velocity_ = min_velocity;
   max_velocity_ = max_velocity;
-}
-
-void DuaDriveInterfaceMock::stage_mock_acceleration(const double acceleration)
-{
-  mock_acceleration_ = acceleration;
 }
 
 }  // namespace duatic::duadrive_interface

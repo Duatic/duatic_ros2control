@@ -51,6 +51,9 @@ public:
 private:
   pinocchio::Model model_;
   pinocchio::Data data_;
+  Eigen::VectorXd q_;
+  Eigen::VectorXd v_;
+  Eigen::VectorXd tau_;
   Eigen::VectorX<Eigen::Index> joint_model_map_q_;  // containing idx_q
   Eigen::VectorX<Eigen::Index> joint_model_map_v_;  // containing idx_v
 

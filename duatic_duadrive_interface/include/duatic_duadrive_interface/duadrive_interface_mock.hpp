@@ -102,16 +102,18 @@ public:
   void limit_velocity(const double max_abs_velocity) {
     limit_velocity(max_abs_velocity, -max_abs_velocity);
   }
-
   /**
-   * @brief Stage additional acceleration commands derived from outside dynamics
+   * @brief Register a mock dynamics model with the mock hardware
    */
-  void stage_mock_acceleration(const double acceleration);
+  void register_mock_dynamics(const std::function<double()>& acceleration_callback)
+  {
+    mock_acceleration_callback_ = acceleration_callback;
+  }
 
 private:
   double min_velocity_;
   double max_velocity_;
-  double mock_acceleration_;
+  std::function<double()> mock_acceleration_callback_;
 };
 
 /*
