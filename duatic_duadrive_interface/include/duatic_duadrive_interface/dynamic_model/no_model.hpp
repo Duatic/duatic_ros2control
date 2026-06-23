@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include <urdf/model.h> // NOLINT(build/include_order)
+#include <urdf/model.h>  // NOLINT(build/include_order)
 #include "hardware_interface/system_interface.hpp"
 
 namespace duatic::duadrive_interface::dynamic_model
@@ -36,7 +36,8 @@ class NoModel
 public:
   void init([[maybe_unused]] const hardware_interface::HardwareComponentInterfaceParams& system_info,
             [[maybe_unused]] const std::shared_ptr<urdf::Model> urdf_model) const noexcept
-  {}
+  {
+  }
 };
 
 }  // namespace duatic::duadrive_interface::dynamic_model

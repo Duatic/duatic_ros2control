@@ -35,7 +35,7 @@ namespace duatic::duadrive_interface::dynamic_model
 {
 
 void PinocchioModel::init(const hardware_interface::HardwareComponentInterfaceParams& system_info,
-                                 const std::shared_ptr<urdf::Model> urdf_model)
+                          const std::shared_ptr<urdf::Model> urdf_model)
 {
   // build robot model from urdf
   pinocchio::urdf::buildModel(urdf_model, model_);
@@ -66,7 +66,7 @@ void PinocchioModel::init(const hardware_interface::HardwareComponentInterfacePa
 }
 
 void PinocchioModel::mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
-                                                      const std::span<const SerialCommand> serial_command_span)
+                                               const std::span<const SerialCommand> serial_command_span)
 {
   for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {
     q_[joint_model_map_q_[i]] = serial_joint_state_span[static_cast<std::size_t>(i)].position;

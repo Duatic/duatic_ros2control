@@ -28,7 +28,7 @@
 #include <tuple>
 #include <vector>
 
-#include <urdf/model.h> // NOLINT(build/include_order)
+#include <urdf/model.h>  // NOLINT(build/include_order)
 #include "hardware_interface/system_interface.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
 

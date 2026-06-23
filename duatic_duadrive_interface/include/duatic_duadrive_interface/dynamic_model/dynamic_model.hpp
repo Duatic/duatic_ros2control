@@ -32,7 +32,7 @@
 
 /* ros */
 #include "hardware_interface/system_interface.hpp"
-#include <urdf/model.h> // NOLINT(build/include_order)
+#include <urdf/model.h>  // NOLINT(build/include_order)
 
 #include "Eigen/Dense"
 
@@ -52,8 +52,8 @@ concept DynamicModel = requires(DynamicModelT dynamic_model,
                                 const hardware_interface::HardwareComponentInterfaceParams& system_info,
                                 const std::shared_ptr<urdf::Model> urdf_model)
 {
-  DynamicModelT();             // default constructable
-  dynamic_model.init(system_info, urdf_model); // initialize robot model
+  DynamicModelT();                              // default constructable
+  dynamic_model.init(system_info, urdf_model);  // initialize robot model
 };
 
 /*
@@ -72,7 +72,6 @@ concept MockDynamicModel = DynamicModel<MockDynamicModelT> &&
  * type trait to evaluate a default DynamicModel implementation
  */
 template <typename DriveTypeT>
-using default_dynamic_model_t =
-    std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>, PinocchioModel, NoModel>;
+using default_dynamic_model_t = std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>, PinocchioModel, NoModel>;
 
 }  // namespace duatic::duadrive_interface::dynamic_model

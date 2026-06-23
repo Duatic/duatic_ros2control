@@ -175,7 +175,7 @@ public:
       dynamic_model_.init(system_info, urdf_model);
     } catch (const std::exception& e) {
       RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!",
-                  e.what());
+                   e.what());
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
@@ -238,9 +238,9 @@ public:
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
-    // TODO: Probably better to add c-time information on whether to accept position/velocity/dynamics-model or not (independent of being mock or not, e.g. to maybe also include other simulations if necessary)
-    // In case there are predefined positions for mock operation we enforce them
-    // This is a pure compile time statement
+    // TODO: Probably better to add c-time information on whether to accept position/velocity/dynamics-model or not
+    // (independent of being mock or not, e.g. to maybe also include other simulations if necessary) In case there are
+    // predefined positions for mock operation we enforce them This is a pure compile time statement
     if constexpr (is_mock) {
       if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
@@ -255,7 +255,7 @@ public:
           kinematics_translator::map_from_serial_to_coupled(positions_serial, positions_coupled);
 
           for (std::size_t i = 0; i < drives_.size(); i++) {
-            const auto &drive_name = drives_[i]->get_name();
+            const auto& drive_name = drives_[i]->get_name();
             const auto urdf_joint = urdf_model->getJoint(drive_name);
             if (urdf_joint) {
               // init start position
@@ -271,9 +271,8 @@ public:
               RCLCPP_ERROR_STREAM(logger_, "Unable to find URDF joint for drive: " << drive_name);
             }
             // register mock dynamics model
-            drives_[i]->register_mock_dynamics([i, this](){
-              return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0);
-            });
+            drives_[i]->register_mock_dynamics(
+                [i, this]() { return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0); });
           }
         } else {
           RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
@@ -422,7 +421,8 @@ public:
     if constexpr (is_mock) {
       dynamic_model_.mock_effort_accelerations(state_serial_kinematics_,
                                                commands_serial_kinematics_);  // This also includes gravity simulation
-      dynamic_model_.mocked_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
+      dynamic_model_.mocked_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(
+          dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
     }
 
     // Translated commands to coupled kinematics
