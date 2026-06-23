@@ -23,7 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "duatic_duadrive_interface/dynamic_model/dynamic_model_pinocchio.hpp"
+#include "duatic_duadrive_interface/dynamic_model/pinocchio_model.hpp"
 
 #include <exception>
 
@@ -34,7 +34,7 @@
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-void DynamicModelPinocchio::init(const hardware_interface::HardwareComponentInterfaceParams& system_info,
+void PinocchioModel::init(const hardware_interface::HardwareComponentInterfaceParams& system_info,
                                  const std::shared_ptr<urdf::Model> urdf_model)
 {
   // build robot model from urdf
@@ -65,7 +65,7 @@ void DynamicModelPinocchio::init(const hardware_interface::HardwareComponentInte
   }
 }
 
-void DynamicModelPinocchio::mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
+void PinocchioModel::mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
                                                       const std::span<const SerialCommand> serial_command_span)
 {
   for (Eigen::Index i = 0; i < joint_model_map_q_.size(); i++) {

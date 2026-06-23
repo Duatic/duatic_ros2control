@@ -38,8 +38,8 @@
 
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
-#include "duatic_duadrive_interface/dynamic_model/dynamic_model_pinocchio.hpp"
-#include "duatic_duadrive_interface/dynamic_model/dynamic_model_non.hpp"
+#include "duatic_duadrive_interface/dynamic_model/pinocchio_model.hpp"
+#include "duatic_duadrive_interface/dynamic_model/no_model.hpp"
 
 namespace duatic::duadrive_interface::dynamic_model
 {
@@ -73,6 +73,6 @@ concept MockDynamicModel = DynamicModel<MockDynamicModelT> &&
  */
 template <typename DriveTypeT>
 using default_dynamic_model_t =
-    std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>, DynamicModelPinocchio, DynamicModelNon>;
+    std::conditional_t<is_dua_drive_interface_mock_v<DriveTypeT>, PinocchioModel, NoModel>;
 
 }  // namespace duatic::duadrive_interface::dynamic_model

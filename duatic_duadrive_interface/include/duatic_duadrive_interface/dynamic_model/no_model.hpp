@@ -25,40 +25,18 @@
 
 #pragma once
 
-#include <tuple>
-#include <vector>
-
 #include <urdf/model.h> // NOLINT(build/include_order)
 #include "hardware_interface/system_interface.hpp"
-#include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
-
-#include "Eigen/Eigen"
-#include <pinocchio/multibody/data.hpp>
-#include <pinocchio/multibody/model.hpp>
 
 namespace duatic::duadrive_interface::dynamic_model
 {
 
-class DynamicModelPinocchio
+class NoModel
 {
 public:
-  void init(const hardware_interface::HardwareComponentInterfaceParams& system_info,
-            const std::shared_ptr<urdf::Model> urdf_model);
-
-  void mock_effort_accelerations(const std::span<const SerialJointState> serial_joint_state_span,
-                                 const std::span<const SerialCommand> serial_command_span);
-
-private:
-  pinocchio::Model model_;
-  pinocchio::Data data_;
-  Eigen::VectorXd q_;
-  Eigen::VectorXd v_;
-  Eigen::VectorXd tau_;
-  Eigen::VectorX<Eigen::Index> joint_model_map_q_;  // containing idx_q
-  Eigen::VectorX<Eigen::Index> joint_model_map_v_;  // containing idx_v
-
-public:
-  Eigen::VectorXd mocked_accelerations;
+  void init([[maybe_unused]] const hardware_interface::HardwareComponentInterfaceParams& system_info,
+            [[maybe_unused]] const std::shared_ptr<urdf::Model> urdf_model) const noexcept
+  {}
 };
 
 }  // namespace duatic::duadrive_interface::dynamic_model
