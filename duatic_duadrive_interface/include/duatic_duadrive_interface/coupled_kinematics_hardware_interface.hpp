@@ -238,9 +238,10 @@ public:
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
-    // TODO: Probably better to add c-time information on whether to accept position/velocity/dynamics-model or not
-    // (independent of being mock or not, e.g. to maybe also include other simulations if necessary) In case there are
-    // predefined positions for mock operation we enforce them This is a pure compile time statement
+    // TODO(team-software): Probably better to add c-time information on whether to accept
+    // position/velocity/dynamics-model or not (independent of being mock or not, e.g. to maybe also include other
+    // simulations if necessary) In case there are predefined positions for mock operation we enforce them This is a
+    // pure compile time statement
     if constexpr (is_mock) {
       if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"

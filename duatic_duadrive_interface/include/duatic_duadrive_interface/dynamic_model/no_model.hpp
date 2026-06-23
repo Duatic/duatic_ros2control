@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <memory>
 #include <urdf/model.h>  // NOLINT(build/include_order)
 #include "hardware_interface/system_interface.hpp"
 

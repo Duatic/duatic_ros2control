@@ -29,6 +29,7 @@
 #include <concepts>
 #include <span>
 #include <type_traits>
+#include <memory>
 
 /* ros */
 #include "hardware_interface/system_interface.hpp"
