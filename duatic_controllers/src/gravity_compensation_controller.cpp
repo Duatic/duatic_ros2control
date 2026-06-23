@@ -259,14 +259,12 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
 
   const auto& tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
 
-
   state_msg.timestamp = time;
   // Write only the efforts for this arm's joints
   for (std::size_t i = 0; i < joint_count; i++) {
     auto idx = joint_indices_[i];
     double effort = tau[pinocchio_model_.joints[idx].idx_v()];
     bool success = joint_effort_command_interfaces_.at(i).get().set_value(effort);
-
 
     state_msg.commanded_torque[i] = effort;
 

@@ -18,6 +18,8 @@ float64 joint_position_commanded
 float64 joint_velocity_commanded
 # Currently commanded joint torque [Nm]
 float64 joint_effort_commanded
+# Currently commanded motor current (q-axis) [A]
+float64 motor_current_commanded
 
 
 #TODO add commanded values?

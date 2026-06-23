@@ -65,6 +65,7 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/position_commanded");
     config.names.emplace_back(joint + "/velocity_commanded");
     config.names.emplace_back(joint + "/effort_commanded");
+    config.names.emplace_back(joint + "/current_commanded");
 
     config.names.emplace_back(joint + "/current_d");
     config.names.emplace_back(joint + "/current_q");
@@ -124,6 +125,7 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_position_commanded_interfaces_.clear();
   joint_velocity_commanded_interfaces_.clear();
   joint_effort_commanded_interfaces_.clear();
+  motor_current_commanded_interfaces_.clear();
   joint_temperature_system_interfaces_.clear();
   joint_temperature_phase_a_interfaces_.clear();
   joint_temperature_phase_b_interfaces_.clear();
@@ -170,6 +172,11 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "effort_commanded",
                                                     joint_effort_commanded_interfaces_)) {
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - effort_commanded");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "current_commanded",
+                                                    motor_current_commanded_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_commanded");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
@@ -273,7 +280,8 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
           duatic::controllers::compat::require_value(joint_velocity_commanded_interfaces_.at(i).get());
       drive_state_msg.joint_effort_commanded =
           duatic::controllers::compat::require_value(joint_effort_commanded_interfaces_.at(i).get());
-
+      drive_state_msg.motor_current_commanded =
+          duatic::controllers::compat::require_value(motor_current_commanded_interfaces_.at(i).get());
       drive_state_msg.current_d = duatic::controllers::compat::require_value(joint_current_d_interfaces_.at(i).get());
       drive_state_msg.current_q = duatic::controllers::compat::require_value(joint_current_q_interfaces_.at(i).get());
       drive_state_msg.current_phase_a =
@@ -287,8 +295,6 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
                    params_.joints[i].c_str(), e.what());
       return controller_interface::return_type::ERROR;
     }
-
-
   }
 
   // and we try to have our realtime publisher publish the message
