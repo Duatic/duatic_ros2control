@@ -1,12 +1,12 @@
-# DynaArm Status Controller
+# DuaDrive Status Controller
 
-Controller that provides additional status information about the configured DynaArm.
-The published [ArmState](https://github.com/Duatic/duatic_dynaarm_driver/blob/main/dynaarm_msgs/msg/ArmState.msg) consists of an array of information about each configured [actuator](https://github.com/Duatic/duatic_dynaarm_driver/blob/main/dynaarm_msgs/msg/DriveState.msg)
+Controller that provides additional status information about the configured set of DuaDrives.
+
 
 ## Parameters
 
 ### Definition:
-```{literalinclude} ../../duatic_dynaarm_controllers/src/dynaarm_status_broadcaster_parameters.yaml
+```{literalinclude} ../../src/duadrive_status_broadcaster_parameters.yaml
 ```
 
 __joints__ | [Required]:\
@@ -21,7 +21,7 @@ Name of the arm as specified in the ros2control part of the urdf. Currently this
 A full example can be found in the [dynaarm_demo](https://github.com/Duatic/dynaarm_demo/blob/main/dynaarm_examples/config/controllers.yaml) repository.
 
 ```yaml
-dynaarm_status_broadcaster:
+duadrive_status_broadcaster:
   ros__parameters:
     joints:
       - shoulder_rotation
@@ -30,7 +30,7 @@ dynaarm_status_broadcaster:
       - forearm_rotation
       - wrist_flexion
       - wrist_rotation
-    arm_name: DynaarmSystem
+
 ```
 
 ## ROS Interfacing

@@ -9,7 +9,7 @@ This controller has to be used in combination with the [Gravity Compensation Con
 ## Parameters
 
 ### Definition:
-```{literalinclude} ../../duatic_dynaarm_controllers/src/freedrive_controller_parameters.yaml
+```{literalinclude} ../../src/freedrive_controller_parameters.yaml
 ```
 
 __joints__ | [Required]:\

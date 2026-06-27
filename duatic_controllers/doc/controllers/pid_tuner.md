@@ -1,4 +1,4 @@
-# DynaArm PID Tuner
+# PID Tuner
 
 Controller that allows to tune the PID parameters of the controllers running on the actuators on the live system.\
 
@@ -10,7 +10,7 @@ Please use with care. By selecting bad parameters it is possible to damage the h
 ## Parameters
 
 ### Definition:
-```{literalinclude} ../../duatic_dynaarm_controllers/src/dynaarm_pid_tuner_parameters.yaml
+```{literalinclude} ../../src/duadrive_pid_tuner_parameters.yaml
 ```
 
 __joints__ | [Required]:\

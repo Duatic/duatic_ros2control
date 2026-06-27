@@ -6,7 +6,7 @@ The freeze mode is enabled upon activation of the controller and disabled upon d
 ## Parameters
 
 ### Definition:
-```{literalinclude} ../../duatic_dynaarm_controllers/src/freeze_controller_parameters.yaml
+```{literalinclude} ../../src/freeze_controller_parameters.yaml
 ```
 
 __arm_name__ | [Required]:\

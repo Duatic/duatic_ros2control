@@ -6,7 +6,7 @@ It is recommended to always run this controller as it vastly improves the contro
 ## Parameters
 
 ### Definition:
-```{literalinclude} ../../duatic_dynaarm_controllers/src/gravity_compensation_controller_parameters.yaml
+```{literalinclude} ../src/gravity_compensation_controller_parameters.yaml
 ```
 
 __joints__ | [Required]:\
