@@ -99,20 +99,34 @@ target_link_libraries(${PROJECT_NAME}
     brake_release_controller_parameters
     pinocchio::pinocchio
 )
-# Use ament_target_dependencies for external deps
-ament_target_dependencies(
-  ${PROJECT_NAME}
-  controller_interface
-  pluginlib
-  rclcpp
-  rclcpp_lifecycle
-  realtime_tools
-  duatic_controller_msgs
-  std_srvs
-  Eigen3
-  eigen3_cmake_module
-  pinocchio
-)
+
+# Support ros distros older than lyrical
+if(COMMAND ament_target_dependencies)
+    ament_target_dependencies(${PROJECT_NAME}
+      controller_interface
+      pluginlib
+      rclcpp
+      rclcpp_lifecycle
+      realtime_tools
+      duatic_controller_msgs
+      std_srvs
+      Eigen3
+      pinocchio
+    )
+else()
+    target_link_libraries(${PROJECT_NAME}
+      controller_interface::controller_interface
+      pluginlib::pluginlib
+      rclcpp::rclcpp
+      rclcpp_lifecycle::rclcpp_lifecycle
+      realtime_tools::realtime_tools
+      duatic_controller_msgs::duatic_controller_msgs
+      std_srvs::std_srvs
+      Eigen3::Eigen
+      pinocchio::pinocchio
+    )
+endif()
+
 # prevent pluginlib from using boost
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 pluginlib_export_plugin_description_file(controller_interface controller_interface_plugin.xml)
