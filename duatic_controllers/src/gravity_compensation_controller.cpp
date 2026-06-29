@@ -130,6 +130,19 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
   joint_velocity_state_interfaces_.clear();
   initial_joint_positions_.clear();
 
+  // (Re)Build full-size vectors for all robot joints (Pinocchio expects this)
+  q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
+  v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+
+  // Do allocation one but clear it in the activate function to to be sure
+  state_msg.joints.clear();
+  for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    const std::string& joint_name = params_.joints[i];
+    state_msg.joints.push_back(joint_name);
+    state_msg.commanded_torque.push_back(0.0);
+  }
+
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(
           state_interfaces_, params_.joints, hardware_interface::HW_IF_POSITION, joint_position_state_interfaces_)) {
@@ -197,10 +210,6 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
 
   const std::size_t joint_count = joint_position_state_interfaces_.size();
 
-  // Build full-size vectors for all robot joints (Pinocchio expects this)
-  Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-  Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
   // Map: Pinocchio joint name -> index in q/v
   for (std::size_t i = 0; i < joint_count; i++) {
     const std::string& joint_name = params_.joints[i];
@@ -248,20 +257,16 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
     }
   }
 
-  forwardKinematics(pinocchio_model_, pinocchio_data_, q, v, a);
-  const auto tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
+  const auto& tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
 
-  StatusMsg state_msg;
   state_msg.timestamp = time;
   // Write only the efforts for this arm's joints
   for (std::size_t i = 0; i < joint_count; i++) {
-    const std::string& joint_name = params_.joints[i];
-    auto idx = pinocchio_model_.getJointId(joint_name);
+    auto idx = joint_indices_[i];
     double effort = tau[pinocchio_model_.joints[idx].idx_v()];
     bool success = joint_effort_command_interfaces_.at(i).get().set_value(effort);
 
-    state_msg.joints.push_back(joint_name);
-    state_msg.commanded_torque.push_back(effort);
+    state_msg.commanded_torque[i] = effort;
 
     if (!success) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);

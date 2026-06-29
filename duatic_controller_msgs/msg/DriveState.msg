@@ -18,6 +18,8 @@ float64 joint_position_commanded
 float64 joint_velocity_commanded
 # Currently commanded joint torque [Nm]
 float64 joint_effort_commanded
+# Currently commanded motor current (q-axis) [A]
+float64 motor_current_commanded
 
 
 #TODO add commanded values?
@@ -43,5 +45,7 @@ float64 current_d
 float64 current_phase_a
 float64 current_phase_b
 float64 current_phase_c
-
-#TODO add drive state, warnings
+# Phase voltages
+float64 voltage_phase_a
+float64 voltage_phase_b
+float64 voltage_phase_c

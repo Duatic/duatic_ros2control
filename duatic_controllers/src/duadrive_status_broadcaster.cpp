@@ -65,12 +65,16 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/position_commanded");
     config.names.emplace_back(joint + "/velocity_commanded");
     config.names.emplace_back(joint + "/effort_commanded");
+    config.names.emplace_back(joint + "/current_commanded");
 
     config.names.emplace_back(joint + "/current_d");
     config.names.emplace_back(joint + "/current_q");
     config.names.emplace_back(joint + "/current_coil_A");
     config.names.emplace_back(joint + "/current_coil_B");
     config.names.emplace_back(joint + "/current_coil_C");
+    config.names.emplace_back(joint + "/voltage_coil_A");
+    config.names.emplace_back(joint + "/voltage_coil_B");
+    config.names.emplace_back(joint + "/voltage_coil_C");
   }
   return config;
 }
@@ -124,6 +128,7 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_position_commanded_interfaces_.clear();
   joint_velocity_commanded_interfaces_.clear();
   joint_effort_commanded_interfaces_.clear();
+  motor_current_commanded_interfaces_.clear();
   joint_temperature_system_interfaces_.clear();
   joint_temperature_phase_a_interfaces_.clear();
   joint_temperature_phase_b_interfaces_.clear();
@@ -136,6 +141,12 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_current_phase_a_interfaces_.clear();
   joint_current_phase_b_interfaces_.clear();
   joint_current_phase_c_interfaces_.clear();
+  joint_voltage_phase_a_interfaces_.clear();
+  joint_voltage_phase_b_interfaces_.clear();
+  joint_voltage_phase_c_interfaces_.clear();
+
+  state_msg.states.clear();
+  state_msg.states.resize(params_.joints.size());
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints,
@@ -167,6 +178,11 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "effort_commanded",
                                                     joint_effort_commanded_interfaces_)) {
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - effort_commanded");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "current_commanded",
+                                                    motor_current_commanded_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_commanded");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
@@ -222,6 +238,22 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_coil_C");
     return controller_interface::CallbackReturn::FAILURE;
   }
+
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "voltage_coil_A",
+                                                    joint_voltage_phase_a_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - voltage_coil_A");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "voltage_coil_B",
+                                                    joint_voltage_phase_b_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - voltage_coil_B");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "voltage_coil_C",
+                                                    joint_voltage_phase_c_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - voltage_coil_C");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -239,12 +271,12 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
   }
 
   // create the status message for the whole arm
-  DriveStateCollection state_msg;
+
   state_msg.header.stamp = time;
 
   // now for every joint we create a drive state message
   for (std::size_t i = 0; i < params_.joints.size(); i++) {
-    DriveState drive_state_msg;
+    DriveState& drive_state_msg = state_msg.states.at(i);
 
     try {
       drive_state_msg.joint_position =
@@ -270,7 +302,8 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
           duatic::controllers::compat::require_value(joint_velocity_commanded_interfaces_.at(i).get());
       drive_state_msg.joint_effort_commanded =
           duatic::controllers::compat::require_value(joint_effort_commanded_interfaces_.at(i).get());
-
+      drive_state_msg.motor_current_commanded =
+          duatic::controllers::compat::require_value(motor_current_commanded_interfaces_.at(i).get());
       drive_state_msg.current_d = duatic::controllers::compat::require_value(joint_current_d_interfaces_.at(i).get());
       drive_state_msg.current_q = duatic::controllers::compat::require_value(joint_current_q_interfaces_.at(i).get());
       drive_state_msg.current_phase_a =
@@ -279,13 +312,18 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
           duatic::controllers::compat::require_value(joint_current_phase_b_interfaces_.at(i).get());
       drive_state_msg.current_phase_c =
           duatic::controllers::compat::require_value(joint_current_phase_c_interfaces_.at(i).get());
+
+      drive_state_msg.voltage_phase_a =
+          duatic::controllers::compat::require_value(joint_voltage_phase_a_interfaces_.at(i).get());
+      drive_state_msg.voltage_phase_b =
+          duatic::controllers::compat::require_value(joint_voltage_phase_b_interfaces_.at(i).get());
+      drive_state_msg.voltage_phase_c =
+          duatic::controllers::compat::require_value(joint_voltage_phase_c_interfaces_.at(i).get());
     } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state interface values for joint '%s': %s",
                    params_.joints[i].c_str(), e.what());
       return controller_interface::return_type::ERROR;
     }
-
-    state_msg.states.emplace_back(drive_state_msg);
   }
 
   // and we try to have our realtime publisher publish the message

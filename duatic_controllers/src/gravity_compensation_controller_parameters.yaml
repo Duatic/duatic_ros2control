@@ -11,7 +11,7 @@ gravity_compensation_controller:
     description: "name of the arm hardware interface"
   enable_state_topic:
     type: bool
-    default_value: true
+    default_value: false
     description: "Publish a status message on the ~/state topic"
   enable_startup_check:
     type: bool
