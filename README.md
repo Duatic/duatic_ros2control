@@ -1,8 +1,9 @@
 # duatic_ros2control
 
-[![Jazzy Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml)  [![Kilted Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml)  [![Rolling Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml)
+[![Jazzy Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml)  [![Kilted Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml)  [![Lyrical Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-lyrical.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-lyrical.yml)  [![Rolling Build Main](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml)
 
 This repository contains implementations that helps to integrate any Duatic DuaDrive setup into [ros2_control](https://control.ros.org/).
+As well as a set of [ros2control controllers](./duatic_controllers/doc/controllers.md) that can be used with every Duatic product.
 
 # License
 
@@ -22,7 +23,13 @@ All dependencies with their corresponding version are listed in the [repos.list]
 
 # Usage
 
-For more detailed information please refer to the DynaArm [documentation](https://docs.duatic.com)
+For more detailed information please refer to the Duatic [documentation](https://docs.duatic.com)
+
+### Package documentation
+
+| Package | Description |
+| ------- | ----------- |
+| [duatic_controllers](./duatic_controllers/README.md) | Variety of controllers for any Duatic product |
 
 # Contributing
 

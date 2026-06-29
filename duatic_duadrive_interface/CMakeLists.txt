@@ -11,9 +11,8 @@ set(PACKAGE_DEPENDENCIES
   pluginlib
   hardware_interface
   urdf
-  pinocchio
-  ethercat_sdk_master
   rsl_drive_sdk
+  pinocchio
 )
 
 foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
@@ -34,11 +33,23 @@ target_include_directories(duatic_duadrive_interface PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
-ament_target_dependencies(duatic_duadrive_interface ${PACKAGE_DEPENDENCIES})
-target_link_libraries(duatic_duadrive_interface
-  ${YAML_CPP_LIBRARIES}
+# Support ros distros older than lyrical
+if(COMMAND ament_target_dependencies)
+  ament_target_dependencies(${PROJECT_NAME}  ${PACKAGE_DEPENDENCIES})
+else()
+  target_link_libraries(${PROJECT_NAME}
+    rclcpp::rclcpp
+    pluginlib::pluginlib
+    hardware_interface::hardware_interface
+    urdf::urdf
+    rsl_drive_sdk::rsl_drive_sdk
+  )
+endif()
+
+target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES}
   pinocchio::pinocchio
 )
+
 # enable additional warnings
 target_compile_options(duatic_duadrive_interface PRIVATE
   -Wall
