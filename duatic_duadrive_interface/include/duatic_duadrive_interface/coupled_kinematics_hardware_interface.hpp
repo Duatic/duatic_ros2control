@@ -133,7 +133,7 @@ public:
     }
     // Append the arm wide freeze mode field
     command_interfaces.emplace_back(
-        create_interface_description<bool>(this->get_hardware_info().name, "freeze_mode", true));
+        create_interface_description<bool>(this->get_hardware_info().name, "freeze_mode", false));
 
     for (std::size_t i = 0; i < drives_.size(); i++) {
       auto& drive = drives_[i];

@@ -62,6 +62,14 @@ namespace duatic::controllers
 class BrakeReleaseController : public controller_interface::ControllerInterface
 {
 public:
+  enum class State
+  {
+    Init,
+    Exciting,
+    Commanding,
+    Holding
+  };
+
   BrakeReleaseController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -85,10 +93,14 @@ private:
   pinocchio::Data pinocchio_data_;
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> brake_target_command_interfaces_;
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
+
+  State current_state_{ State::Init };
+  std::optional<rclcpp::Time> last_state_change_time_;
 };
 
 }  // namespace duatic::controllers

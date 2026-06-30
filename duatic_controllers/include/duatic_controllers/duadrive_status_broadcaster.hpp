@@ -89,6 +89,7 @@ private:
   StateInterfaceReferences joint_position_commanded_interfaces_;
   StateInterfaceReferences joint_velocity_commanded_interfaces_;
   StateInterfaceReferences joint_effort_commanded_interfaces_;
+  StateInterfaceReferences motor_current_commanded_interfaces_;
   StateInterfaceReferences joint_temperature_system_interfaces_;
   StateInterfaceReferences joint_temperature_phase_a_interfaces_;
   StateInterfaceReferences joint_temperature_phase_b_interfaces_;
@@ -100,5 +101,11 @@ private:
   StateInterfaceReferences joint_current_phase_a_interfaces_;
   StateInterfaceReferences joint_current_phase_b_interfaces_;
   StateInterfaceReferences joint_current_phase_c_interfaces_;
+  StateInterfaceReferences joint_voltage_phase_a_interfaces_;
+  StateInterfaceReferences joint_voltage_phase_b_interfaces_;
+  StateInterfaceReferences joint_voltage_phase_c_interfaces_;
+
+  // Buffer message in order to avoid additional allocations
+  DriveStateCollection state_msg;
 };
 }  // namespace duatic::controllers

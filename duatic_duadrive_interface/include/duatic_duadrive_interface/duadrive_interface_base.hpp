@@ -112,6 +112,8 @@ struct DuaDriveInterfaceCommands
   // Scaling factors which allow to scale down the maximum torque/velocity settings of a drive
   double scaling_factor_max_torque{ 1.0 };
   double scaling_factor_max_velocity{ 1.0 };
+
+  int target_brake_state{ 0 };  // 0 engaged, 1 excite, 2 hold
 };
 
 class DuaDriveInterfaceBase

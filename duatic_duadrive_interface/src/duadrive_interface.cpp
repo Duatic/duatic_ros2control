@@ -108,10 +108,17 @@ void DuaDriveInterface::on_bus_startup_finished()
   if (!drive_->getDriveModel(drive_model)) {
     RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'drive model' from driver");
   }
-  RCLCPP_INFO_STREAM(logger_, "Drive info: " << get_name() << " Drive model: " << drive_model << " Build date: "
-                                             << info.buildDate << " tag: " << info.gitTag << " hash: " << info.gitHash);
 
   drive_info_ = { .drive_name = drive_->getName(), .drive_model = drive_model, .drive_build_tag = info.gitTag };
+
+  rsl_drive_sdk::common::Version fw_version;
+  if (!drive_->getDriveInfoFirmwareVersion(fw_version)) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << "failed to read 'firmware version' from driver");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Drive info:\n   Name: " << get_name() << "\n   Drive model: " << drive_model
+                                                       << "\n   Build date: " << info.buildDate << "\n   Git tag: "
+                                                       << info.gitTag << "\n   Git hash: " << info.gitHash
+                                                       << "\n   Firmware version: " << fw_version);
 
   const auto gains = drive_->getConfiguration()
                          .getMode(rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains)
@@ -211,6 +218,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 {
   // Put drive into freeze mode at shutdown
   if (drive_) {
+    drive_->setBrakeTargetState(rsl_drive_sdk::BrakeState::Engaged);
+
     drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 3.0, 0.01);
 
     rsl_drive_sdk::Command cmd;
@@ -307,6 +316,39 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
+
+    // Given the current scaling values calculate the maximum torque/maximum velocity values (NOTE until the point where
+    // we set it we are in joint coordinates)
+    const double new_max_torque = std::clamp(command_.scaling_factor_max_torque, 0.0, 1.0) * configured_max_torque_;
+    const double new_max_velocity =
+        std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_;
+
+    // In case the changed enough -> perform an sdo write of the new maximum values
+    // DISABLED at the moment as we run into issues with sending these values via ethercat
+    /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
+      current_max_torque_ = new_max_torque;
+      RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
+      drive_->setMaxJointTorque(current_max_torque_);
+    }
+    if (std::abs(new_max_velocity - current_max_velocity_) > 1.0) {
+      RCLCPP_INFO_STREAM(logger_, "New maximum joint velocity: " << new_max_velocity << "rad/s (motor:"
+                                                                 << new_max_velocity * configured_gear_ratio_ << ")");
+      current_max_velocity_ = new_max_velocity;
+      // Convert to motor velocity
+      drive_->setMaxMotorVelocity(current_max_velocity_ * configured_gear_ratio_);
+    }*/
+
+    if (command_.target_brake_state != current_target_brake_state) {
+      current_target_brake_state = command_.target_brake_state;
+      // Safety check that only valid values are commanded
+      if (current_target_brake_state >= 0 && current_target_brake_state < 3) {
+        rsl_drive_sdk::BrakeState target_brake_state =
+            static_cast<rsl_drive_sdk::BrakeState>(current_target_brake_state);
+        RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
+        drive_->setBrakeTargetState(target_brake_state);
+      }
+    }
+
   } else {
     rsl_drive_sdk::ReadingExtended reading;
     drive_->getReading(reading);

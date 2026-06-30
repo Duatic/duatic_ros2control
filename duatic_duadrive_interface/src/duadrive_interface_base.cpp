@@ -52,6 +52,7 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
     create_interface_description<double>(get_name(), "velocity_commanded", 0.0),
     create_interface_description<double>(get_name(), "acceleration_commanded", 0.0),
     create_interface_description<double>(get_name(), "effort_commanded", 0.0),
+    create_interface_description<double>(get_name(), "current_commanded", 0.0),
 
     create_interface_description<double>(get_name(), "temperature_system", 0.0),
     create_interface_description<double>(get_name(), "temperature_coil_A", 0.0),
@@ -81,22 +82,23 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
   state_interface_mapping_.insert(
       { state_interface_descriptions_[6].get_name(), &state_.joint_acceleration_commanded });
   state_interface_mapping_.insert({ state_interface_descriptions_[7].get_name(), &state_.joint_torque_commanded });
+  state_interface_mapping_.insert({ state_interface_descriptions_[8].get_name(), &state_.current_q_commanded });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[8].get_name(), &state_.temperature_system });
-  state_interface_mapping_.insert({ state_interface_descriptions_[9].get_name(), &state_.temperature_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[10].get_name(), &state_.temperature_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[11].get_name(), &state_.temperature_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[9].get_name(), &state_.temperature_system });
+  state_interface_mapping_.insert({ state_interface_descriptions_[10].get_name(), &state_.temperature_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[11].get_name(), &state_.temperature_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[12].get_name(), &state_.temperature_coil_C });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[12].get_name(), &state_.bus_voltage });
-  state_interface_mapping_.insert({ state_interface_descriptions_[13].get_name(), &state_.current_d });
-  state_interface_mapping_.insert({ state_interface_descriptions_[14].get_name(), &state_.current_q });
-  state_interface_mapping_.insert({ state_interface_descriptions_[15].get_name(), &state_.current_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[16].get_name(), &state_.current_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[17].get_name(), &state_.current_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[13].get_name(), &state_.bus_voltage });
+  state_interface_mapping_.insert({ state_interface_descriptions_[14].get_name(), &state_.current_d });
+  state_interface_mapping_.insert({ state_interface_descriptions_[15].get_name(), &state_.current_q });
+  state_interface_mapping_.insert({ state_interface_descriptions_[16].get_name(), &state_.current_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[17].get_name(), &state_.current_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[18].get_name(), &state_.current_coil_C });
 
-  state_interface_mapping_.insert({ state_interface_descriptions_[18].get_name(), &state_.voltage_coil_A });
-  state_interface_mapping_.insert({ state_interface_descriptions_[19].get_name(), &state_.voltage_coil_B });
-  state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_C });
+  state_interface_mapping_.insert({ state_interface_descriptions_[19].get_name(), &state_.voltage_coil_A });
+  state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_B });
+  state_interface_mapping_.insert({ state_interface_descriptions_[21].get_name(), &state_.voltage_coil_C });
 
   if (state_interface_mapping_.size() != state_interface_descriptions_.size()) {
     throw std::logic_error("Error in interface mapping sizes");
@@ -113,7 +115,8 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
     create_interface_description<double>(get_name(), "i_gain", 0.0),
     create_interface_description<double>(get_name(), "d_gain", 0.0),
     create_interface_description<double>(get_name(), "scaling_factor_max_torque", 1.0),
-    create_interface_description<double>(get_name(), "scaling_factor_max_velocity", 1.0)
+    create_interface_description<double>(get_name(), "scaling_factor_max_velocity", 1.0),
+    create_interface_description<int>(get_name(), "target_brake_state", 0),
   };
 
   command_interface_mapping_.insert({ command_interface_descriptions_[0].get_name(), &command_.joint_position });
@@ -127,6 +130,7 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
       { command_interface_descriptions_[7].get_name(), &command_.scaling_factor_max_torque });
   command_interface_mapping_.insert(
       { command_interface_descriptions_[8].get_name(), &command_.scaling_factor_max_velocity });
+  command_interface_mapping_.insert({ command_interface_descriptions_[9].get_name(), &command_.target_brake_state });
 
   if (command_interface_mapping_.size() != command_interface_mapping_.size()) {
     throw std::logic_error("Error in interface mapping sizes");

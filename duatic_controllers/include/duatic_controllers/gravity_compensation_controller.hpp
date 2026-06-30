@@ -91,5 +91,12 @@ private:
   bool activation_time_set_ = false;
 
   std::vector<pinocchio::JointIndex> joint_indices_;
+
+  // State buffer
+  Eigen::VectorXd q;
+  Eigen::VectorXd v;
+  Eigen::VectorXd a;
+
+  StatusMsg state_msg;
 };
 }  // namespace duatic::controllers
