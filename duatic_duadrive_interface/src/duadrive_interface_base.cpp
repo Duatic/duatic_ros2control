@@ -79,8 +79,7 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
 
   state_interface_mapping_.insert({ state_interface_descriptions_[4].get_name(), &state_.joint_position_commanded });
   state_interface_mapping_.insert({ state_interface_descriptions_[5].get_name(), &state_.joint_velocity_commanded });
-  state_interface_mapping_.insert(
-      { state_interface_descriptions_[6].get_name(), &state_.joint_acceleration_commanded });
+  state_interface_mapping_.insert({ state_interface_descriptions_[6].get_name(), &state_.joint_acceleration_commanded });
   state_interface_mapping_.insert({ state_interface_descriptions_[7].get_name(), &state_.joint_torque_commanded });
   state_interface_mapping_.insert({ state_interface_descriptions_[8].get_name(), &state_.current_q_commanded });
 

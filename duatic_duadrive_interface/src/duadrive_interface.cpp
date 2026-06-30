@@ -266,6 +266,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.temperature_coil_B = state.getCoilTemp2();
   state_.temperature_coil_C = state.getCoilTemp3();
 
+  rclcpp::Clock clock;
+  RCLCPP_INFO_STREAM_THROTTLE(logger_, clock, 1.0, get_name() << state.getTemperature());
+
   // These fields are reused
   state_.power_active = state.getGearPosition();
   state_.power_reactive = state.getGearVelocity();
