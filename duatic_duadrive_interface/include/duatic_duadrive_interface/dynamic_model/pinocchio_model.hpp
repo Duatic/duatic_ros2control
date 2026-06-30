@@ -33,7 +33,7 @@
 #include "hardware_interface/system_interface.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
 
-#include "Eigen/Eigen"
+#include <Eigen/Dense>  // NOLINT(build/include_order)
 #include <pinocchio/multibody/data.hpp>
 #include <pinocchio/multibody/model.hpp>
 

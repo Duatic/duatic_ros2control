@@ -13,12 +13,12 @@ set(PACKAGE_DEPENDENCIES
   urdf
   rsl_drive_sdk
   pinocchio
+  Eigen3
 )
 
 foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
   find_package(${Dependency} REQUIRED)
 endforeach()
-
 
 add_library(duatic_duadrive_interface
   src/dynamic_model/pinocchio_model.cpp
@@ -43,6 +43,7 @@ else()
     hardware_interface::hardware_interface
     urdf::urdf
     rsl_drive_sdk::rsl_drive_sdk
+    Eigen3::Eigen
   )
 endif()
 

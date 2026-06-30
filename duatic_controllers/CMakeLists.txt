@@ -111,7 +111,6 @@ if(COMMAND ament_target_dependencies)
       duatic_controller_msgs
       std_srvs
       Eigen3
-      pinocchio
     )
 else()
     target_link_libraries(${PROJECT_NAME}
@@ -123,7 +122,6 @@ else()
       duatic_controller_msgs::duatic_controller_msgs
       std_srvs::std_srvs
       Eigen3::Eigen
-      pinocchio::pinocchio
     )
 endif()
 

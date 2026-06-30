@@ -35,7 +35,7 @@
 #include "hardware_interface/system_interface.hpp"
 #include <urdf/model.h>  // NOLINT(build/include_order)
 
-#include "Eigen/Dense"
+#include <Eigen/Dense>  // NOLINT(build/include_order)
 
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
@@ -49,25 +49,24 @@ namespace duatic::duadrive_interface::dynamic_model
  * Concepts specifying a suitable DynamicModel Class
  */
 template <class DynamicModelT>
-concept DynamicModel = requires(DynamicModelT dynamic_model,
-                                const hardware_interface::HardwareComponentInterfaceParams& system_info,
-                                const std::shared_ptr<urdf::Model> urdf_model)
-{
-  DynamicModelT();                              // default constructable
-  dynamic_model.init(system_info, urdf_model);  // initialize robot model
-};
+concept DynamicModel =
+    requires(DynamicModelT dynamic_model, const hardware_interface::HardwareComponentInterfaceParams& system_info,
+             const std::shared_ptr<urdf::Model> urdf_model) {
+      DynamicModelT();                              // default constructable
+      dynamic_model.init(system_info, urdf_model);  // initialize robot model
+    };
 
 /*
  * Concepts specifying a mock-suitable DynamicModel Class
  */
 template <class MockDynamicModelT>
-concept MockDynamicModel = DynamicModel<MockDynamicModelT> &&
+concept MockDynamicModel =
+    DynamicModel<MockDynamicModelT> &&
     requires(MockDynamicModelT model, const std::span<const SerialJointState> serial_joint_state_span,
-             const std::span<const SerialCommand> serial_command_span)
-{
-  model.mock_effort_accelerations(serial_joint_state_span, serial_command_span);
-  model.mocked_accelerations;
-};
+             const std::span<const SerialCommand> serial_command_span) {
+      model.mock_effort_accelerations(serial_joint_state_span, serial_command_span);
+      model.mocked_accelerations;
+    };
 
 /*
  * type trait to evaluate a default DynamicModel implementation
