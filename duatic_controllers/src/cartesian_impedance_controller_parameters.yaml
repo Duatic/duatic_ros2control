@@ -1,0 +1,13 @@
+cartesian_impedance_controller:
+  joints:
+    type: string_array
+    default_value: []
+    description: Names of joints used by the controller
+  reference_frame:
+    type: string
+    default_value: "flange"
+    description: Frame used for the impedance control
+  command_interfaces:
+    type: string_array
+    default_value: ["effort"]
+    description: Command interfaces used by the controller
