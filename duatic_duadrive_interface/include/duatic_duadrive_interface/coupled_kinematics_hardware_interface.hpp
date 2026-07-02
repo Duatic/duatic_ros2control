@@ -65,9 +65,8 @@ namespace duatic::duadrive_interface
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false,
           dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>>
-requires(!is_dua_drive_interface_mock_v<DriveTypeT>) ||
-    dynamic_model::MockDynamicModel<DynamicModelT> class CoupledKinematicsHardwareInterfaceBase
-  : public hardware_interface::SystemInterface
+  requires(!is_dua_drive_interface_mock_v<DriveTypeT>) || dynamic_model::MockDynamicModel<DynamicModelT>
+class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
 public:
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
@@ -243,43 +242,50 @@ public:
     // simulations if necessary) In case there are predefined positions for mock operation we enforce them This is a
     // pure compile time statement
     if constexpr (is_mock) {
-      if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
-        const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
-                                                                                                        "positions"));
-        if (positions.size() == drives_.size()) {
-          std::vector<CoupledCommand> positions_coupled;
-          std::vector<SerialCommand> positions_serial;
-          for (std::size_t i = 0; i < drives_.size(); i++) {
-            positions_coupled.push_back(CoupledCommand{ positions[i], 0, 0, 0 });
-            positions_serial.push_back(SerialCommand{ positions[i], 0, 0, 0 });
-          }
-          kinematics_translator::map_from_serial_to_coupled(positions_serial, positions_coupled);
-
-          for (std::size_t i = 0; i < drives_.size(); i++) {
-            const auto& drive_name = drives_[i]->get_name();
-            const auto urdf_joint = urdf_model->getJoint(drive_name);
-            if (urdf_joint) {
-              // init start position
-              RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_name << ": " << positions[i]);
-              drives_[i]->enforce_position(positions_coupled[i].position);
-              // limit velocities to urdf-defined values, if specified (required to keep dynamic simulation stable)
-              const double velocity_limit = urdf_joint->limits->velocity;
-              if (velocity_limit > 0.0) {
-                drives_[i]->limit_velocity(velocity_limit);
-                RCLCPP_INFO_STREAM(logger_, "Limit Velocity: " << drive_name << ": " << velocity_limit);
-              }
-            } else {
-              RCLCPP_ERROR_STREAM(logger_, "Unable to find URDF joint for drive: " << drive_name);
-            }
-            // register mock dynamics model
-            drives_[i]->register_mock_dynamics(
-                [i, this]() { return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0); });
+      RCLCPP_INFO(logger_, "Configuring mock components");
+      // evaluate completeness of the hw model
+      if (!system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
+        RCLCPP_ERROR_STREAM(logger_, "Missing initial positions for mock drives: Aborting startup!");
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+      // Parse the initial positions and apply them to the mock drives
+      const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
+                                                                                                      "positions"));
+      // evaluate correctness of the hw model
+      if (positions.size() != drives_.size()) {
+        RCLCPP_ERROR_STREAM(logger_, "Inconsistent number of initial positions for mock drives: Expected "
+                                         << drives_.size() << ", got " << positions.size() << ". Aborting startup!");
+        return hardware_interface::CallbackReturn::ERROR;
+      }
+      // Map model to drive initial positions
+      std::vector<CoupledCommand> positions_coupled;
+      std::vector<SerialCommand> positions_serial;
+      for (std::size_t i = 0; i < drives_.size(); i++) {
+        positions_coupled.push_back(CoupledCommand{ positions[i], 0, 0, 0 });
+        positions_serial.push_back(SerialCommand{ positions[i], 0, 0, 0 });
+      }
+      kinematics_translator::map_from_serial_to_coupled(positions_serial, positions_coupled);
+      // Apply configurationss
+      for (std::size_t i = 0; i < drives_.size(); i++) {
+        const auto& drive_name = drives_[i]->get_name();
+        const auto urdf_joint = urdf_model->getJoint(drive_name);
+        RCLCPP_INFO_STREAM(logger_, "Configuring mock drive: " << drive_name);
+        // init start position
+        RCLCPP_INFO_STREAM(logger_, "Initial position: " << positions[i]);
+        drives_[i]->enforce_position(positions_coupled[i].position);
+        if (urdf_joint) {
+          // limit velocities to urdf-defined values, if specified (required to keep dynamic simulation stable)
+          const double velocity_limit = urdf_joint->limits->velocity;
+          if (velocity_limit > 0.0) {
+            drives_[i]->limit_velocity(velocity_limit);
+            RCLCPP_INFO_STREAM(logger_, "Limit Velocity: " << velocity_limit);
           }
         } else {
-          RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
-                                          << positions.size() << ") does not match amount of drives (" << drives_.size()
-                                          << ") We do not apply the initial positions therefore");
+          RCLCPP_WARN_STREAM(logger_, "Unable to find URDF joint for drive: " << drive_name << ".");
         }
+        // register mock dynamics model
+        drives_[i]->register_mock_dynamics(
+            [i, this]() { return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0); });
       }
     }
 
