@@ -163,9 +163,18 @@ public:
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
-    RCLCPP_INFO_STREAM(logger_, "Start with drives");
+    // evaluate and verify correct expected number of drives in the hardware description
+    if (system_info.hardware_info.joints.size() != kinematics_mapping::input_size()) {
+      RCLCPP_FATAL_STREAM(logger_, "Wrong number of joints in hardware info: Expected "
+                                       << kinematics_mapping::input_size() << " received "
+                                       << system_info.hardware_info.joints.size());
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
     // We obtain information about configured joints and create DuaDriveInterface instances from them
     // and initialize them
+    RCLCPP_INFO_STREAM(logger_, "Start with drives: detected " << system_info.hardware_info.joints.size()
+                                                               << " joints in the hardware info");
     for (const auto& joint : system_info.hardware_info.joints) {
       const auto ethercat_address = std::stoi(joint.parameters.at("ethercat_address"));
       const auto ethercat_bus = joint.parameters.at("ethercat_bus");
