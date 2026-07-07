@@ -156,6 +156,10 @@ void DuaDriveInterface::on_bus_startup_finished()
   RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << configured_max_torque_ << "Nm "
                                                        << " maximum joint velocity: " << configured_max_velocity_
                                                        << " rad/s");
+  if (!drive_->getBrakeCurrentState(current_brake_state_)) {
+    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain current brake state");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Current brake state: " << current_brake_state_);
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
@@ -307,11 +311,17 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     cmd.setJointTorque(command_.joint_torque);
     cmd.setPidGains(gains);
 
-    // Enforce freeze mode if desired - otherwise set the currently active mode
-    if (command_.joint_freeze_mode == 1.0) {
-      cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Freeze);
+    // In case the brake is active we do not allow the freeze mode to be enabled as it might vibrate on the brake
+    if (current_brake_state_ == rsl_drive_sdk::BrakeState::Engaged &&
+        (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze || command_.joint_freeze_mode == 1.0)) {
+      cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Disable);
     } else {
-      cmd.setModeEnum(active_mode_);
+      // Enforce freeze mode if desired - otherwise set the currently active mode
+      if (command_.joint_freeze_mode == 1.0) {
+        cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Freeze);
+      } else {
+        cmd.setModeEnum(active_mode_);
+      }
     }
 
     // We always fill all command fields but depending on the mode only a subset is used
@@ -346,6 +356,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
             static_cast<rsl_drive_sdk::BrakeState>(current_target_brake_state);
         RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
         drive_->setBrakeTargetState(target_brake_state);
+
+        current_brake_state_ = target_brake_state;
       }
     }
 
