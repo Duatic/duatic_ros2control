@@ -52,6 +52,7 @@
 #include <realtime_tools/realtime_publisher.hpp>
 #include <realtime_tools/realtime_buffer.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
@@ -97,25 +98,32 @@ private:
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
   std::vector<Eigen::Index> joint_v_idx_;
-  pinocchio::FrameIndex control_frame_idx_;
+  pinocchio::FrameIndex end_effector_frame_idx_;
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
   Eigen::VectorXd state_v_;
-  pinocchio::Motion state_control_frame_twist_;
+  pinocchio::Motion state_end_effector_twist_;
 
   pinocchio::SE3 target_pose_;      // the eventual target pose to reach
   pinocchio::Motion target_twist_;  // the eventual target twist to reach
 
+  double topics_pub_period_;
+  double topics_pub_next_time_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr end_effector_pose_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr end_effector_pose_pub_realtime_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr end_effector_twist_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr end_effector_twist_pub_realtime_;
+
   void update_state();
 
-  inline const pinocchio::SE3& control_frame_pose()
+  inline const pinocchio::SE3& end_effector_pose()
   {  // for convenience
-    return state_data_.oMf[control_frame_idx_];
+    return state_data_.oMf[end_effector_frame_idx_];
   }
-  inline const pinocchio::Motion& control_frame_twist()
+  inline const pinocchio::Motion& end_effector_twist()
   {  // for convenience
-    return state_control_frame_twist_;
+    return state_end_effector_twist_;
   }
 
   ////////////////////////////////////////////////////////

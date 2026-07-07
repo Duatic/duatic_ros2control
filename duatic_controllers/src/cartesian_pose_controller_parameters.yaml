@@ -5,12 +5,31 @@ cartesian_pose_controller:
     description: Names of joints used by the controller
     validation:
       unique<>: null
-  control_frame:
+  end_effector_frame:
     type: string
     default_value: "flange"
-    description: "Name of the frame to be controlled."  
-  
-  
+    description: "Name of the end effector frame to be controlled."
+
+  topic_prefix:
+    type: string
+    default_value: ""
+    description: "Prefix for the published end_effector_pose and end_effector_twist topics. If empty, the controller name is used."
+  topic_frequency:
+    type: double
+    default_value: 10.0
+    description: "Frequency of the published end_effector_pose and end_effector_twist topics. Zero disables publishing."
+    validation:
+      bounds<>: [0.0,1000.0]
+
+  dry_run:
+    type: bool
+    default_value: false
+    description: "If true, the controller will not send commands to the robot."
+
+
+
+
+
   enable_state_topic:
     type: bool
     default_value: true

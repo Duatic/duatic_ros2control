@@ -51,16 +51,18 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
 {
   // Claim the necessary command interfaces
   controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-
-  // ensure the exact same order as for the state interfaces! (Used in on_activate)
-  for (const std::string& joint : params_.joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+  if (params_.dry_run) {
+    config.type = controller_interface::interface_configuration_type::NONE;
+  } else {
+    config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+    // ensure the exact same order as for the state interfaces! (Used in on_activate)
+    for (const std::string& joint : params_.joints) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+    }
+    for (const std::string& joint : params_.joints) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    }
   }
-  for (const std::string& joint : params_.joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
-  }
-
   return config;
 }
 
@@ -134,13 +136,13 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   assert(joint_q_idx_.size() == params_.joints.size());
   assert(joint_v_idx_.size() == params_.joints.size());
 
-  // Store control frame index
-  if (!robot_model_.existFrame(params_.control_frame)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Control frame '%s' not found in Pinocchio model. Abort configuration.",
-                 params_.control_frame.c_str());
+  // Store end effector frame index
+  if (!robot_model_.existFrame(params_.end_effector_frame)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model. Abort configuration.",
+                 params_.end_effector_frame.c_str());
     return controller_interface::CallbackReturn::FAILURE;
   } else {
-    control_frame_idx_ = robot_model_.getFrameId(params_.control_frame);
+    end_effector_frame_idx_ = robot_model_.getFrameId(params_.end_effector_frame);
   }
 
   // size internal state variables
@@ -148,6 +150,34 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
+  // create RT topic publishers for the controller end effector pose and twist
+  if (params_.topic_frequency > 0.0) {
+    topics_pub_period_ = 1.0 / params_.topic_frequency;
+    topics_pub_next_time_ = get_node()->now().seconds();  // force immediate publish on first update
+
+    const std::string end_effector_topic_prefix =
+        params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix;
+
+    end_effector_pose_pub_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
+        end_effector_topic_prefix + "/end_effector_pose", rclcpp::QoS(1).durability_volatile());
+    end_effector_pose_pub_realtime_ =
+        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(end_effector_pose_pub_);
+
+    end_effector_twist_pub_ = get_node()->create_publisher<geometry_msgs::msg::TwistStamped>(
+        end_effector_topic_prefix + "/end_effector_twist", rclcpp::QoS(1).durability_volatile());
+    end_effector_twist_pub_realtime_ =
+        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>>(end_effector_twist_pub_);
+  } else {
+    RCLCPP_INFO(get_node()->get_logger(), "Topic frequency is set to 0.0, not publishing anything");
+    topics_pub_period_ = 0.0;
+    topics_pub_next_time_ = std::numeric_limits<double>::max();
+    end_effector_pose_pub_ = nullptr;
+    end_effector_pose_pub_realtime_ = nullptr;
+    end_effector_twist_pub_ = nullptr;
+    end_effector_twist_pub_realtime_ = nullptr;
+  }
+
+  return controller_interface::CallbackReturn::SUCCESS;
   /*
     try {
       // 1. build the pinocchio model from the urdf
@@ -294,38 +324,39 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
           stage_new_target(ik_result.value());
         });
   */
-  return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn
 CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  // validation check
-  if (command_interfaces_.size() != state_interfaces_.size()) {
-    RCLCPP_ERROR(get_node()->get_logger(),
-                 "Number of command interfaces (%zu) does not match expected number of state interfaces (%zu). Abort "
-                 "activation.",
-                 command_interfaces_.size(), state_interfaces_.size());
-    return controller_interface::CallbackReturn::ERROR;
-  }
-
-  // initialize the command interfaces to the current state to avoid jumps on activation
-  for (size_t i = 0; i < state_interfaces_.size(); ++i) {
-    const auto state = state_interfaces_[i].get_optional();
-    if (!state) {
-      RCLCPP_ERROR(get_node()->get_logger(), "State interface %s is not available. Abort activation.",
-                   state_interfaces_[i].get_name().c_str());
-      return controller_interface::CallbackReturn::FAILURE;
+  if (!params_.dry_run) {
+    // validation check
+    if (command_interfaces_.size() != state_interfaces_.size()) {
+      RCLCPP_ERROR(get_node()->get_logger(),
+                   "Number of command interfaces (%zu) does not match expected number of state interfaces (%zu). Abort "
+                   "activation.",
+                   command_interfaces_.size(), state_interfaces_.size());
+      return controller_interface::CallbackReturn::ERROR;
     }
-    command_interfaces_[i].set_value(state.value());
+
+    // initialize the command interfaces to the current state to avoid jumps on activation
+    for (size_t i = 0; i < state_interfaces_.size(); ++i) {
+      const auto state = state_interfaces_[i].get_optional();
+      if (!state) {
+        RCLCPP_ERROR(get_node()->get_logger(), "State interface %s is not available. Abort activation.",
+                     state_interfaces_[i].get_name().c_str());
+        return controller_interface::CallbackReturn::FAILURE;
+      }
+      command_interfaces_[i].set_value(state.value());
+    }
   }
 
   // initialize current state (data availability is guaranteed by the previous loop)
   update_state();
 
   // initialize the default target frame to the current pose to avoid jumps on activation
-  target_pose_ = control_frame_pose();    // the current control frame pose
-  target_twist_ = control_frame_twist();  // the current control frame twist
+  target_pose_ = end_effector_pose();    // the current control frame pose
+  target_twist_ = end_effector_twist();  // the current control frame twist
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -335,6 +366,40 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 {
   update_state();
 
+  // Publish the current end effector pose and twist if the time is right
+  if (time.seconds() > topics_pub_next_time_) {
+    // update the next publish time
+    topics_pub_next_time_ += topics_pub_period_;
+    // Publish Pose
+    if (end_effector_pose_pub_realtime_->trylock()) {
+      end_effector_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
+      end_effector_pose_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+      const auto& pose_trans = end_effector_pose().translation();
+      end_effector_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
+      end_effector_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
+      end_effector_pose_pub_realtime_->msg_.pose.position.z = pose_trans(2);
+      const Eigen::Quaterniond pose_quat(end_effector_pose().rotation());
+      end_effector_pose_pub_realtime_->msg_.pose.orientation.w = pose_quat.w();
+      end_effector_pose_pub_realtime_->msg_.pose.orientation.x = pose_quat.x();
+      end_effector_pose_pub_realtime_->msg_.pose.orientation.y = pose_quat.y();
+      end_effector_pose_pub_realtime_->msg_.pose.orientation.z = pose_quat.z();
+      end_effector_pose_pub_realtime_->unlockAndPublish();
+    }
+    // Publish Twist
+    if (end_effector_twist_pub_realtime_->trylock()) {
+      end_effector_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
+      end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+      const auto& twist_lin = end_effector_twist().linear();
+      end_effector_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
+      end_effector_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);
+      end_effector_twist_pub_realtime_->msg_.twist.linear.z = twist_lin(2);
+      const auto& twist_ang = end_effector_twist().angular();
+      end_effector_twist_pub_realtime_->msg_.twist.angular.x = twist_ang(0);
+      end_effector_twist_pub_realtime_->msg_.twist.angular.y = twist_ang(1);
+      end_effector_twist_pub_realtime_->msg_.twist.angular.z = twist_ang(2);
+      end_effector_twist_pub_realtime_->unlockAndPublish();
+    }
+  }
   /*
   last_system_state_ = build_current_state();
   if (!last_system_state_) {
@@ -375,11 +440,11 @@ void CartesianPoseController::update_state()
   }
   assert(interface_iter == state_interfaces_.end());
 
-  // run forward kinematics and update control frame state
+  // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
-  pinocchio::updateFramePlacement(robot_model_, state_data_, control_frame_idx_);
-  state_control_frame_twist_ =
-      pinocchio::getFrameVelocity(robot_model_, state_data_, control_frame_idx_, pinocchio::ReferenceFrame::WORLD);
+  pinocchio::updateFramePlacement(robot_model_, state_data_, end_effector_frame_idx_);
+  state_end_effector_twist_ =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, end_effector_frame_idx_, pinocchio::ReferenceFrame::WORLD);
 }
 
 ////////////////////////////////////////////////////////////////////////
