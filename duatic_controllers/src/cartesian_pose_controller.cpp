@@ -21,9 +21,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-
 #include <duatic_controllers/cartesian_pose_controller.hpp>
 
 // C++ system headers
@@ -50,6 +47,345 @@
 namespace duatic::controllers
 {
 
+controller_interface::InterfaceConfiguration CartesianPoseController::command_interface_configuration() const
+{
+  // Claim the necessary command interfaces
+  controller_interface::InterfaceConfiguration config;
+  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+
+  // ensure the exact same order as for the state interfaces! (Used in on_activate)
+  for (const std::string& joint : params_.joints) {
+    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+  }
+  for (const std::string& joint : params_.joints) {
+    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+  }
+
+  return config;
+}
+
+controller_interface::InterfaceConfiguration CartesianPoseController::state_interface_configuration() const
+{
+  // Claim the necessary state interfaces
+  controller_interface::InterfaceConfiguration config;
+  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+
+  // ensure the exact same order as for the command interfaces! (Used in on_activate)
+  for (const std::string& joint : params_.joints) {
+    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+  }
+  for (const std::string& joint : params_.joints) {
+    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+  }
+
+  return config;
+}
+
+controller_interface::CallbackReturn CartesianPoseController::on_init()
+{
+  try {
+    // Obtains necessary parameters
+    param_listener_ = std::make_unique<cartesian_pose_controller::ParamListener>(get_node());
+    param_listener_->refresh_dynamic_parameters();
+    params_ = param_listener_->get_params();
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::CallbackReturn
+CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
+{
+  // update parameters
+  param_listener_->refresh_dynamic_parameters();
+  params_ = param_listener_->get_params();
+
+  // create the pinocchio model from the urdf
+  RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
+  pinocchio::urdf::buildModelFromXML(get_robot_description(), robot_model_);
+
+  // evaluate joits given
+  if (params_.joints.empty()) {
+    RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty. Abort configuration.");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  // build model joint caches
+  joint_model_idx_.clear();
+  joint_model_idx_.reserve(params_.joints.size());
+  joint_q_idx_.clear();
+  joint_q_idx_.reserve(params_.joints.size());
+  joint_v_idx_.clear();
+  joint_v_idx_.reserve(params_.joints.size());
+  for (const std::string& joint : params_.joints) {
+    if (!robot_model_.existJointName(joint)) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint.c_str());
+      return controller_interface::CallbackReturn::FAILURE;
+    } else {
+      const pinocchio::JointIndex jidx = robot_model_.getJointId(joint);
+      joint_model_idx_.push_back(jidx);
+      joint_q_idx_.push_back(robot_model_.idx_qs[jidx]);
+      joint_v_idx_.push_back(robot_model_.idx_vs[jidx]);
+    }
+  }
+  assert(joint_model_idx_.size() == params_.joints.size());
+  assert(joint_q_idx_.size() == params_.joints.size());
+  assert(joint_v_idx_.size() == params_.joints.size());
+
+  // Store control frame index
+  if (!robot_model_.existFrame(params_.control_frame)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Control frame '%s' not found in Pinocchio model. Abort configuration.",
+                 params_.control_frame.c_str());
+    return controller_interface::CallbackReturn::FAILURE;
+  } else {
+    control_frame_idx_ = robot_model_.getFrameId(params_.control_frame);
+  }
+
+  // size internal state variables
+  state_data_ = pinocchio::Data(robot_model_);
+  state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
+  state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
+
+  /*
+    try {
+      // 1. build the pinocchio model from the urdf
+      RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
+      {
+        pinocchio::Model full_model;
+        pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
+
+        // So pinocchio is very counter intuitive. We specify joints that are marked as FIXED in the reduced model
+        // We we built an inversed list
+        // This is needed so that the controller will only do the IK for the specified joint list
+        std::unordered_set<pinocchio::JointIndex> keep;
+
+        for (const auto& joint : params_.joints) {
+          pinocchio::JointIndex id = full_model.getJointId(joint);
+          keep.insert(id);
+
+          RCLCPP_INFO_STREAM(get_node()->get_logger(), "keeping joint: " << joint << " id=" << id);
+        }
+
+        std::vector<pinocchio::JointIndex> indices;
+
+        for (pinocchio::JointIndex j = 1; j < full_model.njoints; ++j) {
+          if (keep.find(j) == keep.end()) {
+            indices.push_back(j);
+            RCLCPP_INFO_STREAM(get_node()->get_logger(), "locking joint: " << full_model.names[j] << " id=" << j);
+          }
+        }
+        Eigen::VectorXd q0 = pinocchio::neutral(full_model);
+        pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
+        RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
+        for (pinocchio::JointIndex j = 0; j < pinocchio_model_.njoints; ++j) {
+          RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
+        }
+        pinocchio_data_ = pinocchio::Data(pinocchio_model_);
+        RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
+                    pinocchio_model_.joints.size() - 1);
+      }
+
+      // 2. Build the collision model from urdf and srdf (only if SRDF is provided)
+      if (!params_.srdf.empty()) {
+        RCLCPP_INFO(get_node()->get_logger(), "Building collision geometry...");
+        std::stringstream urdf_stream;
+        urdf_stream << get_robot_description();
+        pinocchio::urdf::buildGeom(pinocchio_model_, urdf_stream, pinocchio::COLLISION, pinocchio_geom_);
+
+        pinocchio_geom_.addAllCollisionPairs();
+        pinocchio::srdf::removeCollisionPairsFromXML(pinocchio_model_, pinocchio_geom_, params_.srdf);
+        RCLCPP_INFO(get_node()->get_logger(), "Collision geometry built with %zu collision pairs",
+                    pinocchio_geom_.collisionPairs.size());
+      } else {
+        RCLCPP_WARN(get_node()->get_logger(), "No SRDF provided - collision checking will be disabled");
+      }
+
+      // 3. Validate that all controller joints exist in the Pinocchio model
+      RCLCPP_INFO(get_node()->get_logger(), "Validating controller joints...");
+      std::vector<pinocchio::JointIndex> controller_joint_indices;
+      for (const auto& joint_name : params_.joints) {
+        if (!pinocchio_model_.existJointName(joint_name)) {
+          RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
+          return controller_interface::CallbackReturn::ERROR;
+        }
+        auto joint_id = pinocchio_model_.getJointId(joint_name);
+        controller_joint_indices.push_back(joint_id);
+        RCLCPP_INFO(get_node()->get_logger(), "Joint '%s' found with index %ld", joint_name.c_str(), joint_id);
+      }
+
+      // 4. Validate kinematic chain structure (only if more than one joint)
+      if (params_.joints.size() > 1) {
+        RCLCPP_INFO(get_node()->get_logger(), "Validating kinematic chain structure...");
+        for (size_t i = 1; i < controller_joint_indices.size(); ++i) {
+          auto current_joint_id = controller_joint_indices[i];
+          auto previous_joint_id = controller_joint_indices[i - 1];
+
+          // Check if current joint is a descendant of the previous joint in the kinematic tree
+          bool is_valid_chain = false;
+          auto parent_id = pinocchio_model_.parents[current_joint_id];
+
+          // Traverse up the kinematic tree to see if we find the previous joint
+          while (parent_id != 0) {
+            if (parent_id == previous_joint_id) {
+              is_valid_chain = true;
+              break;
+            }
+            parent_id = pinocchio_model_.parents[parent_id];
+          }
+
+          RCLCPP_INFO(get_node()->get_logger(), "Chain validation for joint '%s' (id %ld) -> '%s' (id %ld): %s",
+                      params_.joints[i].c_str(), current_joint_id, params_.joints[i - 1].c_str(), previous_joint_id,
+                      is_valid_chain ? "VALID" : "INVALID");
+
+          if (!is_valid_chain) {
+            RCLCPP_ERROR(get_node()->get_logger(),
+                         "Invalid kinematic chain: Joint '%s' (index %zu) is not a descendant of joint '%s' (index %zu)
+    " "in the kinematic tree.", params_.joints[i].c_str(), i, params_.joints[i - 1].c_str(), i - 1);
+            RCLCPP_ERROR(get_node()->get_logger(), "Please check that the 'joints' parameter lists the joints in the "
+                                                   "correct kinematic order.");
+            return controller_interface::CallbackReturn::ERROR;
+          }
+        }
+      }
+
+      // 5. Validate end effector frame exists
+      if (!pinocchio_model_.existFrame(params_.end_effector_frame)) {
+        RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model.",
+                     params_.end_effector_frame.c_str());
+
+        // Debug: List all available frames
+        RCLCPP_ERROR(get_node()->get_logger(), "Available frames in Pinocchio model:");
+        for (size_t i = 0; i < pinocchio_model_.frames.size(); ++i) {
+          RCLCPP_ERROR(get_node()->get_logger(), "  [%zu]: %s", i, pinocchio_model_.frames[i].name.c_str());
+        }
+        return controller_interface::CallbackReturn::ERROR;
+      }
+
+      RCLCPP_INFO(get_node()->get_logger(),
+                  "Successfully configured controller with %zu joints and end effector frame '%s'",
+    params_.joints.size(), params_.end_effector_frame.c_str()); } catch (const std::exception& e) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
+      return controller_interface::CallbackReturn::ERROR;
+    }
+
+    // Build joint index cache (needed because pinnochio uses a different index scheme)
+    joint_indices_.clear();
+    for (const auto& joint : params_.joints) {
+      RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                         "Joint: " << joint << " pinnochio id: " << pinocchio_model_.getJointId(joint));
+      joint_indices_.push_back(pinocchio_model_.getJointId(joint));
+    }
+
+    // Cache end effector frame id:
+    endeffector_frame_id_ = pinocchio_model_.getFrameId(params_.end_effector_frame);
+    base_frame_id_ = pinocchio_model_.getFrameId(params_.base_frame);
+
+    // Setup the pose listener
+    pose_cmd_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
+        "~/target_pose", 10, [&](const geometry_msgs::msg::PoseStamped& msg) {
+          // Write raw to RT buffer for real-time consumers
+          const auto ik_result = run_ik(msg);
+          if (!ik_result) {
+            RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to solve IK");
+            return;
+          }
+          stage_new_target(ik_result.value());
+        });
+  */
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::CallbackReturn
+CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
+{
+  // validation check
+  if (command_interfaces_.size() != state_interfaces_.size()) {
+    RCLCPP_ERROR(get_node()->get_logger(),
+                 "Number of command interfaces (%zu) does not match expected number of state interfaces (%zu). Abort "
+                 "activation.",
+                 command_interfaces_.size(), state_interfaces_.size());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  // initialize the command interfaces to the current state to avoid jumps on activation
+  for (size_t i = 0; i < state_interfaces_.size(); ++i) {
+    const auto state = state_interfaces_[i].get_optional();
+    if (!state) {
+      RCLCPP_ERROR(get_node()->get_logger(), "State interface %s is not available. Abort activation.",
+                   state_interfaces_[i].get_name().c_str());
+      return controller_interface::CallbackReturn::FAILURE;
+    }
+    command_interfaces_[i].set_value(state.value());
+  }
+
+  // initialize current state (data availability is guaranteed by the previous loop)
+  update_state();
+
+  // initialize the default target frame to the current pose to avoid jumps on activation
+  target_pose_ = control_frame_pose();    // the current control frame pose
+  target_twist_ = control_frame_twist();  // the current control frame twist
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
+                                                                  [[maybe_unused]] const rclcpp::Duration& period)
+{
+  update_state();
+
+  /*
+  last_system_state_ = build_current_state();
+  if (!last_system_state_) {
+    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
+                                                  "operation...wtf");
+    return controller_interface::return_type::ERROR;
+  }
+
+  if (staged_target_) {
+    // Perform linear interpolation of the configured interpolation time
+    const auto next_position_cmd =
+        sample_target(staged_target_->system_state_of_staging.q, staged_target_->target.q_out,
+                      staged_target_->time_of_staging, time, params_.interpolation_time);
+
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      const std::string& joint_name = params_.joints[i];
+      const auto idx = joint_indices_[i];
+      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
+              next_position_cmd[pinocchio_model_.joints[idx].idx_q()])) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
+      }
+    }
+  }
+    */
+  return controller_interface::return_type::OK;
+}
+
+void CartesianPoseController::update_state()
+{
+  auto interface_iter = state_interfaces_.begin();
+  for (const auto idx : joint_q_idx_) {
+    state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
+    interface_iter++;
+  }
+  for (const auto idx : joint_v_idx_) {
+    state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
+    interface_iter++;
+  }
+  assert(interface_iter == state_interfaces_.end());
+
+  // run forward kinematics and update control frame state
+  pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
+  pinocchio::updateFramePlacement(robot_model_, state_data_, control_frame_idx_);
+  state_control_frame_twist_ =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, control_frame_idx_, pinocchio::ReferenceFrame::WORLD);
+}
+
+////////////////////////////////////////////////////////////////////////
+// OLD UNDERNEATH
+////////////////////////////////////////////////////////////////////////
+/*
 static Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const Eigen::VectorXd& target_state,
                                      rclcpp::Time start_time, rclcpp::Time current_time, double duration_sec)
 {
@@ -71,14 +407,17 @@ static Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const E
   return (1.0 - alpha) * start_state + alpha * target_state;
   ;
 }
+  */
+/*
 static pinocchio::SE3 ROS_pose_to_SE3(const geometry_msgs::msg::Pose& pose)
 {
-  Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
-  q.normalize();
-  Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
-  return pinocchio::SE3(q.normalized(), t);
+ Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+ q.normalize();
+ Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
+ return pinocchio::SE3(q.normalized(), t);
 }
-
+*/
+/*
 static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
     const std::string& frame_id, const pinocchio::FrameIndex& base_frame_idx, const pinocchio::SE3& target_pose,
     const pinocchio::Model& model, pinocchio::Data& data, const Eigen::VectorXd& q_current, rclcpp::Logger logger)
@@ -111,7 +450,8 @@ static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
 
   return base_T_target;
 }
-
+*/
+/*
 std::optional<CartesianPoseController::IKResult> CartesianPoseController::compute_ik(
     const pinocchio::Model& model, pinocchio::Data& data, const pinocchio::SE3& target_pose,
     const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in, rclcpp::Logger logger)
@@ -152,7 +492,7 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
       RCLCPP_INFO_STREAM(logger, "q " << q_out.transpose());
       RCLCPP_INFO_STREAM(logger, "error" << err.transpose());
       RCLCPP_INFO(logger, "Iteration %d: error norm = %f", i, err.norm());
-    }*/
+    }*//*
 
     // Check convergence
     if (err.norm() < eps) {
@@ -246,7 +586,8 @@ std::optional<CartesianPoseController::IKResult> CartesianPoseController::comput
     return std::nullopt;
   }
 }
-
+*/
+/*
 std::optional<CartesianPoseController::IKResult>
 CartesianPoseController::run_ik(const geometry_msgs::msg::PoseStamped& msg)
 {
@@ -280,291 +621,8 @@ std::optional<pinocchio::SE3> CartesianPoseController::get_current_ee_pose()
 
   return refM_ee;
 }
-
-CartesianPoseController::CartesianPoseController() : controller_interface::ControllerInterface()
-{
-}
-
-controller_interface::InterfaceConfiguration CartesianPoseController::command_interface_configuration() const
-{
-  // Claim the necessary state interfaces
-  controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-
-  const auto joints = params_.joints;
-  for (auto& joint : joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
-  }
-
-  return config;
-}
-
-controller_interface::InterfaceConfiguration CartesianPoseController::state_interface_configuration() const
-{
-  // Claim the necessary state interfaces
-  controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-
-  const auto joints = params_.joints;
-  for (auto& joint : joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
-    config.names.emplace_back(joint + "/" + "acceleration_commanded");
-  }
-
-  return config;
-}
-
-controller_interface::CallbackReturn CartesianPoseController::on_init()
-{
-  try {
-    // Obtains necessary parameters
-    param_listener_ = std::make_unique<cartesian_pose_controller::ParamListener>(get_node());
-    param_listener_->refresh_dynamic_parameters();
-    params_ = param_listener_->get_params();
-  } catch (const std::exception& e) {
-    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
-    return controller_interface::CallbackReturn::ERROR;
-  }
-
-  // Start IK worker thread
-  // IK worker will be started in on_activate after Pinocchio model is built
-
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  // update the dynamic map parameters
-  param_listener_->refresh_dynamic_parameters();
-
-  // get parameters from the listener in case they were updated
-  params_ = param_listener_->get_params();
-
-  // check if joints are empty
-  if (params_.joints.empty()) {
-    RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty.");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-
-  try {
-    // 1. build the pinocchio model from the urdf
-    RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
-    {
-      pinocchio::Model full_model;
-      pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
-
-      // So pinocchio is very counter intuitive. We specify joints that are marked as FIXED in the reduced model
-      // We we built an inversed list
-      // This is needed so that the controller will only do the IK for the specified joint list
-      std::unordered_set<pinocchio::JointIndex> keep;
-
-      for (const auto& joint : params_.joints) {
-        pinocchio::JointIndex id = full_model.getJointId(joint);
-        keep.insert(id);
-
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), "keeping joint: " << joint << " id=" << id);
-      }
-
-      std::vector<pinocchio::JointIndex> indices;
-
-      for (pinocchio::JointIndex j = 1; j < full_model.njoints; ++j) {
-        if (keep.find(j) == keep.end()) {
-          indices.push_back(j);
-          RCLCPP_INFO_STREAM(get_node()->get_logger(), "locking joint: " << full_model.names[j] << " id=" << j);
-        }
-      }
-      Eigen::VectorXd q0 = pinocchio::neutral(full_model);
-      pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
-      for (pinocchio::JointIndex j = 0; j < pinocchio_model_.njoints; ++j) {
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
-      }
-      pinocchio_data_ = pinocchio::Data(pinocchio_model_);
-      RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
-                  pinocchio_model_.joints.size() - 1);
-    }
-
-    // 2. Build the collision model from urdf and srdf (only if SRDF is provided)
-    if (!params_.srdf.empty()) {
-      RCLCPP_INFO(get_node()->get_logger(), "Building collision geometry...");
-      std::stringstream urdf_stream;
-      urdf_stream << get_robot_description();
-      pinocchio::urdf::buildGeom(pinocchio_model_, urdf_stream, pinocchio::COLLISION, pinocchio_geom_);
-
-      pinocchio_geom_.addAllCollisionPairs();
-      pinocchio::srdf::removeCollisionPairsFromXML(pinocchio_model_, pinocchio_geom_, params_.srdf);
-      RCLCPP_INFO(get_node()->get_logger(), "Collision geometry built with %zu collision pairs",
-                  pinocchio_geom_.collisionPairs.size());
-    } else {
-      RCLCPP_WARN(get_node()->get_logger(), "No SRDF provided - collision checking will be disabled");
-    }
-
-    // 3. Validate that all controller joints exist in the Pinocchio model
-    RCLCPP_INFO(get_node()->get_logger(), "Validating controller joints...");
-    std::vector<pinocchio::JointIndex> controller_joint_indices;
-    for (const auto& joint_name : params_.joints) {
-      if (!pinocchio_model_.existJointName(joint_name)) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-        return controller_interface::CallbackReturn::ERROR;
-      }
-      auto joint_id = pinocchio_model_.getJointId(joint_name);
-      controller_joint_indices.push_back(joint_id);
-      RCLCPP_INFO(get_node()->get_logger(), "Joint '%s' found with index %ld", joint_name.c_str(), joint_id);
-    }
-
-    // 4. Validate kinematic chain structure (only if more than one joint)
-    if (params_.joints.size() > 1) {
-      RCLCPP_INFO(get_node()->get_logger(), "Validating kinematic chain structure...");
-      for (size_t i = 1; i < controller_joint_indices.size(); ++i) {
-        auto current_joint_id = controller_joint_indices[i];
-        auto previous_joint_id = controller_joint_indices[i - 1];
-
-        // Check if current joint is a descendant of the previous joint in the kinematic tree
-        bool is_valid_chain = false;
-        auto parent_id = pinocchio_model_.parents[current_joint_id];
-
-        // Traverse up the kinematic tree to see if we find the previous joint
-        while (parent_id != 0) {
-          if (parent_id == previous_joint_id) {
-            is_valid_chain = true;
-            break;
-          }
-          parent_id = pinocchio_model_.parents[parent_id];
-        }
-
-        RCLCPP_INFO(get_node()->get_logger(), "Chain validation for joint '%s' (id %ld) -> '%s' (id %ld): %s",
-                    params_.joints[i].c_str(), current_joint_id, params_.joints[i - 1].c_str(), previous_joint_id,
-                    is_valid_chain ? "VALID" : "INVALID");
-
-        if (!is_valid_chain) {
-          RCLCPP_ERROR(get_node()->get_logger(),
-                       "Invalid kinematic chain: Joint '%s' (index %zu) is not a descendant of joint '%s' (index %zu) "
-                       "in the kinematic tree.",
-                       params_.joints[i].c_str(), i, params_.joints[i - 1].c_str(), i - 1);
-          RCLCPP_ERROR(get_node()->get_logger(), "Please check that the 'joints' parameter lists the joints in the "
-                                                 "correct kinematic order.");
-          return controller_interface::CallbackReturn::ERROR;
-        }
-      }
-    }
-
-    // 5. Validate end effector frame exists
-    if (!pinocchio_model_.existFrame(params_.end_effector_frame)) {
-      RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model.",
-                   params_.end_effector_frame.c_str());
-
-      // Debug: List all available frames
-      RCLCPP_ERROR(get_node()->get_logger(), "Available frames in Pinocchio model:");
-      for (size_t i = 0; i < pinocchio_model_.frames.size(); ++i) {
-        RCLCPP_ERROR(get_node()->get_logger(), "  [%zu]: %s", i, pinocchio_model_.frames[i].name.c_str());
-      }
-      return controller_interface::CallbackReturn::ERROR;
-    }
-
-    RCLCPP_INFO(get_node()->get_logger(),
-                "Successfully configured controller with %zu joints and end effector frame '%s'", params_.joints.size(),
-                params_.end_effector_frame.c_str());
-  } catch (const std::exception& e) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
-    return controller_interface::CallbackReturn::ERROR;
-  }
-
-  // Build joint index cache (needed because pinnochio uses a different index scheme)
-  joint_indices_.clear();
-  for (const auto& joint : params_.joints) {
-    RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                       "Joint: " << joint << " pinnochio id: " << pinocchio_model_.getJointId(joint));
-    joint_indices_.push_back(pinocchio_model_.getJointId(joint));
-  }
-
-  // Cache end effector frame id:
-  endeffector_frame_id_ = pinocchio_model_.getFrameId(params_.end_effector_frame);
-  base_frame_id_ = pinocchio_model_.getFrameId(params_.base_frame);
-
-  // Setup the pose listener
-  pose_cmd_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
-      "~/target_pose", 10, [&](const geometry_msgs::msg::PoseStamped& msg) {
-        // Write raw to RT buffer for real-time consumers
-        const auto ik_result = run_ik(msg);
-        if (!ik_result) {
-          RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to solve IK");
-          return;
-        }
-        stage_new_target(ik_result.value());
-      });
-
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  active_ = true;
-
-  // clear out vectors in case of restart
-  joint_position_command_interfaces_.clear();
-  joint_velocity_command_interfaces_.clear();
-
-  joint_position_state_interfaces_.clear();
-  joint_velocity_state_interfaces_.clear();
-  joint_acceleration_state_interfaces_.clear();
-
-  // get the actual interface in an ordered way (same order as the joints parameter)
-  if (!controller_interface::get_ordered_interfaces(
-          state_interfaces_, params_.joints, hardware_interface::HW_IF_POSITION, joint_position_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - position");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-  if (!controller_interface::get_ordered_interfaces(
-          state_interfaces_, params_.joints, hardware_interface::HW_IF_VELOCITY, joint_velocity_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - velocity");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "acceleration_commanded",
-                                                    joint_acceleration_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - acceleration");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-
-  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
-                                                    hardware_interface::HW_IF_POSITION,
-                                                    joint_position_command_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - position");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
-                                                    hardware_interface::HW_IF_VELOCITY,
-                                                    joint_velocity_command_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - position");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-
-  last_system_state_ = build_current_state();
-  if (!last_system_state_) {
-    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during activation - "
-                                                  "this is fatal, aborting");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-
-  staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
-                                 .system_state_of_staging = last_system_state_.value(),
-                                 .target = IKResult{ .q_out = last_system_state_->q } };
-
-  RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial system state: " << last_system_state_.value());
-
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-CartesianPoseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  active_ = false;
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
+*/
+/*
 std::optional<CartesianPoseController::PinocchioState> CartesianPoseController::build_current_state()
 {
   const std::size_t joint_count = joint_position_state_interfaces_.size();
@@ -595,55 +653,8 @@ std::optional<CartesianPoseController::PinocchioState> CartesianPoseController::
   }
   return state;
 }
+*/
 
-controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
-                                                                  [[maybe_unused]] const rclcpp::Duration& period)
-{
-  if (get_lifecycle_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE || !active_) {
-    return controller_interface::return_type::OK;
-  }
-
-  last_system_state_ = build_current_state();
-  if (!last_system_state_) {
-    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
-                                                  "operation...wtf");
-    return controller_interface::return_type::ERROR;
-  }
-
-  if (staged_target_) {
-    // Perform linear interpolation of the configured interpolation time
-    const auto next_position_cmd =
-        sample_target(staged_target_->system_state_of_staging.q, staged_target_->target.q_out,
-                      staged_target_->time_of_staging, time, params_.interpolation_time);
-
-    for (std::size_t i = 0; i < params_.joints.size(); i++) {
-      const std::string& joint_name = params_.joints[i];
-      const auto idx = joint_indices_[i];
-      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
-              next_position_cmd[pinocchio_model_.joints[idx].idx_q()])) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
-      }
-    }
-  }
-  return controller_interface::return_type::OK;
-}
-controller_interface::CallbackReturn
-CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-CartesianPoseController::on_error([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-CartesianPoseController::on_shutdown([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
 }  // namespace duatic::controllers
 
 // NOLINTNEXTLINE

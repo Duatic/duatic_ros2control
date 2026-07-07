@@ -80,69 +80,77 @@ public:
     IKResult target;
   };
 
-  CartesianPoseController();
+  CartesianPoseController() = default;
+
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_error(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_shutdown(const rclcpp_lifecycle::State& previous_state) override;
 
-protected:
 private:
-  // Access to controller parameters via generate_parameter_library
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
   cartesian_pose_controller::Params params_;
 
-  pinocchio::Model pinocchio_model_;
-  pinocchio::Data pinocchio_data_;
+  pinocchio::Model robot_model_;
+  std::vector<pinocchio::JointIndex> joint_model_idx_;
+  std::vector<Eigen::Index> joint_q_idx_;
+  std::vector<Eigen::Index> joint_v_idx_;
+  pinocchio::FrameIndex control_frame_idx_;
+
+  pinocchio::Data state_data_;
+  Eigen::VectorXd state_q_;
+  Eigen::VectorXd state_v_;
+  pinocchio::Motion state_control_frame_twist_;
+
+  pinocchio::SE3 target_pose_;      // the eventual target pose to reach
+  pinocchio::Motion target_twist_;  // the eventual target twist to reach
+
+  void update_state();
+
+  inline const pinocchio::SE3& control_frame_pose()
+  {  // for convenience
+    return state_data_.oMf[control_frame_idx_];
+  }
+  inline const pinocchio::Motion& control_frame_twist()
+  {  // for convenience
+    return state_control_frame_twist_;
+  }
+
+  ////////////////////////////////////////////////////////
+  /// OLD UNDERNEATH
+  ////////////////////////////////////////////////////////
   pinocchio::GeometryModel pinocchio_geom_;
-
-  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
-
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
-  std::atomic_bool active_{ false };
 
   std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
   realtime_tools::RealtimeBuffer<PinocchioState> buffer_target_cmd_;
-  // Mapping between -> ros2control index and pinnochio index
-  std::vector<pinocchio::JointIndex> joint_indices_;
-  pinocchio::FrameIndex endeffector_frame_id_;
-  pinocchio::FrameIndex base_frame_id_;
 
-  std::optional<PinocchioState> last_system_state_;
-  std::optional<StagingState> staged_target_;
-
-  std::optional<PinocchioState> build_current_state();
-  std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
-  std::optional<pinocchio::SE3> get_current_ee_pose();
-  std::optional<IKResult> compute_ik(const pinocchio::Model& model, pinocchio::Data& data,
-                                     const pinocchio::SE3& target_pose,
-                                     const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
-                                     rclcpp::Logger logger);
-
+  /*
+    std::optional<PinocchioState> build_current_state();
+    std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
+    std::optional<pinocchio::SE3> get_current_ee_pose();
+    std::optional<IKResult> compute_ik(const pinocchio::Model& model, pinocchio::Data& data,
+                                       const pinocchio::SE3& target_pose,
+                                       const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
+                                       rclcpp::Logger logger);
+  */
   /**
    * @brief stage a new target which is eventually commanded and store its time of staging for
    */
-  void stage_new_target(const IKResult& new_target)
-  {
-    if (!last_system_state_) {
-      RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Cannot stage new target as there is currently no system state "
-                                                    "available");
-      return;
-    }
+  /*  void stage_new_target(const IKResult& new_target)
+    {
+      if (!last_system_state_) {
+        RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Cannot stage new target as there is currently no system state "
+                                                      "available");
+        return;
+      }
 
-    staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
-                                   .system_state_of_staging = last_system_state_.value(),
-                                   .target = new_target };
-  }
+      staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
+                                     .system_state_of_staging = last_system_state_.value(),
+                                     .target = new_target };
+    }
+  */
 };
 
 inline std::ostream& operator<<(std::ostream& os, const CartesianPoseController::PinocchioState& s)
