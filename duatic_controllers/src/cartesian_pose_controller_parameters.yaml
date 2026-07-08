@@ -14,7 +14,11 @@ cartesian_pose_controller:
     type: string
     default_value: ""
     description: "Prefix for the published end_effector_pose and end_effector_twist topics. If empty, the controller name is used."
-  topic_frequency:
+  target_subscription_topic:
+    type: string
+    default_value: "target_pose_twist"
+    description: "Name of the topic to subscribe to for target pose and twist commands."
+  topic_pub_frequency:
     type: double
     default_value: 10.0
     description: "Frequency of the published end_effector_pose and end_effector_twist topics. Zero disables publishing."

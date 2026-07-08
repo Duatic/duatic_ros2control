@@ -47,6 +47,16 @@
 namespace duatic::controllers
 {
 
+namespace trajectory
+{
+
+void ExponentialTargetPoseTwist::update(const TrajectoryUpdateInformation& update_info)
+{
+  std::cout << "\n\n### UPDATE TRAJECTORY INFO ###\n\n";
+};
+
+}  // namespace trajectory
+
 controller_interface::InterfaceConfiguration CartesianPoseController::command_interface_configuration() const
 {
   // Claim the necessary command interfaces
@@ -150,9 +160,44 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
+  // subscribe to the target topic
+  target_pose_twist_sub_ = get_node()->create_subscription<duatic_controller_msgs::msg::PoseTwistStamped>(
+      params_.target_subscription_topic, rclcpp::QoS(1).reliable().durability_volatile(),
+      [this](const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg) {
+        this->read_rt_state_buffer();  // update subscription data copy
+        // store update information
+        this->trajectory_update_buffer_[sub_idx_].target_time = msg->timestamp;
+        // pose
+        auto& target_trans = this->trajectory_update_buffer_[sub_idx_].target_pose.translation();
+        target_trans(0) = msg->pose.position.x;
+        target_trans(1) = msg->pose.position.y;
+        target_trans(2) = msg->pose.position.z;
+        Eigen::Quaterniond orientation;
+        orientation.w() = msg->pose.orientation.w;
+        orientation.x() = msg->pose.orientation.x;
+        orientation.y() = msg->pose.orientation.y;
+        orientation.z() = msg->pose.orientation.z;
+        this->trajectory_update_buffer_[sub_idx_].target_pose.rotation() = orientation;
+        // twist
+        auto twist_lin = this->trajectory_update_buffer_[sub_idx_].target_twist.linear();
+        twist_lin(0) = msg->twist.linear.x;
+        twist_lin(1) = msg->twist.linear.y;
+        twist_lin(2) = msg->twist.linear.z;
+        auto twist_ang = this->trajectory_update_buffer_[sub_idx_].target_twist.angular();
+        twist_ang(0) = msg->twist.angular.x;
+        twist_ang(1) = msg->twist.angular.y;
+        twist_ang(2) = msg->twist.angular.z;
+        // Calculate new trajectory outside the realtime-loop
+        const trajectory::ExponentialTargetPoseTwist trajectory(
+            this->trajectory_update_buffer_[sub_idx_]);  // no rvalue push into the buffer existing, hoping for
+                                                         // compiler-optimization
+        // copy new trajectory into rt-buffer
+        this->trajectory_buffer_.writeFromNonRT(trajectory);
+      });
+
   // create RT topic publishers for the controller end effector pose and twist
-  if (params_.topic_frequency > 0.0) {
-    topics_pub_period_ = 1.0 / params_.topic_frequency;
+  if (params_.topic_pub_frequency > 0.0) {
+    topics_pub_period_ = 1.0 / params_.topic_pub_frequency;
     topics_pub_next_time_ = get_node()->now().seconds();  // force immediate publish on first update
 
     const std::string end_effector_topic_prefix =
@@ -366,8 +411,85 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 {
   update_state();
 
-  // Publish the current end effector pose and twist if the time is right
-  if (time.seconds() > topics_pub_next_time_) {
+  update_rt_state_buffer(time);
+
+  publish_topics(time);
+  /*
+  last_system_state_ = build_current_state();
+  if (!last_system_state_) {
+    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
+                                                  "operation...wtf");
+    return controller_interface::return_type::ERROR;
+  }
+
+  if (staged_target_) {
+    // Perform linear interpolation of the configured interpolation time
+    const auto next_position_cmd =
+        sample_target(staged_target_->system_state_of_staging.q, staged_target_->target.q_out,
+                      staged_target_->time_of_staging, time, params_.interpolation_time);
+
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      const std::string& joint_name = params_.joints[i];
+      const auto idx = joint_indices_[i];
+      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
+              next_position_cmd[pinocchio_model_.joints[idx].idx_q()])) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
+      }
+    }
+  }
+    */
+  return controller_interface::return_type::OK;
+}  // namespace duatic::controllers
+
+void CartesianPoseController::update_state()
+{
+  auto interface_iter = state_interfaces_.begin();
+  for (const auto idx : joint_q_idx_) {
+    state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
+    interface_iter++;
+  }
+  for (const auto idx : joint_v_idx_) {
+    state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
+    interface_iter++;
+  }
+  assert(interface_iter == state_interfaces_.end());
+
+  // run forward kinematics and update end effector frame state
+  pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
+  pinocchio::updateFramePlacement(robot_model_, state_data_, end_effector_frame_idx_);
+  state_end_effector_twist_ =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, end_effector_frame_idx_, pinocchio::ReferenceFrame::WORLD);
+}
+
+void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
+{
+  // update rt state buffer
+  trajectory_update_buffer_[rt_idx_].curr_time = now;
+  trajectory_update_buffer_[rt_idx_].curr_pose = end_effector_pose();
+  trajectory_update_buffer_[rt_idx_].curr_twist = end_effector_twist();
+  // atomic swap indizes with update indication
+  rt_idx_ = buff_idx_.exchange(rt_idx_ & c_buff_update, std::memory_order_release) &
+            c_buff_MASK;  // always store with update flag and remove the update flag on load
+  assert((rt_idx_ < 3) && "Invariance Violation: rt_idx_ out of bounds. There is something serious going wrong here!");
+}
+
+void CartesianPoseController::read_rt_state_buffer()
+{
+  // check for an available update
+  const uint8_t update_available = buff_idx_.load(std::memory_order_acquire) & c_buff_update;  // mask with update bit
+  if (update_available) {  // update non-rt data copy only if there is an update available
+    // atomic update non-rt data copy
+    sub_idx_ = buff_idx_.exchange(sub_idx_, std::memory_order_acquire) &
+               c_buff_MASK;  // always remove the update flag and store without
+    assert((sub_idx_ < 3) && "Invariance Violation: sub_idx_ out of bounds. There is something serious going wrong "
+                             "here!");
+  }
+}
+
+void CartesianPoseController::publish_topics(const rclcpp::Time& now)
+{
+  // Publish the current end effector pose and twist iff the time is right
+  if (now.seconds() > topics_pub_next_time_) {
     // update the next publish time
     topics_pub_next_time_ += topics_pub_period_;
     // Publish Pose
@@ -400,51 +522,6 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
       end_effector_twist_pub_realtime_->unlockAndPublish();
     }
   }
-  /*
-  last_system_state_ = build_current_state();
-  if (!last_system_state_) {
-    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
-                                                  "operation...wtf");
-    return controller_interface::return_type::ERROR;
-  }
-
-  if (staged_target_) {
-    // Perform linear interpolation of the configured interpolation time
-    const auto next_position_cmd =
-        sample_target(staged_target_->system_state_of_staging.q, staged_target_->target.q_out,
-                      staged_target_->time_of_staging, time, params_.interpolation_time);
-
-    for (std::size_t i = 0; i < params_.joints.size(); i++) {
-      const std::string& joint_name = params_.joints[i];
-      const auto idx = joint_indices_[i];
-      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
-              next_position_cmd[pinocchio_model_.joints[idx].idx_q()])) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
-      }
-    }
-  }
-    */
-  return controller_interface::return_type::OK;
-}
-
-void CartesianPoseController::update_state()
-{
-  auto interface_iter = state_interfaces_.begin();
-  for (const auto idx : joint_q_idx_) {
-    state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
-    interface_iter++;
-  }
-  for (const auto idx : joint_v_idx_) {
-    state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
-    interface_iter++;
-  }
-  assert(interface_iter == state_interfaces_.end());
-
-  // run forward kinematics and update end effector frame state
-  pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
-  pinocchio::updateFramePlacement(robot_model_, state_data_, end_effector_frame_idx_);
-  state_end_effector_twist_ =
-      pinocchio::getFrameVelocity(robot_model_, state_data_, end_effector_frame_idx_, pinocchio::ReferenceFrame::WORLD);
 }
 
 ////////////////////////////////////////////////////////////////////////

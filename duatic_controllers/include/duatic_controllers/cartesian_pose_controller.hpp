@@ -25,6 +25,7 @@
 #pragma once
 
 // C++ system headers
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -55,33 +56,57 @@
 #include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
+#include <duatic_controller_msgs/msg/pose_twist_stamped.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
 
 namespace duatic::controllers
 {
-class CartesianPoseController : public controller_interface::ControllerInterface
+
+namespace trajectory
+{
+
+struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInformation
+{
+  rclcpp::Time curr_time;
+  pinocchio::SE3 curr_pose;
+  pinocchio::Motion curr_twist;
+
+  rclcpp::Time target_time;
+  pinocchio::SE3 target_pose;
+  pinocchio::Motion target_twist;
+};
+
+class ExponentialTargetPoseTwist
 {
 public:
-  struct PinocchioState
+  inline ExponentialTargetPoseTwist() = default;
+  inline ExponentialTargetPoseTwist(const TrajectoryUpdateInformation& update_info) : ExponentialTargetPoseTwist()
   {
-    Eigen::VectorXd q;
-    Eigen::VectorXd v;
-    Eigen::VectorXd a;
-  };
-  struct IKResult
-  {
-    Eigen::VectorXd q_out;
-  };
+    update(update_info);
+  }
 
-  struct StagingState
-  {
-    rclcpp::Time time_of_staging;
-    PinocchioState system_state_of_staging;
-    IKResult target;
-  };
+  void update(const TrajectoryUpdateInformation& update_info);
+};
 
-  CartesianPoseController() = default;
+}  // namespace trajectory
+
+class CartesianPoseController : public controller_interface::ControllerInterface
+{
+private:
+  static constexpr uint8_t c_buff_update = (1 << 7);      // MSB
+  static constexpr uint8_t c_buff_MASK = !c_buff_update;  // all non-msb bits
+
+public:
+  inline CartesianPoseController()
+    : controller_interface::ControllerInterface()
+    // INVARIANT: ENSURE THOSE THREE INDIZES ALWAYS HOLD THESE EXACT VALUES IN ARB. PERMUTATION (MSB used for
+    // Update-indication)
+    , rt_idx_(0)
+    , buff_idx_(1)
+    , sub_idx_(2)
+  {
+  }
 
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -108,6 +133,26 @@ private:
   pinocchio::SE3 target_pose_;      // the eventual target pose to reach
   pinocchio::Motion target_twist_;  // the eventual target twist to reach
 
+  // input topic subscriptions
+  std::shared_ptr<rclcpp::Subscription<duatic_controller_msgs::msg::PoseTwistStamped>> target_pose_twist_sub_;
+
+  // the official realtime buffer is not meant to be used in the direction from rt to non-rt, thus implement a CPU-level
+  // lock-free one-way buffer in the following:
+  // -> ensure cache-line aligned data for the exchange between rt-update and non-rt subscription
+  alignas(std::hardware_destructive_interference_size)
+      std::array<trajectory::TrajectoryUpdateInformation, 3> trajectory_update_buffer_;
+  alignas(std::hardware_destructive_interference_size) uint8_t rt_idx_;
+  alignas(std::hardware_destructive_interference_size) std::atomic_uint8_t buff_idx_;
+  alignas(std::hardware_destructive_interference_size) uint8_t sub_idx_;
+
+  static_assert(std::atomic_uint8_t::is_always_lock_free, "This hardware is not suitable for lock-free atomic uint8_t "
+                                                          "operations. Cannot compile this code!");
+
+  realtime_tools::RealtimeBuffer<trajectory::ExponentialTargetPoseTwist>
+      trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
+                           // other buffer is not yet separated into a dedicated class
+
+  // state publication topics
   double topics_pub_period_;
   double topics_pub_next_time_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr end_effector_pose_pub_;
@@ -116,6 +161,12 @@ private:
   realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr end_effector_twist_pub_realtime_;
 
   void update_state();
+
+  void update_rt_state_buffer(const rclcpp::Time& now);
+
+  void read_rt_state_buffer();
+
+  void publish_topics(const rclcpp::Time& now);
 
   inline const pinocchio::SE3& end_effector_pose()
   {  // for convenience
@@ -130,9 +181,6 @@ private:
   /// OLD UNDERNEATH
   ////////////////////////////////////////////////////////
   pinocchio::GeometryModel pinocchio_geom_;
-
-  std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
-  realtime_tools::RealtimeBuffer<PinocchioState> buffer_target_cmd_;
 
   /*
     std::optional<PinocchioState> build_current_state();
@@ -161,13 +209,4 @@ private:
   */
 };
 
-inline std::ostream& operator<<(std::ostream& os, const CartesianPoseController::PinocchioState& s)
-{
-  os << "{\n";
-  os << "  q: " << s.q.transpose() << "\n";
-  os << "  v: " << s.v.transpose() << "\n";
-  os << "  a: " << s.a.transpose() << "\n";
-  os << "}";
-  return os;
-}
 }  // namespace duatic::controllers
