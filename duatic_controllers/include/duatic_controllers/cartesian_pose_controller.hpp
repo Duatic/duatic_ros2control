@@ -73,20 +73,45 @@ struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInfo
   pinocchio::Motion curr_twist;
 
   rclcpp::Time target_time;
-  pinocchio::SE3 target_pose;
-  pinocchio::Motion target_twist;
+  Eigen::Vector<double, 3> target_pose_lin;
+  Eigen::Quaternion<double> target_pose_rot;
+  Eigen::Vector<double, 6> target_twist;
 };
 
 class ExponentialTargetPoseTwist
 {
 public:
+  static constexpr double c_default_target_precision = 0.99;
+
+public:
   inline ExponentialTargetPoseTwist() = default;
-  inline ExponentialTargetPoseTwist(const TrajectoryUpdateInformation& update_info) : ExponentialTargetPoseTwist()
+  inline ExponentialTargetPoseTwist(const TrajectoryUpdateInformation& update_info,
+                                    const double max_lin_velocity = -1.0, const double max_rot_velocity = -1.0)
+    : ExponentialTargetPoseTwist()
   {
-    update(update_info);
+    update(update_info, max_lin_velocity, max_rot_velocity);
   }
 
-  void update(const TrajectoryUpdateInformation& update_info);
+  // negative max_lin_velocity disables max_lin_velocity, negative max_rot_velocity synchronizes rot to lin velocity
+  void update(const TrajectoryUpdateInformation& update_info, const double max_lin_velocity = -1.0,
+              const double max_rot_velocity = -1.0);
+
+private:
+  /* Implementing the following exponential trajectory:
+   *
+   * f(t)  = (s - d) exp(w t) + d
+   * f'(t) = (s - d) exp(w t) w
+   *
+   * t > 0 : time in trajectory
+   * s : source
+   * d : destination
+   * w = -v/|s-d| : approximation rate
+   * v > 0 : abs velocity at t=0, i.e., max abs velocity
+   */
+
+  Eigen::Vector<double, 3> target_pose_lin;   // d|lin
+  Eigen::Quaternion<double> target_pose_rot;  // d|rot
+  double
 };
 
 }  // namespace trajectory
@@ -159,6 +184,8 @@ private:
   realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr end_effector_pose_pub_realtime_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr end_effector_twist_pub_;
   realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr end_effector_twist_pub_realtime_;
+
+  void handle_target_pose_twist_sub(const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg);
 
   void update_state();
 

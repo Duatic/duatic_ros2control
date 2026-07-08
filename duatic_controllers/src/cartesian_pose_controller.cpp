@@ -28,6 +28,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 
 #include <pinocchio/collision/collision.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
@@ -163,37 +164,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // subscribe to the target topic
   target_pose_twist_sub_ = get_node()->create_subscription<duatic_controller_msgs::msg::PoseTwistStamped>(
       params_.target_subscription_topic, rclcpp::QoS(1).reliable().durability_volatile(),
-      [this](const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg) {
-        this->read_rt_state_buffer();  // update subscription data copy
-        // store update information
-        this->trajectory_update_buffer_[sub_idx_].target_time = msg->timestamp;
-        // pose
-        auto& target_trans = this->trajectory_update_buffer_[sub_idx_].target_pose.translation();
-        target_trans(0) = msg->pose.position.x;
-        target_trans(1) = msg->pose.position.y;
-        target_trans(2) = msg->pose.position.z;
-        Eigen::Quaterniond orientation;
-        orientation.w() = msg->pose.orientation.w;
-        orientation.x() = msg->pose.orientation.x;
-        orientation.y() = msg->pose.orientation.y;
-        orientation.z() = msg->pose.orientation.z;
-        this->trajectory_update_buffer_[sub_idx_].target_pose.rotation() = orientation;
-        // twist
-        auto twist_lin = this->trajectory_update_buffer_[sub_idx_].target_twist.linear();
-        twist_lin(0) = msg->twist.linear.x;
-        twist_lin(1) = msg->twist.linear.y;
-        twist_lin(2) = msg->twist.linear.z;
-        auto twist_ang = this->trajectory_update_buffer_[sub_idx_].target_twist.angular();
-        twist_ang(0) = msg->twist.angular.x;
-        twist_ang(1) = msg->twist.angular.y;
-        twist_ang(2) = msg->twist.angular.z;
-        // Calculate new trajectory outside the realtime-loop
-        const trajectory::ExponentialTargetPoseTwist trajectory(
-            this->trajectory_update_buffer_[sub_idx_]);  // no rvalue push into the buffer existing, hoping for
-                                                         // compiler-optimization
-        // copy new trajectory into rt-buffer
-        this->trajectory_buffer_.writeFromNonRT(trajectory);
-      });
+      std::bind(&CartesianPoseController::handle_target_pose_twist_sub, this, std::placeholders::_1));
 
   // create RT topic publishers for the controller end effector pose and twist
   if (params_.topic_pub_frequency > 0.0) {
@@ -404,6 +375,36 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   target_twist_ = end_effector_twist();  // the current control frame twist
 
   return controller_interface::CallbackReturn::SUCCESS;
+}
+
+void CartesianPoseController::handle_target_pose_twist_sub(
+    const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg)
+{
+  read_rt_state_buffer();  // update subscription data copy
+  // store update information
+  trajectory_update_buffer_[sub_idx_].target_time = msg->timestamp;
+  // pose
+  auto& target_trans = trajectory_update_buffer_[sub_idx_].target_pose.translation();
+  target_trans(0) = msg->pose.position.x;
+  target_trans(1) = msg->pose.position.y;
+  target_trans(2) = msg->pose.position.z;
+  Eigen::Quaterniond orientation;
+  orientation.w() = msg->pose.orientation.w;
+  orientation.x() = msg->pose.orientation.x;
+  orientation.y() = msg->pose.orientation.y;
+  orientation.z() = msg->pose.orientation.z;
+  trajectory_update_buffer_[sub_idx_].target_pose.rotation() = orientation;
+  // twist
+  auto twist_lin = trajectory_update_buffer_[sub_idx_].target_twist.linear();
+  twist_lin(0) = msg->twist.linear.x;
+  twist_lin(1) = msg->twist.linear.y;
+  twist_lin(2) = msg->twist.linear.z;
+  auto twist_ang = trajectory_update_buffer_[sub_idx_].target_twist.angular();
+  twist_ang(0) = msg->twist.angular.x;
+  twist_ang(1) = msg->twist.angular.y;
+  twist_ang(2) = msg->twist.angular.z;
+  // Calculate new trajectory outside the realtime-loop
+  trajectory_buffer_.writeFromNonRT(trajectory::ExponentialTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
