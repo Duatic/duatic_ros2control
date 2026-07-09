@@ -16,6 +16,7 @@ find_package(std_srvs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(pinocchio REQUIRED)
+find_package(proxsuite REQUIRED)
 # Generate code from parameter description yaml files
 generate_parameter_library(
     safety_scaling_controller_parameters
@@ -99,7 +100,6 @@ target_link_libraries(${PROJECT_NAME}
     freeze_controller_parameters
     brake_release_controller_parameters
     cartesian_pose_controller_parameters
-    pinocchio::pinocchio
 )
 
 # Support ros distros older than lyrical
@@ -115,6 +115,7 @@ if(COMMAND ament_target_dependencies)
       std_srvs
       Eigen3
       pinocchio
+      proxsuite
     )
 else()
     target_link_libraries(${PROJECT_NAME}
@@ -128,6 +129,7 @@ else()
       std_srvs::std_srvs
       Eigen3::Eigen
       pinocchio::pinocchio
+      proxsuite::proxsuite
     )
 endif()
 
@@ -145,6 +147,7 @@ install(
     freedrive_controller_parameters
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
+    cartesian_pose_controller_parameters
     freeze_controller_parameters
     brake_release_controller_parameters
   EXPORT export_${PROJECT_NAME}

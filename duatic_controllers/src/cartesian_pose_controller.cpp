@@ -151,6 +151,17 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
+  // initialize QP
+  const int qp_size = robot_model_.nv + 6;
+  qp_solver_ = std::make_unique<proxsuite::proxqp::dense::QP<double>>(
+      qp_size, 6, 0,
+      proxsuite::proxqp::HessianType::Diagonal);  // joints+error, eq-constraints, in-constraints
+  qp_solver_H_ = Eigen::MatrixXd::Identity(qp_size, qp_size);
+  qp_solver_H_.diagonal().segment(robot_model_.nv, 6).setConstant(100.0);  // Stress to avoid errors
+  // TODO(patrick): make this a parameter
+  qp_solver_A_ = Eigen::MatrixXd::Zero(6, qp_size);
+  qp_solver_A_.block(0, robot_model_.nv, 6, 6).diagonal().setOnes();
+
   // subscribe to the target topic
   target_pose_twist_sub_ = get_node()->create_subscription<duatic_controller_msgs::msg::PoseTwistStamped>(
       params_.target_subscription_topic, rclcpp::QoS(1).reliable().durability_volatile(),
@@ -374,6 +385,18 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   trajectory_buffer_.initRT(
       geometry::ConstantTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));  // initialize with a constant trajectory
 
+  // initialize IK QP
+  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
+                                  pinocchio::ReferenceFrame::WORLD, qp_solver_A_.block(0, 0, 6, robot_model_.nv));
+  qp_solver_->init(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, Eigen::VectorXd::Zero(6), proxsuite::nullopt,
+                   proxsuite::nullopt, proxsuite::nullopt);
+  qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
+  if (!qp_solver_->results.x.isZero(1.0e-6)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "QP solver did not converge on zero-initialization. Abort Activation.");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
+  // Everything functional and ready for RT operation
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -409,8 +432,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   update_rt_state_buffer(time);
 
-  // trajectory_buffer_.readFromRT();
-  //  computePoseJointsMotion()
+  computeStateJointMotion(trajectory_buffer_.readFromRT()->evaluate_at(time), period);
 
   publish_topics(time);
   /*
@@ -476,6 +498,49 @@ void CartesianPoseController::read_rt_state_buffer()
                c_buff_MASK;  // always remove the update flag and store without
     assert((sub_idx_ < 3) && "Invariance Violation: sub_idx_ out of bounds. There is something serious going wrong "
                              "here!");
+  }
+}
+
+void CartesianPoseController::computeStateJointMotion(const geometry::State3Dd& target, const rclcpp::Duration& period)
+{
+  // Get 6D-diff between current pose and target pose
+  const geometry::Twist3Dd pose_diff =
+      target.pose - geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation());
+
+  // Fill QP Equality constraint with current EE-Jacobian
+  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
+                                  pinocchio::ReferenceFrame::WORLD, qp_solver_A_.block(0, 0, 6, robot_model_.nv));
+  // Update and solve QP
+  qp_solver_->update(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, pose_diff.vector, proxsuite::nullopt,
+                     proxsuite::nullopt, proxsuite::nullopt);
+  // hotstart from previous result, assume continuous inputs and outputs
+  qp_solver_->solve(qp_solver_->results.x, qp_solver_->results.y, qp_solver_->results.z);
+  if (qp_solver_->results.info.status != proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED) {
+    RCLCPP_WARN_STREAM(
+        get_node()->get_logger(),
+        "CartesianPoseController: QP solver did not converge, result status is "
+            << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(qp_solver_->results.info.status));
+  }
+  // integrate joint position
+  const auto control_q = state_q_ + qp_solver_->results.x.segment(0, robot_model_.nv);
+
+  if (!params_.dry_run) {
+    auto command_itr = command_interfaces_.begin();
+    for (std::size_t i = 0; i < params_.joints.size(); ++i) {
+      // set position
+      if (!command_itr->set_value(control_q[joint_q_idx_[i]])) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'",
+                    params_.joints[i].c_str());
+      }
+      command_itr++;
+      // set velocity
+      if (!command_itr->set_value(0.0)) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'",
+                    params_.joints[i].c_str());
+      }
+      command_itr++;
+    }
+    assert(command_itr == command_interfaces_.end());
   }
 }
 

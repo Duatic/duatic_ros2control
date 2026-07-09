@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
+#include <duatic_geometry/twist_3d.hpp>
 
 namespace duatic::geometry
 {
@@ -30,6 +32,13 @@ public:
   }
 
   static constexpr Self Neutral = Self(LinearType::Zero(), RotationType::Identity());
+
+  // Arithmetics
+  Twist3D<Scalar> operator-(const Self& other) const
+  {
+    const Eigen::AngleAxis<Scalar> orientation_axis(orientation * other.orientation.conjugate());
+    return Twist3D<Scalar>(position - other.position, orientation_axis.angle() * orientation_axis.axis());
+  }
 };
 
 // Explicit Types

@@ -39,8 +39,11 @@
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/parsers/srdf.hpp>
-#include "pinocchio/algorithm/joint-configuration.hpp"
-#include "pinocchio/algorithm/geometry.hpp"
+#include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/geometry.hpp>
+
+// Optimization
+#include <proxsuite/proxqp/dense/dense.hpp>
 
 // Other headers
 #include <controller_interface/controller_interface.hpp>
@@ -122,6 +125,14 @@ private:
       trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
                            // other buffer is not yet separated into a dedicated class
 
+  /* Quadratic programming solver
+   *   min x=[theta,error] 1/2 x^T H_diag x
+   *   subject to: J theta + error = pose_diff    <=>  [J 1] x = pose_diff
+   */
+  std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
+  Eigen::MatrixXd qp_solver_H_;
+  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_solver_A_;
+
   // state publication topics
   double topics_pub_period_;
   double topics_pub_next_time_;
@@ -137,6 +148,8 @@ private:
   void update_rt_state_buffer(const rclcpp::Time& now);
 
   void read_rt_state_buffer();
+
+  void computeStateJointMotion(const geometry::State3Dd& target, const rclcpp::Duration& period);
 
   void publish_topics(const rclcpp::Time& now);
 
