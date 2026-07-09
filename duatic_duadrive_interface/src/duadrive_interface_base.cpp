@@ -69,7 +69,9 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
 
     create_interface_description<double>(get_name(), "voltage_coil_A", 0.0),
     create_interface_description<double>(get_name(), "voltage_coil_B", 0.0),
-    create_interface_description<double>(get_name(), "voltage_coil_C", 0.0)
+    create_interface_description<double>(get_name(), "voltage_coil_C", 0.0),
+    create_interface_description<double>(get_name(), "internal_timestamp", 0.0),
+    create_interface_description<double>(get_name(), "internal_update_rate", 0.0)
   };
 
   state_interface_mapping_.insert({ state_interface_descriptions_[0].get_name(), &state_.joint_position });
@@ -99,7 +101,8 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
   state_interface_mapping_.insert({ state_interface_descriptions_[19].get_name(), &state_.voltage_coil_A });
   state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_B });
   state_interface_mapping_.insert({ state_interface_descriptions_[21].get_name(), &state_.voltage_coil_C });
-
+  state_interface_mapping_.insert({ state_interface_descriptions_[22].get_name(), &state_.internal_timestamp });
+  state_interface_mapping_.insert({ state_interface_descriptions_[23].get_name(), &state_.internal_update_rate });
   if (state_interface_mapping_.size() != state_interface_descriptions_.size()) {
     throw std::logic_error("Error in interface mapping sizes");
   }

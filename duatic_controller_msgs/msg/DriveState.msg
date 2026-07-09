@@ -22,9 +22,6 @@ float64 joint_effort_commanded
 float64 motor_current_commanded
 
 
-#TODO add commanded values?
-#TODO refactor into using JointState message?
-
 # Current system temperature [°C]
 float32 temperature_system
 # Current phase A temperature [°C]
@@ -49,3 +46,9 @@ float64 current_phase_c
 float64 voltage_phase_a
 float64 voltage_phase_b
 float64 voltage_phase_c
+
+# Provide information about the timestamp the actuator reported in this update time stamp
+# [ns]
+uint64 internal_time_stamp
+# [ns]
+uint64 internal_update_rate

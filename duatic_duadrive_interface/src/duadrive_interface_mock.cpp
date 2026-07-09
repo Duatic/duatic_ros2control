@@ -41,6 +41,8 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::init(const DuaDriveInt
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterfaceMock_" + params.joint_name);
   generate_state_interface_descriptions();
   generate_command_interface_desriptions();
+
+  last_update_time_ = std::chrono::system_clock::now();
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -71,6 +73,10 @@ hardware_interface::return_type DuaDriveInterfaceMock::read([[maybe_unused]] con
 hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] const rclcpp::Time& time,
                                                              const rclcpp::Duration& period)
 {
+  const auto now = std::chrono::system_clock::now();
+  state_.internal_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+  state_.internal_update_rate = std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_update_time_).count();
+  last_update_time_ = now;
   state_.joint_position_commanded = command_.joint_position;
   state_.joint_velocity_commanded = command_.joint_velocity;
   state_.joint_acceleration_commanded = command_.joint_acceleration;
