@@ -59,7 +59,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   const ecat_master::EthercatMasterConfiguration ecat_master_config = {
     .name = "DuaDriveHardwareInterface",
     .networkInterface = ethercat_bus,
-    .timeStep = 0.002,
+    .timeStep = 0.0019646365,
     .doBusDiagnosis = false,
     .logErrorCounters = false
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
@@ -245,6 +245,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   last_status_word_ = current_status_word;
 
   // Now update the state vector
+  state_.internal_update_rate = (state.getTimestamp() * 40.0 - state_.internal_timestamp);
+  state_.internal_timestamp = state.getTimestamp() * 40.0;
   state_.joint_position = state.getJointPosition();
   state_.joint_velocity = state.getJointVelocity();
   state_.joint_acceleration = state.getJointAcceleration();
