@@ -59,43 +59,10 @@
 #include <duatic_controller_msgs/msg/pose_twist_stamped.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
+#include <duatic_geometry/trajectory.hpp>
 
 namespace duatic::controllers
 {
-
-namespace trajectory
-{
-
-struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInformation
-{
-  rclcpp::Time curr_time;
-  pinocchio::SE3 curr_pose;
-  pinocchio::Motion curr_twist;
-
-  rclcpp::Time target_time;
-  Eigen::Vector<double, 3> target_pose_lin;
-  Eigen::Quaternion<double> target_pose_rot;
-  Eigen::Vector<double, 6> target_twist;
-};
-
-class ConstantTargetPoseTwist
-{
-public:
-  inline ConstantTargetPoseTwist() = default;
-  inline ConstantTargetPoseTwist(const TrajectoryUpdateInformation& update_info) : ConstantTargetPoseTwist()
-  {
-    update(update_info);
-  }
-
-  inline void update(const TrajectoryUpdateInformation& update_info);
-
-private:
-  Eigen::Vector<double, 3> target_pose_lin_;
-  Eigen::Quaternion<double> target_pose_rot_;
-  Eigen::Vector<double, 6> target_twist_;
-};
-
-}  // namespace trajectory
 
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
@@ -143,7 +110,7 @@ private:
   // lock-free one-way buffer in the following:
   // -> ensure cache-line aligned data for the exchange between rt-update and non-rt subscription
   alignas(std::hardware_destructive_interference_size)
-      std::array<trajectory::TrajectoryUpdateInformation, 3> trajectory_update_buffer_;
+      std::array<geometry::TrajectoryUpdateInformation, 3> trajectory_update_buffer_;
   alignas(std::hardware_destructive_interference_size) uint8_t rt_idx_;
   alignas(std::hardware_destructive_interference_size) std::atomic_uint8_t buff_idx_;
   alignas(std::hardware_destructive_interference_size) uint8_t sub_idx_;
@@ -151,7 +118,7 @@ private:
   static_assert(std::atomic_uint8_t::is_always_lock_free, "This hardware is not suitable for lock-free atomic uint8_t "
                                                           "operations. Cannot compile this code!");
 
-  realtime_tools::RealtimeBuffer<trajectory::ConstantTargetPoseTwist>
+  realtime_tools::RealtimeBuffer<geometry::ConstantTargetPoseTwist>
       trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
                            // other buffer is not yet separated into a dedicated class
 

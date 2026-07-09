@@ -10,6 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(duatic_controller_msgs REQUIRED)
+find_package(duatic_geometry REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -97,6 +98,7 @@ target_link_libraries(${PROJECT_NAME}
     gravity_compensation_controller_parameters
     freeze_controller_parameters
     brake_release_controller_parameters
+    cartesian_pose_controller_parameters
     pinocchio::pinocchio
 )
 
@@ -109,6 +111,7 @@ if(COMMAND ament_target_dependencies)
       rclcpp_lifecycle
       realtime_tools
       duatic_controller_msgs
+      duatic_geometry
       std_srvs
       Eigen3
       pinocchio
@@ -121,6 +124,7 @@ else()
       rclcpp_lifecycle::rclcpp_lifecycle
       realtime_tools::realtime_tools
       duatic_controller_msgs::duatic_controller_msgs
+      duatic_geometry::duatic_geometry
       std_srvs::std_srvs
       Eigen3::Eigen
       pinocchio::pinocchio
