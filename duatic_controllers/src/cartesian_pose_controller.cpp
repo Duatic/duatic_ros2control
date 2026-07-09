@@ -51,9 +51,11 @@ namespace duatic::controllers
 namespace trajectory
 {
 
-void ExponentialTargetPoseTwist::update(const TrajectoryUpdateInformation& update_info)
+void ConstantTargetPoseTwist::update(const TrajectoryUpdateInformation& update_info)
 {
-  std::cout << "\n\n### UPDATE TRAJECTORY INFO ###\n\n";
+  target_pose_lin_ = update_info.target_pose_lin;
+  target_pose_rot_ = update_info.target_pose_rot;
+  target_twist_ = update_info.target_twist;
 };
 
 }  // namespace trajectory
@@ -363,16 +365,26 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
                      state_interfaces_[i].get_name().c_str());
         return controller_interface::CallbackReturn::FAILURE;
       }
-      command_interfaces_[i].set_value(state.value());
+      if (!command_interfaces_[i].set_value(state.value())) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to initialize command '%s'",
+                    command_interfaces_[i].get_full_name().c_str());
+      };
     }
   }
 
   // initialize current state (data availability is guaranteed by the previous loop)
   update_state();
 
-  // initialize the default target frame to the current pose to avoid jumps on activation
-  target_pose_ = end_effector_pose();    // the current control frame pose
-  target_twist_ = end_effector_twist();  // the current control frame twist
+  // initialize current trajectory
+  trajectory_update_buffer_[sub_idx_].curr_time = get_node()->now();
+  trajectory_update_buffer_[sub_idx_].curr_pose = end_effector_pose();
+  trajectory_update_buffer_[sub_idx_].curr_twist = end_effector_twist();
+  trajectory_update_buffer_[sub_idx_].target_time = get_node()->now();
+  trajectory_update_buffer_[sub_idx_].target_pose_lin = end_effector_pose().translation();
+  trajectory_update_buffer_[sub_idx_].target_pose_rot = end_effector_pose().rotation();
+  trajectory_update_buffer_[sub_idx_].target_twist = end_effector_twist();
+  trajectory_buffer_.initRT(trajectory::ConstantTargetPoseTwist(
+      trajectory_update_buffer_[sub_idx_]));  // initialize with a constant trajectory
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -384,27 +396,22 @@ void CartesianPoseController::handle_target_pose_twist_sub(
   // store update information
   trajectory_update_buffer_[sub_idx_].target_time = msg->timestamp;
   // pose
-  auto& target_trans = trajectory_update_buffer_[sub_idx_].target_pose.translation();
-  target_trans(0) = msg->pose.position.x;
-  target_trans(1) = msg->pose.position.y;
-  target_trans(2) = msg->pose.position.z;
-  Eigen::Quaterniond orientation;
-  orientation.w() = msg->pose.orientation.w;
-  orientation.x() = msg->pose.orientation.x;
-  orientation.y() = msg->pose.orientation.y;
-  orientation.z() = msg->pose.orientation.z;
-  trajectory_update_buffer_[sub_idx_].target_pose.rotation() = orientation;
+  trajectory_update_buffer_[sub_idx_].target_pose_lin(0) = msg->pose.position.x;
+  trajectory_update_buffer_[sub_idx_].target_pose_lin(1) = msg->pose.position.y;
+  trajectory_update_buffer_[sub_idx_].target_pose_lin(2) = msg->pose.position.z;
+  trajectory_update_buffer_[sub_idx_].target_pose_rot.w() = msg->pose.orientation.w;
+  trajectory_update_buffer_[sub_idx_].target_pose_rot.x() = msg->pose.orientation.x;
+  trajectory_update_buffer_[sub_idx_].target_pose_rot.y() = msg->pose.orientation.y;
+  trajectory_update_buffer_[sub_idx_].target_pose_rot.z() = msg->pose.orientation.z;
   // twist
-  auto twist_lin = trajectory_update_buffer_[sub_idx_].target_twist.linear();
-  twist_lin(0) = msg->twist.linear.x;
-  twist_lin(1) = msg->twist.linear.y;
-  twist_lin(2) = msg->twist.linear.z;
-  auto twist_ang = trajectory_update_buffer_[sub_idx_].target_twist.angular();
-  twist_ang(0) = msg->twist.angular.x;
-  twist_ang(1) = msg->twist.angular.y;
-  twist_ang(2) = msg->twist.angular.z;
+  trajectory_update_buffer_[sub_idx_].target_twist(0) = msg->twist.linear.x;
+  trajectory_update_buffer_[sub_idx_].target_twist(1) = msg->twist.linear.y;
+  trajectory_update_buffer_[sub_idx_].target_twist(2) = msg->twist.linear.z;
+  trajectory_update_buffer_[sub_idx_].target_twist(3) = msg->twist.angular.x;
+  trajectory_update_buffer_[sub_idx_].target_twist(4) = msg->twist.angular.y;
+  trajectory_update_buffer_[sub_idx_].target_twist(5) = msg->twist.angular.z;
   // Calculate new trajectory outside the realtime-loop
-  trajectory_buffer_.writeFromNonRT(trajectory::ExponentialTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));
+  trajectory_buffer_.writeFromNonRT(trajectory::ConstantTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
@@ -416,12 +423,6 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   publish_topics(time);
   /*
-  last_system_state_ = build_current_state();
-  if (!last_system_state_) {
-    RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Could not obtain the full current system state during "
-                                                  "operation...wtf");
-    return controller_interface::return_type::ERROR;
-  }
 
   if (staged_target_) {
     // Perform linear interpolation of the configured interpolation time

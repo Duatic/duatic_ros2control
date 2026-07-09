@@ -78,40 +78,21 @@ struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInfo
   Eigen::Vector<double, 6> target_twist;
 };
 
-class ExponentialTargetPoseTwist
+class ConstantTargetPoseTwist
 {
 public:
-  static constexpr double c_default_target_precision = 0.99;
-
-public:
-  inline ExponentialTargetPoseTwist() = default;
-  inline ExponentialTargetPoseTwist(const TrajectoryUpdateInformation& update_info,
-                                    const double max_lin_velocity = -1.0, const double max_rot_velocity = -1.0)
-    : ExponentialTargetPoseTwist()
+  inline ConstantTargetPoseTwist() = default;
+  inline ConstantTargetPoseTwist(const TrajectoryUpdateInformation& update_info) : ConstantTargetPoseTwist()
   {
-    update(update_info, max_lin_velocity, max_rot_velocity);
+    update(update_info);
   }
 
-  // negative max_lin_velocity disables max_lin_velocity, negative max_rot_velocity synchronizes rot to lin velocity
-  void update(const TrajectoryUpdateInformation& update_info, const double max_lin_velocity = -1.0,
-              const double max_rot_velocity = -1.0);
+  inline void update(const TrajectoryUpdateInformation& update_info);
 
 private:
-  /* Implementing the following exponential trajectory:
-   *
-   * f(t)  = (s - d) exp(w t) + d
-   * f'(t) = (s - d) exp(w t) w
-   *
-   * t > 0 : time in trajectory
-   * s : source
-   * d : destination
-   * w = -v/|s-d| : approximation rate
-   * v > 0 : abs velocity at t=0, i.e., max abs velocity
-   */
-
-  Eigen::Vector<double, 3> target_pose_lin;   // d|lin
-  Eigen::Quaternion<double> target_pose_rot;  // d|rot
-  double
+  Eigen::Vector<double, 3> target_pose_lin_;
+  Eigen::Quaternion<double> target_pose_rot_;
+  Eigen::Vector<double, 6> target_twist_;
 };
 
 }  // namespace trajectory
@@ -155,9 +136,6 @@ private:
   Eigen::VectorXd state_v_;
   pinocchio::Motion state_end_effector_twist_;
 
-  pinocchio::SE3 target_pose_;      // the eventual target pose to reach
-  pinocchio::Motion target_twist_;  // the eventual target twist to reach
-
   // input topic subscriptions
   std::shared_ptr<rclcpp::Subscription<duatic_controller_msgs::msg::PoseTwistStamped>> target_pose_twist_sub_;
 
@@ -173,7 +151,7 @@ private:
   static_assert(std::atomic_uint8_t::is_always_lock_free, "This hardware is not suitable for lock-free atomic uint8_t "
                                                           "operations. Cannot compile this code!");
 
-  realtime_tools::RealtimeBuffer<trajectory::ExponentialTargetPoseTwist>
+  realtime_tools::RealtimeBuffer<trajectory::ConstantTargetPoseTwist>
       trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
                            // other buffer is not yet separated into a dedicated class
 
