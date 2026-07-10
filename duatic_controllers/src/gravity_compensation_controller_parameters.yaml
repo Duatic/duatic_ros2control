@@ -25,7 +25,7 @@ gravity_compensation_controller:
     type: bool
     default_value: false
     description: "In addition to the gravity compensation also account for coriolis effects"
-  
+
   enable_introspection:
     type: bool
     default_value: false

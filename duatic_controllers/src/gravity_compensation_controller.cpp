@@ -155,8 +155,8 @@ GravityCompensationController::on_cleanup([[maybe_unused]] const rclcpp_lifecycl
   if (params_.enable_introspection) {
     RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
     for (std::size_t i = 0; i < params_.joints.size(); i++) {
-      using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
-                                           // namespace natively as done in the REGISTER function
+      using hardware_interface::DEFAULT_REGISTRY_KEY;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to
+                                                       // include this namespace natively as done in REGISTER
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("tau_gravity_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("tau_coriolis_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("joint_effort_" + std::to_string(i));
