@@ -149,12 +149,19 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
         }
       }
       Eigen::VectorXd q0 = pinocchio::neutral(full_model);
-      pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
+      pinocchio::Model reduced_model;  // rebuilding into the old model causes data-model inconsistency
+      pinocchio::buildReducedModel(full_model, indices, q0, reduced_model);
+      pinocchio_model_ = std::move(reduced_model);
+      pinocchio_data_ = std::move(pinocchio_model_.createData());
+      if (!pinocchio_model_.check(pinocchio_data_)) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'pinocchio_data_' is not consistent with "
+                                               "'pinocchio_model_'");
+        return controller_interface::CallbackReturn::ERROR;
+      }
       RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
       for (pinocchio::JointIndex j = 0; j < static_cast<pinocchio::JointIndex>(pinocchio_model_.njoints); ++j) {
         RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
       }
-      pinocchio_data_ = pinocchio::Data(pinocchio_model_);
       RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
                   pinocchio_model_.joints.size() - 1);
     }
