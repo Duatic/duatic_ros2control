@@ -60,6 +60,7 @@ public:
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
+  controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
 
@@ -85,8 +86,8 @@ private:
   rclcpp::Time activation_time_;
   bool activation_time_set_ = false;
 
-  std::vector<pinocchio::JointIndex> joint_q_idx_;
-  std::vector<pinocchio::JointIndex> joint_v_idx_;
+  std::vector<Eigen::Index> joint_q_idx_;
+  std::vector<Eigen::Index> joint_v_idx_;
 
   // State buffer
   Eigen::VectorXd q_;
@@ -94,7 +95,8 @@ private:
   // target buffer
   Eigen::VectorXd tau_gravity_;
   Eigen::VectorXd tau_coriolis_;
+  std::vector<double> joint_effort_;
 
-  StatusMsg state_msg;
+  StatusMsg state_msg_;
 };
 }  // namespace duatic::controllers

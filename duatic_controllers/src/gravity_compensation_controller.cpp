@@ -27,6 +27,7 @@
 #include <duatic_controllers/gravity_compensation_controller.hpp>
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
+#include <hardware_interface/introspection.hpp>
 #include <controller_interface/helpers.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <duatic_controllers/ros2_control_compat.hpp>
@@ -42,11 +43,14 @@ controller_interface::InterfaceConfiguration GravityCompensationController::comm
 {
   // Claim the necessary state interfaces
   controller_interface::InterfaceConfiguration config;
-  config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-
-  const auto joints = params_.joints;
-  for (auto& joint : joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_EFFORT);
+  if (params_.dry_run) {
+    config.type = controller_interface::interface_configuration_type::NONE;
+  } else {
+    config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+    const auto joints = params_.joints;
+    for (auto& joint : joints) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_EFFORT);
+    }
   }
 
   return config;
@@ -111,6 +115,8 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
   v_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
   tau_gravity_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
   tau_coriolis_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  joint_effort_.clear();
+  joint_effort_.resize(params_.joints.size(), 0.0);
 
   // Build pinocchio-joint index caches
   joint_q_idx_.resize(params_.joints.size());
@@ -130,6 +136,32 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
   status_pub_ = get_node()->create_publisher<StatusMsg>("~/state", 10);  // TODO(firesurfer) what is the right qos ?
   status_pub_rt_ = std::make_unique<StatusMsgPublisher>(status_pub_);
 
+  // ros2control introspection
+  if (params_.enable_introspection) {
+    RCLCPP_INFO(get_node()->get_logger(), "Configuring ROS2control Introspection for internal state monitoring.");
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      REGISTER_ROS2_CONTROL_INTROSPECTION("tau_gravity_" + std::to_string(i), &tau_gravity_[joint_v_idx_[i]]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("tau_coriolis_" + std::to_string(i), &tau_coriolis_[joint_v_idx_[i]]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("joint_effort_" + std::to_string(i), &joint_effort_[i]);
+    }
+  }
+
+  return controller_interface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::CallbackReturn
+GravityCompensationController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
+{
+  if (params_.enable_introspection) {
+    RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
+                                           // namespace natively as done in the REGISTER function
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("tau_gravity_" + std::to_string(i));
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("tau_coriolis_" + std::to_string(i));
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("joint_effort_" + std::to_string(i));
+    }
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -143,11 +175,11 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
   initial_joint_positions_.clear();
 
   // Do allocation one but clear it in the activate function to to be sure
-  state_msg.joints.clear();
+  state_msg_.joints.clear();
   for (std::size_t i = 0; i < params_.joints.size(); i++) {
     const std::string& joint_name = params_.joints[i];
-    state_msg.joints.push_back(joint_name);
-    state_msg.commanded_torque.push_back(0.0);
+    state_msg_.joints.push_back(joint_name);
+    state_msg_.commanded_torque.push_back(0.0);
   }
 
   // get the actual interface in an ordered way (same order as the joints parameter)
@@ -162,10 +194,12 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  if (!controller_interface::get_ordered_interfaces(
-          command_interfaces_, params_.joints, hardware_interface::HW_IF_EFFORT, joint_effort_command_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - effort");
-    return controller_interface::CallbackReturn::FAILURE;
+  if (!params_.dry_run) {
+    if (!controller_interface::get_ordered_interfaces(
+            command_interfaces_, params_.joints, hardware_interface::HW_IF_EFFORT, joint_effort_command_interfaces_)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - effort");
+      return controller_interface::CallbackReturn::FAILURE;
+    }
   }
 
   // Obtain the joint positions during startup which we need for the startup jump check
@@ -187,10 +221,8 @@ controller_interface::CallbackReturn
 GravityCompensationController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
   activation_time_set_ = false;
-  const std::size_t joint_count = joint_position_state_interfaces_.size();
-  // Reset the commanded joint efforts to 0
-  for (std::size_t i = 0; i < joint_count; i++) {
-    (void)joint_effort_command_interfaces_.at(i).get().set_value(0.0);
+  for (auto effort_if : joint_effort_command_interfaces_) {
+    (void)effort_if.get().set_value(0.0);
   }
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -249,21 +281,28 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
     tau_coriolis_ = pinocchio::computeCoriolisMatrix(pinocchio_model_, pinocchio_data_, q_, v_) * v_;
   }
 
-  state_msg.timestamp = time;
-  // Write only the efforts for this arm's joints
+  // combine into joint_effort command
   for (std::size_t i = 0; i < joint_count; i++) {
-    const double effort = tau_gravity_[joint_v_idx_[i]] + tau_coriolis_[joint_v_idx_[i]];
-    state_msg.commanded_torque[i] = effort;
-    if (!joint_effort_command_interfaces_.at(i).get().set_value(effort)) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);
-      return controller_interface::return_type::ERROR;
+    joint_effort_[i] = tau_gravity_[joint_v_idx_[i]] + tau_coriolis_[joint_v_idx_[i]];
+  }
+
+  // command to hw
+  if (!params_.dry_run) {
+    for (std::size_t i = 0; i < joint_count; i++) {
+      if (!joint_effort_command_interfaces_.at(i).get().set_value(joint_effort_[i])) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);
+        return controller_interface::return_type::ERROR;
+      }
     }
   }
 
-  // and we try to have our realtime publisher publish the message
-  // if this doesn't succeed - well it will probably next time
+  // publish state topic
   if (params_.enable_state_topic) {
-    duatic::controllers::compat::publish_rt(status_pub_rt_, state_msg);
+    state_msg_.timestamp = time;
+    for (std::size_t i = 0; i < joint_count; i++) {
+      state_msg_.commanded_torque[i] = joint_effort_[i];
+    }
+    duatic::controllers::compat::publish_rt(status_pub_rt_, state_msg_);
   }
 
   return controller_interface::return_type::OK;
