@@ -117,8 +117,16 @@ ForceTorqueBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  pinocchio::urdf::buildModelFromXML(get_robot_description(), pinocchio_model_);
-  pinocchio_data_ = pinocchio::Data(pinocchio_model_);
+  RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
+  pinocchio::Model new_model;  // rebuilding into the old model causes data-model inconsistency
+  pinocchio::urdf::buildModelFromXML(get_robot_description(), new_model);
+  pinocchio_model_ = std::move(new_model);
+  pinocchio_data_ = std::move(pinocchio_model_.createData());
+  if (!pinocchio_model_.check(pinocchio_data_)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'pinocchio_data_' is not consistent with "
+                                           "'pinocchio_model_'");
+    return controller_interface::CallbackReturn::ERROR;
+  }
 
   for (const auto& joint_name : params_.joints) {
     if (!pinocchio_model_.existJointName(joint_name)) {
