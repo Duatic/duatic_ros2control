@@ -98,7 +98,13 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  pinocchio::urdf::buildModelFromXML(get_robot_description(), pinocchio_model_);
+  try {
+    pinocchio::urdf::buildModelFromXML(get_robot_description(), pinocchio_model_);
+  } catch (const std::invalid_argument& e) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to build Pinocchio model from robot_description: %s", e.what());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
   pinocchio_data_ = pinocchio::Data(pinocchio_model_);
 
   for (const auto& joint_name : params_.joints) {
@@ -134,6 +140,7 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
   q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
   v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
   a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  tau = Eigen::VectorXd::Zero(pinocchio_model_.nv);
 
   // Do allocation one but clear it in the activate function to to be sure
   state_msg.joints.clear();
@@ -214,10 +221,6 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   for (std::size_t i = 0; i < joint_count; i++) {
     const std::string& joint_name = params_.joints[i];
     const auto idx = joint_indices_[i];
-    if (idx == 0) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-      return controller_interface::return_type::ERROR;
-    }
     // Pinocchio joint index starts at 1, q/v index is idx-1
     try {
       q[pinocchio_model_.joints[idx].idx_q()] =
@@ -257,7 +260,12 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
     }
   }
 
-  const auto& tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
+  // Depending on user selection we calculate the full dynamics or just the gravity
+  if (params_.enable_dynamics_compensation) {
+    tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
+  } else {
+    tau = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q);
+  }
 
   state_msg.timestamp = time;
   // Write only the efforts for this arm's joints

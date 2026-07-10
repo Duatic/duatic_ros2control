@@ -96,6 +96,8 @@ private:
   Eigen::VectorXd q;
   Eigen::VectorXd v;
   Eigen::VectorXd a;
+  // target buffer
+  Eigen::VectorXd tau;
 
   StatusMsg state_msg;
 };
