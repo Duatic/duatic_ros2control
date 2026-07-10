@@ -21,7 +21,7 @@ gravity_compensation_controller:
     type: double
     default_value: 0.5
     description: "The maximum allowed jump in the first half second after startup"
-  enable_dynamics_compensation:
+  enable_coriolis_compensation:
     type: bool
     default_value: false
-    description: "In addition to the gravity compensation also account for dynamic effects"
+    description: "In addition to the gravity compensation also account for coriolis effects"

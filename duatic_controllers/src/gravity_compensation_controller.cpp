@@ -62,7 +62,6 @@ controller_interface::InterfaceConfiguration GravityCompensationController::stat
   for (auto& joint : joints) {
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
-    config.names.emplace_back(joint + "/" + "acceleration_commanded");
   }
 
   return config;
@@ -86,10 +85,8 @@ controller_interface::CallbackReturn GravityCompensationController::on_init()
 controller_interface::CallbackReturn
 GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  // update the dynamic map parameters
+  // update parameters
   param_listener_->refresh_dynamic_parameters();
-
-  // get parameters from the listener in case they were updated
   params_ = param_listener_->get_params();
 
   // check if joints are empty
@@ -98,25 +95,35 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  try {
-    pinocchio::urdf::buildModelFromXML(get_robot_description(), pinocchio_model_);
-  } catch (const std::invalid_argument& e) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Failed to build Pinocchio model from robot_description: %s", e.what());
+  RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
+  pinocchio::Model new_model;  // rebuilding into the old model causes data-model inconsistency
+  pinocchio::urdf::buildModelFromXML(get_robot_description(), new_model);
+  pinocchio_model_ = std::move(new_model);
+  pinocchio_data_ = std::move(pinocchio_model_.createData());
+  if (!pinocchio_model_.check(pinocchio_data_)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'pinocchio_data_' is not consistent with "
+                                           "'pinocchio_model_'");
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  pinocchio_data_ = pinocchio::Data(pinocchio_model_);
+  // (Re)Build full-size vectors for all robot joints (Pinocchio expects this)
+  q_ = Eigen::VectorXd::Zero(pinocchio_model_.nq);
+  v_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  tau_gravity_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  tau_coriolis_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
 
-  for (const auto& joint_name : params_.joints) {
-    if (!pinocchio_model_.existJointName(joint_name)) {
+  // Build pinocchio-joint index caches
+  joint_q_idx_.resize(params_.joints.size());
+  joint_v_idx_.resize(params_.joints.size());
+  for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    const std::string& joint_name = params_.joints[i];
+    if (!pinocchio_model_.existJointName(joint_name)) {  // evaluate model
       RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
       return controller_interface::CallbackReturn::ERROR;
     }
-  }
-  // Build joint index cache
-  joint_indices_.clear();
-  for (const auto& joint : params_.joints) {
-    joint_indices_.push_back(pinocchio_model_.getJointId(joint));
+    auto& joint = pinocchio_model_.joints[pinocchio_model_.getJointId(joint_name)];
+    joint_q_idx_[i] = joint.idx_q();
+    joint_v_idx_[i] = joint.idx_v();
   }
 
   // The status publisher
@@ -131,16 +138,9 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
 {
   // clear out vectors in case of restart
   joint_effort_command_interfaces_.clear();
-  joint_acceleration_state_interfaces_.clear();
   joint_position_state_interfaces_.clear();
   joint_velocity_state_interfaces_.clear();
   initial_joint_positions_.clear();
-
-  // (Re)Build full-size vectors for all robot joints (Pinocchio expects this)
-  q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-  v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  tau = Eigen::VectorXd::Zero(pinocchio_model_.nv);
 
   // Do allocation one but clear it in the activate function to to be sure
   state_msg.joints.clear();
@@ -161,11 +161,6 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - velocity");
     return controller_interface::CallbackReturn::FAILURE;
   }
-  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "acceleration_commanded",
-                                                    joint_acceleration_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - acceleration");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
 
   if (!controller_interface::get_ordered_interfaces(
           command_interfaces_, params_.joints, hardware_interface::HW_IF_EFFORT, joint_effort_command_interfaces_)) {
@@ -184,7 +179,6 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
       return controller_interface::CallbackReturn::ERROR;
     }
   }
-  active_ = true;
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -192,7 +186,6 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
 controller_interface::CallbackReturn
 GravityCompensationController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  active_ = false;
   activation_time_set_ = false;
   const std::size_t joint_count = joint_position_state_interfaces_.size();
   // Reset the commanded joint efforts to 0
@@ -205,10 +198,6 @@ GravityCompensationController::on_deactivate([[maybe_unused]] const rclcpp_lifec
 controller_interface::return_type GravityCompensationController::update([[maybe_unused]] const rclcpp::Time& time,
                                                                         [[maybe_unused]] const rclcpp::Duration& period)
 {
-  if (get_lifecycle_state().id() == lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE || !active_) {
-    return controller_interface::return_type::OK;
-  }
-
   // Set activation_time_ only once, using the same time source as 'time'
   if (!activation_time_set_) {
     activation_time_ = time;
@@ -216,26 +205,18 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   }
 
   const std::size_t joint_count = joint_position_state_interfaces_.size();
-
+  assert(joint_count == joint_velocity_state_interfaces_.size());
   // Map: Pinocchio joint name -> index in q/v
-  for (std::size_t i = 0; i < joint_count; i++) {
-    const std::string& joint_name = params_.joints[i];
-    const auto idx = joint_indices_[i];
-    // Pinocchio joint index starts at 1, q/v index is idx-1
-    try {
-      q[pinocchio_model_.joints[idx].idx_q()] =
-          duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-
-      v[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-
-      a[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-    } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
-      return controller_interface::return_type::ERROR;
+  try {
+    for (std::size_t i = 0; i < joint_count; i++) {
+      q_[joint_q_idx_[i]] = duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
+      v_[joint_v_idx_[i]] = duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
     }
+  } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to read joint state values: %s", e.what());
+    return controller_interface::return_type::ERROR;
   }
+
   // Perform startup jump check if enabled
   // A jump might happen if the configured urdf does not match the hardware
   // So for the first 0.5s after activation we check if there was a jump of more than (default 0.5) x rad
@@ -260,27 +241,25 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
     }
   }
 
-  // Depending on user selection we calculate the full dynamics or just the gravity
-  if (params_.enable_dynamics_compensation) {
-    tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
-  } else {
-    tau = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q);
+  // Gravity Compensation
+  tau_gravity_ = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q_);
+
+  // Coriolis Compensation
+  if (params_.enable_coriolis_compensation) {  // else: stays zero as initialized in on_configure
+    tau_coriolis_ = pinocchio::computeCoriolisMatrix(pinocchio_model_, pinocchio_data_, q_, v_) * v_;
   }
 
   state_msg.timestamp = time;
   // Write only the efforts for this arm's joints
   for (std::size_t i = 0; i < joint_count; i++) {
-    auto idx = joint_indices_[i];
-    double effort = tau[pinocchio_model_.joints[idx].idx_v()];
-    bool success = joint_effort_command_interfaces_.at(i).get().set_value(effort);
-
+    const double effort = tau_gravity_[joint_v_idx_[i]] + tau_coriolis_[joint_v_idx_[i]];
     state_msg.commanded_torque[i] = effort;
-
-    if (!success) {
+    if (!joint_effort_command_interfaces_.at(i).get().set_value(effort)) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);
       return controller_interface::return_type::ERROR;
     }
   }
+
   // and we try to have our realtime publisher publish the message
   // if this doesn't succeed - well it will probably next time
   if (params_.enable_state_topic) {
@@ -290,23 +269,6 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   return controller_interface::return_type::OK;
 }
 
-controller_interface::CallbackReturn
-GravityCompensationController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-GravityCompensationController::on_error([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
-
-controller_interface::CallbackReturn
-GravityCompensationController::on_shutdown([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
-{
-  return controller_interface::CallbackReturn::SUCCESS;
-}
 }  // namespace duatic::controllers
 
 #include "pluginlib/class_list_macros.hpp"
