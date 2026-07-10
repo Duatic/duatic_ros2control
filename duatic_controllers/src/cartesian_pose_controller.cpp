@@ -108,7 +108,17 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   // create the pinocchio model from the urdf
   RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
-  pinocchio::urdf::buildModelFromXML(get_robot_description(), robot_model_);
+  pinocchio::Model new_model;  // rebuilding into the old model causes data-model inconsistency
+  pinocchio::urdf::buildModelFromXML(get_robot_description(), new_model);
+  robot_model_ = std::move(new_model);
+  state_data_ = std::move(robot_model_.createData());
+  if (!robot_model_.check(state_data_)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'state_data_' is not consistent with "
+                                           "'robot_model_'");
+    return controller_interface::CallbackReturn::ERROR;
+  }
+  state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
+  state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // evaluate joits given
   if (params_.joints.empty()) {
@@ -146,19 +156,23 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     end_effector_frame_idx_ = robot_model_.getFrameId(params_.end_effector_frame);
   }
 
-  // size internal state variables
-  state_data_ = pinocchio::Data(robot_model_);
-  state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
-  state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
-
-  // initialize QP
+  // setup and initialize QP
   const int qp_size = robot_model_.nv + 6;
   qp_solver_ = std::make_unique<proxsuite::proxqp::dense::QP<double>>(
       qp_size, 6, 0,
       proxsuite::proxqp::HessianType::Diagonal);  // joints+error, eq-constraints, in-constraints
-  qp_solver_H_ = Eigen::MatrixXd::Identity(qp_size, qp_size);
-  qp_solver_H_.diagonal().segment(robot_model_.nv, 6).setConstant(100.0);  // Stress to avoid errors
-  // TODO(patrick): make this a parameter
+  // settings
+  qp_solver_->settings.eps_abs = params_.ik_precision;
+  qp_solver_->settings.eps_rel = 0.1 * params_.ik_precision;
+  qp_solver_->settings.max_iter = params_.ik_max_iterations;
+  qp_solver_->settings.max_iter_in = (params_.ik_max_iterations >> 3);  // div 8
+  qp_solver_->settings.verbose = params_.enable_debug_log;
+  qp_solver_->settings.initial_guess = proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;
+  // variables
+  qp_solver_H_ = Eigen::MatrixXd::Identity(qp_size, qp_size);  // joint motion minimization
+  qp_solver_H_.diagonal().segment(robot_model_.nv, 6).setConstant(params_.ik_error_avoidance_weight);
+  qp_solver_->settings.default_H_eigenvalue_estimate = 1.0;
+  assert(params_.ik_error_avoidance_weight >= 1.0);  // given by parameter bounds
   qp_solver_A_ = Eigen::MatrixXd::Zero(6, qp_size);
   qp_solver_A_.block(0, robot_model_.nv, 6, 6).diagonal().setOnes();
 
@@ -386,8 +400,10 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
       geometry::ConstantTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));  // initialize with a constant trajectory
 
   // initialize IK QP
+  auto end_effector_jacobian = qp_solver_A_.block(0, 0, 6, robot_model_.nv);
+  end_effector_jacobian.setZero();
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
-                                  pinocchio::ReferenceFrame::WORLD, qp_solver_A_.block(0, 0, 6, robot_model_.nv));
+                                  pinocchio::ReferenceFrame::WORLD, end_effector_jacobian);
   qp_solver_->init(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, Eigen::VectorXd::Zero(6), proxsuite::nullopt,
                    proxsuite::nullopt, proxsuite::nullopt);
   qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
@@ -395,6 +411,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     RCLCPP_ERROR(get_node()->get_logger(), "QP solver did not converge on zero-initialization. Abort Activation.");
     return controller_interface::CallbackReturn::FAILURE;
   }
+  publish_statistics();
 
   // Everything functional and ready for RT operation
   return controller_interface::CallbackReturn::SUCCESS;
@@ -433,6 +450,8 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   update_rt_state_buffer(time);
 
   computeStateJointMotion(trajectory_buffer_.readFromRT()->evaluate_at(time), period);
+
+  publish_statistics();
 
   publish_topics(time);
   /*
@@ -513,10 +532,9 @@ void CartesianPoseController::computeStateJointMotion(const geometry::State3Dd& 
   // Update and solve QP
   qp_solver_->update(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, pose_diff.vector, proxsuite::nullopt,
                      proxsuite::nullopt, proxsuite::nullopt);
-  // hotstart from previous result, assume continuous inputs and outputs
-  qp_solver_->solve(qp_solver_->results.x, qp_solver_->results.y, qp_solver_->results.z);
+  qp_solver_->solve();  // warm start with previous result by settings
   if (qp_solver_->results.info.status != proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED) {
-    RCLCPP_WARN_STREAM(
+    RCLCPP_ERROR_STREAM(
         get_node()->get_logger(),
         "CartesianPoseController: QP solver did not converge, result status is "
             << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(qp_solver_->results.info.status));
@@ -541,6 +559,28 @@ void CartesianPoseController::computeStateJointMotion(const geometry::State3Dd& 
       command_itr++;
     }
     assert(command_itr == command_interfaces_.end());
+  }
+}
+
+void CartesianPoseController::publish_statistics()
+{
+  // debug log
+  if (params_.enable_debug_log) {
+    RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                       "IK solver statistics:"
+                           << std::endl
+                           << " - status: "
+                           << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(
+                                  qp_solver_->results.info.status)
+                           << (qp_solver_->results.info.status == proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED ?
+                                   " (SOLVED)" :
+                                   " (FAILED)")
+                           << std::endl
+                           << " - iterations - total: " << qp_solver_->results.info.iter << std::endl
+                           << " - iterations - outer: " << qp_solver_->results.info.iter_ext << std::endl
+                           << " - time - setup: " << qp_solver_->results.info.setup_time << std::endl
+                           << " - time - solve: " << qp_solver_->results.info.solve_time << std::endl
+                           << " - time - run: " << qp_solver_->results.info.run_time << std::endl);
   }
 }
 

@@ -151,6 +151,8 @@ private:
 
   void computeStateJointMotion(const geometry::State3Dd& target, const rclcpp::Duration& period);
 
+  void publish_statistics();
+
   void publish_topics(const rclcpp::Time& now);
 
   inline const pinocchio::SE3& end_effector_pose()
