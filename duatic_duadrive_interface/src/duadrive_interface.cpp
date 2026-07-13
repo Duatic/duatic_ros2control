@@ -209,6 +209,12 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
+  // We want to enforce disable mode at startup and workaround the SDK limitation of implicitly starting in freeze mode
+  rsl_drive_sdk::Command disable_cmd;
+  disable_cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Disable);
+  disable_cmd.setJointPosition(state_.joint_position);
+  drive_->setCommand(disable_cmd);
+
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
 
@@ -220,15 +226,20 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 {
-  // Put drive into freeze mode at shutdown
   if (drive_) {
-    drive_->setBrakeTargetState(rsl_drive_sdk::BrakeState::Engaged);
-
-    drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 3.0, 0.01);
-
-    rsl_drive_sdk::Command cmd;
-    cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Freeze);
-    drive_->setCommand(cmd);
+    if (params_.has_brake) {
+      // in case we have a brake -> disable drive and engage the brake
+      rsl_drive_sdk::Command cmd;
+      cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Disable);
+      drive_->setCommand(cmd);
+      drive_->setBrakeTargetState(rsl_drive_sdk::BrakeState::Engaged);
+    } else {
+      // in case we have no brake -> enable freeze mode (NOTE: the drives will go into standby state during shutdown and
+      // will nevertheless result into a falling arm)
+      rsl_drive_sdk::Command cmd;
+      cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Freeze);
+      drive_->setCommand(cmd);
+    }
   }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
