@@ -312,7 +312,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     cmd.setPidGains(gains);
 
     // In case the brake is active we do not allow the freeze mode to be enabled as it might vibrate on the brake
-    if (current_brake_state_ == rsl_drive_sdk::BrakeState::Engaged &&
+    if (params_.has_brake && current_brake_state_ == rsl_drive_sdk::BrakeState::Engaged &&
         (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze || command_.joint_freeze_mode == 1.0)) {
       cmd.setModeEnum(rsl_drive_sdk::mode::ModeEnum::Disable);
     } else {
@@ -327,14 +327,16 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
 
+    // DISABLED at the moment as we run into issues with sending these values via ethercat
+
     // Given the current scaling values calculate the maximum torque/maximum velocity values (NOTE until the point where
     // we set it we are in joint coordinates)
-    const double new_max_torque = std::clamp(command_.scaling_factor_max_torque, 0.0, 1.0) * configured_max_torque_;
-    const double new_max_velocity =
-        std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_;
+    // const double new_max_torque = std::clamp(command_.scaling_factor_max_torque, 0.0, 1.0) * configured_max_torque_;
+    // const double new_max_velocity =
+    //    std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_;
 
     // In case the changed enough -> perform an sdo write of the new maximum values
-    // DISABLED at the moment as we run into issues with sending these values via ethercat
+
     /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
       current_max_torque_ = new_max_torque;
       RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
@@ -348,7 +350,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       drive_->setMaxMotorVelocity(current_max_velocity_ * configured_gear_ratio_);
     }*/
 
-    if (command_.target_brake_state != current_target_brake_state) {
+    if (params_.has_brake && command_.target_brake_state != current_target_brake_state) {
       current_target_brake_state = command_.target_brake_state;
       // Safety check that only valid values are commanded
       if (current_target_brake_state >= 0 && current_target_brake_state < 3) {
