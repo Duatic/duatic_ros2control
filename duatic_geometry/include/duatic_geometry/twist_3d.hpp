@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility>
+#include <ostream>
 
 #include <Eigen/Dense>
 
@@ -16,7 +17,9 @@ public:
 
   using VectorType = Eigen::Vector<Scalar, 6>;
   using TranslationType = decltype(std::declval<VectorType>().segment(0, 3));
+  using TranslationTypeConst = decltype(std::declval<const VectorType>().segment(0, 3));
   using RotationType = decltype(std::declval<VectorType>().segment(3, 3));
+  using RotationTypeConst = decltype(std::declval<const VectorType>().segment(3, 3));
 
   VectorType vector;
 
@@ -43,8 +46,16 @@ public:
   {
     return vector.segment(0, 3);
   }
+  inline TranslationTypeConst Translation() const
+  {
+    return vector.segment(0, 3);
+  }
 
   inline RotationType Rotation()
+  {
+    return vector.segment(3, 3);
+  }
+  inline const RotationTypeConst Rotation() const
   {
     return vector.segment(3, 3);
   }
@@ -54,3 +65,12 @@ public:
 using Twist3Dd = Twist3D<double>;
 
 }  // namespace duatic::geometry
+
+// streaming
+template <typename ScalarT>
+inline std::ostream& operator<<(std::ostream& os, const duatic::geometry::Twist3D<ScalarT>& twist)
+{
+  os << "Twist3D(translation: " << twist.Translation().transpose() << ", rotation: " << twist.Rotation().transpose()
+     << ")";
+  return os;
+}

@@ -36,3 +36,11 @@ public:
 using State3Dd = State3D<double>;
 
 }  // namespace duatic::geometry
+
+// streaming
+template <typename ScalarT>
+inline std::ostream& operator<<(std::ostream& os, const duatic::geometry::State3D<ScalarT>& state)
+{
+  os << "State:" << std::endl << " - Pose: " << state.pose << std::endl << " - Twist: " << state.twist << std::endl;
+  return os;
+}

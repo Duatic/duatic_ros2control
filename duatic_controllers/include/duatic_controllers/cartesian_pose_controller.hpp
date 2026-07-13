@@ -62,6 +62,8 @@
 #include <duatic_controller_msgs/msg/pose_twist_stamped.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
+#include <duatic_geometry/twist_3d.hpp>
+#include <duatic_geometry/state_3d.hpp>
 #include <duatic_geometry/trajectory.hpp>
 
 namespace duatic::controllers
@@ -106,6 +108,9 @@ private:
   Eigen::VectorXd state_v_;
   pinocchio::Motion state_end_effector_twist_;
 
+  Eigen::VectorXd control_q_;
+  Eigen::VectorXd control_v_;
+
   // input topic subscriptions
   std::shared_ptr<rclcpp::Subscription<duatic_controller_msgs::msg::PoseTwistStamped>> target_pose_twist_sub_;
 
@@ -124,6 +129,9 @@ private:
   realtime_tools::RealtimeBuffer<geometry::ConstantTargetPoseTwist>
       trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
                            // other buffer is not yet separated into a dedicated class
+
+  geometry::State3Dd target_state_;
+  geometry::Twist3Dd target_pose_diff_;
 
   /* Quadratic programming solver
    *   min x=[theta,error] 1/2 x^T H_diag x
@@ -149,11 +157,13 @@ private:
 
   void read_rt_state_buffer();
 
-  void computeStateJointMotion(const geometry::State3Dd& target, const rclcpp::Duration& period);
+  void computeStateJointMotion(const rclcpp::Duration& period, const bool verbose = false);
+
+  void command_controls();
 
   void publish_statistics();
 
-  void publish_topics(const rclcpp::Time& now);
+  void publish_topics();
 
   inline const pinocchio::SE3& end_effector_pose()
   {  // for convenience
@@ -168,32 +178,6 @@ private:
   /// OLD UNDERNEATH
   ////////////////////////////////////////////////////////
   pinocchio::GeometryModel pinocchio_geom_;
-
-  /*
-    std::optional<PinocchioState> build_current_state();
-    std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
-    std::optional<pinocchio::SE3> get_current_ee_pose();
-    std::optional<IKResult> compute_ik(const pinocchio::Model& model, pinocchio::Data& data,
-                                       const pinocchio::SE3& target_pose,
-                                       const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
-                                       rclcpp::Logger logger);
-  */
-  /**
-   * @brief stage a new target which is eventually commanded and store its time of staging for
-   */
-  /*  void stage_new_target(const IKResult& new_target)
-    {
-      if (!last_system_state_) {
-        RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Cannot stage new target as there is currently no system state "
-                                                      "available");
-        return;
-      }
-
-      staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
-                                     .system_state_of_staging = last_system_state_.value(),
-                                     .target = new_target };
-    }
-  */
 };
 
 }  // namespace duatic::controllers

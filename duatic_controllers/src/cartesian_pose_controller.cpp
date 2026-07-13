@@ -119,6 +119,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   }
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
+  // control output variables
+  control_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
+  control_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // evaluate joits given
   if (params_.joints.empty()) {
@@ -176,18 +179,20 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_A_ = Eigen::MatrixXd::Zero(6, qp_size);
   qp_solver_A_.block(0, robot_model_.nv, 6, 6).diagonal().setOnes();
 
-  // subscribe to the target topic
+  // subscriptions
+  const std::string end_effector_topic_prefix =
+      params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix;
+
+  // TARGET INPUT
   target_pose_twist_sub_ = get_node()->create_subscription<duatic_controller_msgs::msg::PoseTwistStamped>(
-      params_.target_subscription_topic, rclcpp::QoS(1).reliable().durability_volatile(),
+      end_effector_topic_prefix + "/" + params_.target_subscription_topic,
+      rclcpp::QoS(1).reliable().durability_volatile(),
       std::bind(&CartesianPoseController::handle_target_pose_twist_sub, this, std::placeholders::_1));
 
   // create RT topic publishers for the controller end effector pose and twist
   if (params_.topic_pub_frequency > 0.0) {
     topics_pub_period_ = 1.0 / params_.topic_pub_frequency;
     topics_pub_next_time_ = get_node()->now().seconds();  // force immediate publish on first update
-
-    const std::string end_effector_topic_prefix =
-        params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix;
 
     end_effector_pose_pub_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
         end_effector_topic_prefix + "/end_effector_pose", rclcpp::QoS(1).durability_volatile());
@@ -371,6 +376,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     }
 
     // initialize the command interfaces to the current state to avoid jumps on activation
+    assert(state_interfaces_.size() == command_interfaces_.size());
     for (size_t i = 0; i < state_interfaces_.size(); ++i) {
       const auto state = state_interfaces_[i].get_optional();
       if (!state) {
@@ -396,8 +402,8 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   trajectory_update_buffer_[sub_idx_].target_state.pose.position = end_effector_pose().translation();
   trajectory_update_buffer_[sub_idx_].target_state.pose.orientation = end_effector_pose().rotation();
   trajectory_update_buffer_[sub_idx_].target_state.twist = end_effector_twist();
-  trajectory_buffer_.initRT(
-      geometry::ConstantTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));  // initialize with a constant trajectory
+  trajectory_buffer_.initRT(geometry::ConstantTargetPoseTwist(
+      trajectory_update_buffer_[sub_idx_]));  // initialize with a finished/constant trajectory
 
   // initialize IK QP
   auto end_effector_jacobian = qp_solver_A_.block(0, 0, 6, robot_model_.nv);
@@ -412,6 +418,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::FAILURE;
   }
   publish_statistics();
+  publish_topics();
 
   // Everything functional and ready for RT operation
   return controller_interface::CallbackReturn::SUCCESS;
@@ -445,15 +452,30 @@ void CartesianPoseController::handle_target_pose_twist_sub(
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
                                                                   [[maybe_unused]] const rclcpp::Duration& period)
 {
+  // Publish the current end effector pose and twist iff the time is right
+  const double seconds = time.seconds();
+  const bool do_publications = (seconds > topics_pub_next_time_);
+
   update_state();
 
   update_rt_state_buffer(time);
 
-  computeStateJointMotion(trajectory_buffer_.readFromRT()->evaluate_at(time), period);
+  trajectory_buffer_.readFromRT()->evaluate_at(time, target_state_);
+  computeStateJointMotion(period, params_.enable_debug_log && do_publications);
 
-  publish_statistics();
+  // Write to HW
+  if (!params_.dry_run) {
+    command_controls();
+  }
 
-  publish_topics(time);
+  // Publish the current end effector pose and twist iff the time is right
+  if (do_publications) {
+    publish_statistics();
+    publish_topics();
+
+    // update the next publish time
+    topics_pub_next_time_ = std::fmax(seconds, topics_pub_next_time_ + topics_pub_period_);
+  }
   /*
 
   if (staged_target_) {
@@ -520,17 +542,18 @@ void CartesianPoseController::read_rt_state_buffer()
   }
 }
 
-void CartesianPoseController::computeStateJointMotion(const geometry::State3Dd& target, const rclcpp::Duration& period)
+void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& period, const bool verbose)
 {
   // Get 6D-diff between current pose and target pose
-  const geometry::Twist3Dd pose_diff =
-      target.pose - geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation());
+  target_pose_diff_ =
+      target_state_.pose - geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation());
 
   // Fill QP Equality constraint with current EE-Jacobian
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_solver_A_.block(0, 0, 6, robot_model_.nv));
   // Update and solve QP
-  qp_solver_->update(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, pose_diff.vector, proxsuite::nullopt,
+  qp_solver_->settings.verbose = verbose;
+  qp_solver_->update(qp_solver_H_, proxsuite::nullopt, qp_solver_A_, target_pose_diff_.vector, proxsuite::nullopt,
                      proxsuite::nullopt, proxsuite::nullopt);
   qp_solver_->solve();  // warm start with previous result by settings
   if (qp_solver_->results.info.status != proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED) {
@@ -540,26 +563,27 @@ void CartesianPoseController::computeStateJointMotion(const geometry::State3Dd& 
             << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(qp_solver_->results.info.status));
   }
   // integrate joint position
-  const auto control_q = state_q_ + qp_solver_->results.x.segment(0, robot_model_.nv);
+  assert(robot_model_.nv == state_q_.size());
+  control_q_ = state_q_ + qp_solver_->results.x.segment(0, robot_model_.nv);
+  // TODO: update control_v_
+}
 
-  if (!params_.dry_run) {
-    auto command_itr = command_interfaces_.begin();
-    for (std::size_t i = 0; i < params_.joints.size(); ++i) {
-      // set position
-      if (!command_itr->set_value(control_q[joint_q_idx_[i]])) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'",
-                    params_.joints[i].c_str());
-      }
-      command_itr++;
-      // set velocity
-      if (!command_itr->set_value(0.0)) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'",
-                    params_.joints[i].c_str());
-      }
-      command_itr++;
+void CartesianPoseController::command_controls()
+{
+  auto command_itr = command_interfaces_.begin();
+  for (std::size_t i = 0; i < params_.joints.size(); ++i) {
+    // set position
+    if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
+      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", params_.joints[i].c_str());
     }
-    assert(command_itr == command_interfaces_.end());
+    command_itr++;
+    // set velocity
+    if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
+      RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'", params_.joints[i].c_str());
+    }
+    command_itr++;
   }
+  assert(command_itr == command_interfaces_.end());
 }
 
 void CartesianPoseController::publish_statistics()
@@ -569,56 +593,67 @@ void CartesianPoseController::publish_statistics()
     RCLCPP_INFO_STREAM(get_node()->get_logger(),
                        "IK solver statistics:"
                            << std::endl
-                           << " - status: "
-                           << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(
-                                  qp_solver_->results.info.status)
-                           << (qp_solver_->results.info.status == proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED ?
-                                   " (SOLVED)" :
-                                   " (FAILED)")
-                           << std::endl
-                           << " - iterations - total: " << qp_solver_->results.info.iter << std::endl
-                           << " - iterations - outer: " << qp_solver_->results.info.iter_ext << std::endl
                            << " - time - setup: " << qp_solver_->results.info.setup_time << std::endl
                            << " - time - solve: " << qp_solver_->results.info.solve_time << std::endl
                            << " - time - run: " << qp_solver_->results.info.run_time << std::endl);
+    Eigen::VectorXd control_positions = Eigen::VectorXd::Zero(control_q_.size());
+    Eigen::VectorXd control_velocities = Eigen::VectorXd::Zero(control_v_.size());
+    assert(control_q_.size() == control_v_.size());
+    assert(control_q_.size() == static_cast<Eigen::Index>(params_.joints.size()));
+    for (Eigen::Index i = 0; i < control_q_.size(); ++i) {
+      control_positions[i] = control_q_[joint_q_idx_[i]];
+      control_velocities[i] = control_v_[joint_v_idx_[i]];
+    }
+    RCLCPP_INFO_STREAM(
+        get_node()->get_logger(),
+        "Problem Description and Solution:"
+            << std::endl
+            << " - pose  - end_effector: "
+            << geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation()) << std::endl
+            << " - pose  - target      : " << target_state_.pose << std::endl
+            << " - twist - end_effector: "
+            << geometry::Twist3Dd(end_effector_twist().linear(), end_effector_twist().angular()) << std::endl
+            << " - twist - target      : " << target_state_.twist << std::endl
+            << " - solver - solution   : " << qp_solver_->results.x.segment(0, robot_model_.nv).transpose() << std::endl
+            << " - solver - cart. error: " << qp_solver_->results.x.segment(robot_model_.nv, 6).transpose() << std::endl
+            << " - solver - target-diff: " << target_pose_diff_.vector.transpose() << std::endl
+            << " - state   - position: " << state_q_.transpose() << std::endl
+            << " - control - position: " << control_positions.transpose() << std::endl
+            << " - state   - velocity: " << state_v_.transpose() << std::endl
+            << " - control - velocity: " << control_velocities.transpose());
   }
 }
 
-void CartesianPoseController::publish_topics(const rclcpp::Time& now)
+void CartesianPoseController::publish_topics()
 {
-  // Publish the current end effector pose and twist iff the time is right
-  if (now.seconds() > topics_pub_next_time_) {
-    // update the next publish time
-    topics_pub_next_time_ += topics_pub_period_;
-    // Publish Pose
-    if (end_effector_pose_pub_realtime_->trylock()) {
-      end_effector_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
-      end_effector_pose_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
-      const auto& pose_trans = end_effector_pose().translation();
-      end_effector_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
-      end_effector_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
-      end_effector_pose_pub_realtime_->msg_.pose.position.z = pose_trans(2);
-      const Eigen::Quaterniond pose_quat(end_effector_pose().rotation());
-      end_effector_pose_pub_realtime_->msg_.pose.orientation.w = pose_quat.w();
-      end_effector_pose_pub_realtime_->msg_.pose.orientation.x = pose_quat.x();
-      end_effector_pose_pub_realtime_->msg_.pose.orientation.y = pose_quat.y();
-      end_effector_pose_pub_realtime_->msg_.pose.orientation.z = pose_quat.z();
-      end_effector_pose_pub_realtime_->unlockAndPublish();
-    }
-    // Publish Twist
-    if (end_effector_twist_pub_realtime_->trylock()) {
-      end_effector_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
-      end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
-      const auto& twist_lin = end_effector_twist().linear();
-      end_effector_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
-      end_effector_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);
-      end_effector_twist_pub_realtime_->msg_.twist.linear.z = twist_lin(2);
-      const auto& twist_ang = end_effector_twist().angular();
-      end_effector_twist_pub_realtime_->msg_.twist.angular.x = twist_ang(0);
-      end_effector_twist_pub_realtime_->msg_.twist.angular.y = twist_ang(1);
-      end_effector_twist_pub_realtime_->msg_.twist.angular.z = twist_ang(2);
-      end_effector_twist_pub_realtime_->unlockAndPublish();
-    }
+  // Publish Pose
+  if (end_effector_pose_pub_realtime_->trylock()) {
+    end_effector_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
+    end_effector_pose_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+    const auto& pose_trans = end_effector_pose().translation();
+    end_effector_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
+    end_effector_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
+    end_effector_pose_pub_realtime_->msg_.pose.position.z = pose_trans(2);
+    const Eigen::Quaterniond pose_quat(end_effector_pose().rotation());
+    end_effector_pose_pub_realtime_->msg_.pose.orientation.w = pose_quat.w();
+    end_effector_pose_pub_realtime_->msg_.pose.orientation.x = pose_quat.x();
+    end_effector_pose_pub_realtime_->msg_.pose.orientation.y = pose_quat.y();
+    end_effector_pose_pub_realtime_->msg_.pose.orientation.z = pose_quat.z();
+    end_effector_pose_pub_realtime_->unlockAndPublish();
+  }
+  // Publish Twist
+  if (end_effector_twist_pub_realtime_->trylock()) {
+    end_effector_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
+    end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+    const auto& twist_lin = end_effector_twist().linear();
+    end_effector_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
+    end_effector_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);
+    end_effector_twist_pub_realtime_->msg_.twist.linear.z = twist_lin(2);
+    const auto& twist_ang = end_effector_twist().angular();
+    end_effector_twist_pub_realtime_->msg_.twist.angular.x = twist_ang(0);
+    end_effector_twist_pub_realtime_->msg_.twist.angular.y = twist_ang(1);
+    end_effector_twist_pub_realtime_->msg_.twist.angular.z = twist_ang(2);
+    end_effector_twist_pub_realtime_->unlockAndPublish();
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <ostream>
 #include <duatic_geometry/twist_3d.hpp>
 
 namespace duatic::geometry
@@ -45,3 +46,11 @@ public:
 using Pose3Dd = Pose3D<double>;
 
 }  // namespace duatic::geometry
+
+// streaming
+template <typename ScalarT>
+inline std::ostream& operator<<(std::ostream& os, const duatic::geometry::Pose3D<ScalarT>& pose)
+{
+  os << "Pose3D(position: " << pose.position.transpose() << ", orientation: " << pose.orientation << ")";
+  return os;
+}
