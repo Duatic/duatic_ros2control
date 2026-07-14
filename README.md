@@ -1,6 +1,9 @@
 # duatic_ros2control
 
-[![Jazzy](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-jazzy.yml)  [![Kilted](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-kilted.yml)  [![Lyrical](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-lyrical.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-lyrical.yml)  [![Rolling](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml/badge.svg?branch=main)](https://github.com/Duatic/duatic_ros2control/actions/workflows/build-rolling.yml)
+[![Jazzy](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-jazzy.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Kilted](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-kilted.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Lyrical](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-lyrical.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Rolling](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-rolling.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
 
 This repository contains implementations that helps to integrate any Duatic DuaDrive setup into [ros2_control](https://control.ros.org/).
 As well as a set of [ros2control controllers](./duatic_controllers/doc/controllers.md) that can be used with every Duatic product.
