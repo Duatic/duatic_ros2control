@@ -214,8 +214,9 @@ public:
         limit_upper = 0.0;
         RCLCPP_INFO_STREAM(logger_, "Disable advanced position limiter for: " << joint_name);
       } else {
-        RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
-                                                             << " max: " << position_limits.max_position);
+        RCLCPP_INFO_STREAM(logger_, "Position limits for joint: " << joint_name
+                                                                  << ": min: " << position_limits.min_position
+                                                                  << " max: " << position_limits.max_position);
       }
 
       position_limiters_.emplace_back(

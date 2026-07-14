@@ -570,18 +570,19 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
 
 void CartesianPoseController::command_controls()
 {
+  // make sure to have the same order as initially claimed within 'command_interface_configuration'
   auto command_itr = command_interfaces_.begin();
-  for (std::size_t i = 0; i < params_.joints.size(); ++i) {
+  for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
     // set position
     if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
       RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", params_.joints[i].c_str());
     }
-    command_itr++;
+  }
+  for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
     // set velocity
     if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
       RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'", params_.joints[i].c_str());
     }
-    command_itr++;
   }
   assert(command_itr == command_interfaces_.end());
 }
