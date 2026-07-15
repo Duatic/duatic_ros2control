@@ -47,6 +47,7 @@
 
 // sdk
 #include <duatic_duadrive_interface/interface_utils.hpp>
+#include <duatic_duadrive_interface/string_utils.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_base.hpp>
 #include <duatic_duadrive_interface/duadrive_interface_mock.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_translator.hpp>
@@ -181,6 +182,7 @@ public:
       const auto joint_name = joint.name;
       const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
       const auto urdf_joint = urdf_model.getJoint(joint_name);
+      const auto has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
 
       if (!urdf_joint) {
         RCLCPP_FATAL_STREAM(logger_, "Failed to obtain joint from urdf: " << joint_name);
@@ -190,6 +192,7 @@ public:
       RCLCPP_INFO_STREAM(logger_, "Setup drive instance for joint: " << joint_name
                                                                      << " on ethercat bus:" << ethercat_bus
                                                                      << " at address: " << ethercat_address);
+      RCLCPP_INFO_STREAM(logger_, "Actuator has brake included: " << std::boolalpha << has_brake);
       RCLCPP_INFO_STREAM(logger_, "Drive parameter file: " << drive_parameter_file_path);
       // We do not startup a drive without a parameter file on purpose
       // even though this is possible we want to make sure that we use the parameteritation from the file
@@ -228,7 +231,8 @@ public:
       drives_.back()->init(DuaDriveInterfaceParameters{ .ethercat_bus = ethercat_bus,
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
-                                                        .device_address = ethercat_address });
+                                                        .device_address = ethercat_address,
+                                                        .has_brake = has_brake });
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 

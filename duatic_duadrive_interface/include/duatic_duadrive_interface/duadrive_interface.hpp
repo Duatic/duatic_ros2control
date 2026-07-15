@@ -93,6 +93,7 @@ private:
   rsl_drive_sdk::DriveEthercatDevice::SharedPtr drive_;
 
   rsl_drive_sdk::Statusword last_status_word_;
+  rsl_drive_sdk::BrakeState current_brake_state_{ rsl_drive_sdk::BrakeState::Engaged };
 
   double configured_max_torque_{ 0.0 };
   double configured_max_velocity_{ 0.0 };

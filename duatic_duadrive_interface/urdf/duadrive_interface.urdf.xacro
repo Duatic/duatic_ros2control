@@ -28,7 +28,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 <!--Base macro which represents a single duadrive as joint in ros2control-->
-<xacro:macro name="duadrive_interface_joint" params="name ethercat_address ethercat_bus mode parent_unit drive_parameter_file_path">
+<xacro:macro name="duadrive_interface_joint" params="name ethercat_address ethercat_bus mode parent_unit drive_parameter_file_path has_brake:=true">
     <joint name="${name}">
       <xacro:if value="${mode != 'isaac'}">
         <!--This is used for gazebo sim, mock hardware and real hardware-->
@@ -37,6 +37,8 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
         <!--parent unit allows us to afterwards identify which subcomponent a drive belongs to-->
         <param name="parent_unit">${parent_unit}</param>
         <param name="drive_parameter_file_path">${drive_parameter_file_path}</param>
+        <!--Information if a drive is used which included a pin brake-->
+        <param name="has_brake">${has_brake}</param>
         <state_interface name="position">
             <!-- Slightly offset the initial position for the gazebo sim-->
             <param name="initial_value">0.05</param>

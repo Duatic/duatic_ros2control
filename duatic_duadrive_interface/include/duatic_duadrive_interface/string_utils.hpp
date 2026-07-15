@@ -40,7 +40,7 @@ namespace utils
  * @throw std::invalid_argument if string could not be parsed
  * @note create a copy of the passed string as it needs to transform it
  */
-[[nodiscard]] inline bool sttobool(std::string s)
+[[nodiscard]] inline bool str_to_bool(std::string s)
 {
   // Transform to lower case
   std::transform(s.begin(), s.end(), s.begin(), ::tolower);
