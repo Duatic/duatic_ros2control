@@ -27,19 +27,19 @@ cartesian_pose_controller:
 
   ik_error_avoidance_weight:
     type: double
-    default_value: 100.0
+    default_value: 10.0
     description: "Weight for the result error avoidance criteria in the inverse kinematics solver."
     validation:
-      bounds<>: [1.0, 10000.0]
+      bounds<>: [0.001, 1000.0]
   ik_precision:
     type: double
-    default_value: 1.0e-5
+    default_value: 1.0e-3
     description: "Precision of the inverse kinematics solver."
     validation:
       bounds<>: [0.0, 0.1]
   ik_max_iterations:
     type: int
-    default_value: 100
+    default_value: 1000
     description: "Maximum number of iterations for the inverse kinematics solver."
     validation:
       bounds<>: [1, 10000]

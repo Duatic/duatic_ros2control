@@ -116,7 +116,9 @@ private:
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
   Eigen::MatrixXd qp_solver_H_;
-  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_solver_A_;
+  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_solver_A_;  // eq-constraint matrix
+  Eigen::VectorXd qp_solver_l_box_;                       // lower box bounds
+  Eigen::VectorXd qp_solver_u_box_;                       // upper box bounds
 
   // state publication topics
   double topics_pub_period_;
@@ -136,7 +138,7 @@ private:
 
   void command_controls();
 
-  void publish_statistics();
+  void publish_statistics(const bool always_publish = false);
 
   void publish_topics();
 
