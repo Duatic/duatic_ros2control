@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 #include <ostream>
 #include <duatic_geometry/twist_3d.hpp>
+#include <duatic_geometry/stamped.hpp>
 
 namespace duatic::geometry
 {
@@ -42,8 +43,13 @@ public:
   }
 };
 
+// Stamped Type Def
+template <typename ScalarT = double>
+using StampedPose3D = Stamped<Pose3D<ScalarT>>;
+
 // Explicit Types
 using Pose3Dd = Pose3D<double>;
+using StampedPose3Dd = StampedPose3D<double>;
 
 }  // namespace duatic::geometry
 

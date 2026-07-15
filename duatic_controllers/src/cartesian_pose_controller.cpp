@@ -394,16 +394,16 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   // initialize current state (data availability is guaranteed by the previous loop)
   update_state();
 
-  // initialize current trajectory
-  trajectory_update_buffer_[sub_idx_].curr_time = get_node()->now();
-  trajectory_update_buffer_[sub_idx_].curr_pose = end_effector_pose();
-  trajectory_update_buffer_[sub_idx_].curr_twist = end_effector_twist();
-  trajectory_update_buffer_[sub_idx_].target_time = get_node()->now();
-  trajectory_update_buffer_[sub_idx_].target_state.pose.position = end_effector_pose().translation();
-  trajectory_update_buffer_[sub_idx_].target_state.pose.orientation = end_effector_pose().rotation();
-  trajectory_update_buffer_[sub_idx_].target_state.twist = end_effector_twist();
-  trajectory_buffer_.initRT(geometry::ConstantTargetPoseTwist(
-      trajectory_update_buffer_[sub_idx_]));  // initialize with a finished/constant trajectory
+  // initialize state and trajectory buffers
+  current_state_buffer_.write().time = get_node()->now();
+  current_state_buffer_.write().pose.position = end_effector_pose().translation();
+  current_state_buffer_.write().pose.orientation = end_effector_pose().rotation();
+  current_state_buffer_.write().twist = end_effector_twist();
+  current_state_buffer_.publish_write();
+  current_state_buffer_.update_read();
+  trajectory_buffer_.write().update(current_state_buffer_.read(), geometry::TrajectoryUpdateInformation{
+                                                                      .target_state = current_state_buffer_.read() });
+  trajectory_buffer_.publish_write();
 
   // initialize IK QP
   auto end_effector_jacobian = qp_solver_A_.block(0, 0, 6, robot_model_.nv);
@@ -427,26 +427,25 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 void CartesianPoseController::handle_target_pose_twist_sub(
     const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg)
 {
-  read_rt_state_buffer();  // update subscription data copy
-  // store update information
-  trajectory_update_buffer_[sub_idx_].target_time = msg->timestamp;
-  // pose
-  trajectory_update_buffer_[sub_idx_].target_state.pose.position(0) = msg->pose.position.x;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.position(1) = msg->pose.position.y;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.position(2) = msg->pose.position.z;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.orientation.w() = msg->pose.orientation.w;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.orientation.x() = msg->pose.orientation.x;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.orientation.y() = msg->pose.orientation.y;
-  trajectory_update_buffer_[sub_idx_].target_state.pose.orientation.z() = msg->pose.orientation.z;
-  // twist
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(0) = msg->twist.linear.x;
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(1) = msg->twist.linear.y;
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(2) = msg->twist.linear.z;
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(3) = msg->twist.angular.x;
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(4) = msg->twist.angular.y;
-  trajectory_update_buffer_[sub_idx_].target_state.twist.vector(5) = msg->twist.angular.z;
-  // Calculate new trajectory outside the realtime-loop
-  trajectory_buffer_.writeFromNonRT(geometry::ConstantTargetPoseTwist(trajectory_update_buffer_[sub_idx_]));
+  // create Update-Info from msg
+  geometry::TrajectoryUpdateInformation update_info;
+  update_info.target_state.time = msg->timestamp;
+  update_info.target_state.pose.position(0) = msg->pose.position.x;
+  update_info.target_state.pose.position(1) = msg->pose.position.y;
+  update_info.target_state.pose.position(2) = msg->pose.position.z;
+  update_info.target_state.pose.orientation.w() = msg->pose.orientation.w;
+  update_info.target_state.pose.orientation.x() = msg->pose.orientation.x;
+  update_info.target_state.pose.orientation.y() = msg->pose.orientation.y;
+  update_info.target_state.pose.orientation.z() = msg->pose.orientation.z;
+  update_info.target_state.twist.vector(0) = msg->twist.linear.x;
+  update_info.target_state.twist.vector(1) = msg->twist.linear.y;
+  update_info.target_state.twist.vector(2) = msg->twist.linear.z;
+  update_info.target_state.twist.vector(3) = msg->twist.angular.x;
+  update_info.target_state.twist.vector(4) = msg->twist.angular.y;
+  update_info.target_state.twist.vector(5) = msg->twist.angular.z;
+  // Update/Calculate new trajectory outside the realtime-loop
+  trajectory_buffer_.write().update(current_state_buffer_.update_read(), update_info);
+  trajectory_buffer_.publish_write();
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
@@ -460,7 +459,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   update_rt_state_buffer(time);
 
-  trajectory_buffer_.readFromRT()->evaluate_at(time, target_state_);
+  trajectory_buffer_.update_read().evaluate_at(time, target_state_);
   computeStateJointMotion(period, params_.enable_debug_log && do_publications);
 
   // Write to HW
@@ -520,26 +519,11 @@ void CartesianPoseController::update_state()
 void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
 {
   // update rt state buffer
-  trajectory_update_buffer_[rt_idx_].curr_time = now;
-  trajectory_update_buffer_[rt_idx_].curr_pose = end_effector_pose();
-  trajectory_update_buffer_[rt_idx_].curr_twist = end_effector_twist();
-  // atomic swap indizes with update indication
-  rt_idx_ = buff_idx_.exchange(rt_idx_ & c_buff_update, std::memory_order_release) &
-            c_buff_MASK;  // always store with update flag and remove the update flag on load
-  assert((rt_idx_ < 3) && "Invariance Violation: rt_idx_ out of bounds. There is something serious going wrong here!");
-}
-
-void CartesianPoseController::read_rt_state_buffer()
-{
-  // check for an available update
-  const uint8_t update_available = buff_idx_.load(std::memory_order_acquire) & c_buff_update;  // mask with update bit
-  if (update_available) {  // update non-rt data copy only if there is an update available
-    // atomic update non-rt data copy
-    sub_idx_ = buff_idx_.exchange(sub_idx_, std::memory_order_acquire) &
-               c_buff_MASK;  // always remove the update flag and store without
-    assert((sub_idx_ < 3) && "Invariance Violation: sub_idx_ out of bounds. There is something serious going wrong "
-                             "here!");
-  }
+  current_state_buffer_.write().time = now;
+  current_state_buffer_.write().pose.position = end_effector_pose().translation();
+  current_state_buffer_.write().pose.orientation = end_effector_pose().rotation();
+  current_state_buffer_.write().twist = end_effector_twist();
+  current_state_buffer_.publish_write();
 }
 
 void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& period, const bool verbose)

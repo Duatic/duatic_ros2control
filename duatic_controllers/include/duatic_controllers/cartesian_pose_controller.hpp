@@ -29,7 +29,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <memory>
 #include <algorithm>
 
 // Pinocchio
@@ -54,11 +53,11 @@
 
 // ROS2
 #include <realtime_tools/realtime_publisher.hpp>
-#include <realtime_tools/realtime_buffer.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
+#include <duatic_concurrency/unidirectional_buffer.hpp>
 #include <duatic_controller_msgs/msg/pose_twist_stamped.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
@@ -71,18 +70,8 @@ namespace duatic::controllers
 
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
-private:
-  static constexpr uint8_t c_buff_update = (1 << 7);      // MSB
-  static constexpr uint8_t c_buff_MASK = !c_buff_update;  // all non-msb bits
-
 public:
-  inline CartesianPoseController()
-    : controller_interface::ControllerInterface()
-    // INVARIANT: ENSURE THOSE THREE INDIZES ALWAYS HOLD THESE EXACT VALUES IN ARB. PERMUTATION (MSB used for
-    // Update-indication)
-    , rt_idx_(0)
-    , buff_idx_(1)
-    , sub_idx_(2)
+  inline CartesianPoseController() : controller_interface::ControllerInterface()
   {
   }
 
@@ -114,21 +103,9 @@ private:
   // input topic subscriptions
   std::shared_ptr<rclcpp::Subscription<duatic_controller_msgs::msg::PoseTwistStamped>> target_pose_twist_sub_;
 
-  // the official realtime buffer is not meant to be used in the direction from rt to non-rt, thus implement a CPU-level
-  // lock-free one-way buffer in the following:
-  // -> ensure cache-line aligned data for the exchange between rt-update and non-rt subscription
-  alignas(std::hardware_destructive_interference_size)
-      std::array<geometry::TrajectoryUpdateInformation, 3> trajectory_update_buffer_;
-  alignas(std::hardware_destructive_interference_size) uint8_t rt_idx_;
-  alignas(std::hardware_destructive_interference_size) std::atomic_uint8_t buff_idx_;
-  alignas(std::hardware_destructive_interference_size) uint8_t sub_idx_;
-
-  static_assert(std::atomic_uint8_t::is_always_lock_free, "This hardware is not suitable for lock-free atomic uint8_t "
-                                                          "operations. Cannot compile this code!");
-
-  realtime_tools::RealtimeBuffer<geometry::ConstantTargetPoseTwist>
-      trajectory_buffer_;  // use the available impl. because it's there not because it's better ... and because the
-                           // other buffer is not yet separated into a dedicated class
+  // lock-free RT Non-RT data exchange buffer
+  duatic::concurrency::UnidirectionalBuffer<geometry::StampedState3Dd> current_state_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<geometry::ConstantTargetPoseTwist> trajectory_buffer_;
 
   geometry::State3Dd target_state_;
   geometry::Twist3Dd target_pose_diff_;
@@ -154,8 +131,6 @@ private:
   void update_state();
 
   void update_rt_state_buffer(const rclcpp::Time& now);
-
-  void read_rt_state_buffer();
 
   void computeStateJointMotion(const rclcpp::Duration& period, const bool verbose = false);
 

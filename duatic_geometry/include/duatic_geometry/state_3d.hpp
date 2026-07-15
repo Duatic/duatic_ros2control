@@ -2,7 +2,7 @@
 
 #include <duatic_geometry/pose_3d.hpp>
 #include <duatic_geometry/twist_3d.hpp>
-
+#include <duatic_geometry/stamped.hpp>
 namespace duatic::geometry
 {
 
@@ -32,8 +32,13 @@ public:
   static constexpr Self Neutral = Self(PoseType::Neutral(), TwistType::Neutral());
 };
 
+// Stamped Type Def
+template <typename ScalarT = double>
+using StampedState3D = Stamped<State3D<ScalarT>>;
+
 // Explicit Types
 using State3Dd = State3D<double>;
+using StampedState3Dd = StampedState3D<double>;
 
 }  // namespace duatic::geometry
 
@@ -41,6 +46,6 @@ using State3Dd = State3D<double>;
 template <typename ScalarT>
 inline std::ostream& operator<<(std::ostream& os, const duatic::geometry::State3D<ScalarT>& state)
 {
-  os << "State:" << std::endl << " - Pose: " << state.pose << std::endl << " - Twist: " << state.twist << std::endl;
+  os << "State:" << std::endl << " - Pose: " << state.pose << std::endl << " - Twist: " << state.twist;
   return os;
 }

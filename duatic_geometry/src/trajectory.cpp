@@ -3,7 +3,8 @@
 namespace duatic::geometry
 {
 
-void ConstantTargetPoseTwist::update(const TrajectoryUpdateInformation& update_info)
+void ConstantTargetPoseTwist::update([[maybe_unused]] const StampedState3Dd& current_state,
+                                     const TrajectoryUpdateInformation& update_info)
 {
   target_state_ = update_info.target_state;
 }

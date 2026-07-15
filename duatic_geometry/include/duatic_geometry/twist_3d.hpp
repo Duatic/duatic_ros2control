@@ -5,6 +5,8 @@
 
 #include <Eigen/Dense>
 
+#include <duatic_geometry/stamped.hpp>
+
 namespace duatic::geometry
 {
 
@@ -61,8 +63,13 @@ public:
   }
 };
 
+// Stamped Type Def
+template <typename ScalarT = double>
+using StampedTwist3D = Stamped<Twist3D<ScalarT>>;
+
 // Explicit Types
 using Twist3Dd = Twist3D<double>;
+using StampedTwist3Dd = StampedTwist3D<double>;
 
 }  // namespace duatic::geometry
 

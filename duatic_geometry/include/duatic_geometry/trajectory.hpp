@@ -11,24 +11,20 @@ namespace duatic::geometry
 
 struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInformation
 {
-  rclcpp::Time curr_time;
-  pinocchio::SE3 curr_pose;
-  pinocchio::Motion curr_twist;
-
-  rclcpp::Time target_time;
-  State3Dd target_state;
+  StampedState3Dd target_state;
 };
 
 class ConstantTargetPoseTwist
 {
 public:
   inline ConstantTargetPoseTwist() = default;
-  inline ConstantTargetPoseTwist(const TrajectoryUpdateInformation& update_info) : ConstantTargetPoseTwist()
+  inline ConstantTargetPoseTwist(const StampedState3Dd& current_state, const TrajectoryUpdateInformation& update_info)
+    : ConstantTargetPoseTwist()
   {
-    update(update_info);
+    update(current_state, update_info);
   }
 
-  void update(const TrajectoryUpdateInformation& update_info);
+  void update(const StampedState3Dd& current_state, const TrajectoryUpdateInformation& update_info);
 
   void evaluate_at(const rclcpp::Time& time, State3Dd& out_state) const;
 
