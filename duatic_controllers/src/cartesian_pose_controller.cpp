@@ -226,153 +226,59 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     end_effector_twist_pub_realtime_ = nullptr;
   }
 
+  // ros2control introspection
+  if (params_.enable_introspection) {
+    RCLCPP_INFO(get_node()->get_logger(), "Configuring ROS2control Introspection for internal state monitoring.");
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
+    }
+    for (Eigen::Index i = 0; i < robot_model_.nv; i++) {
+      REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
+    }
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner", &(qp_solver_->results.info.iter));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_outer", &(qp_solver_->results.info.iter_ext));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_setup", &(qp_solver_->results.info.setup_time));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_solve", &(qp_solver_->results.info.solve_time));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_run", &(qp_solver_->results.info.run_time));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_x", &(qp_solver_->results.x[robot_model_.nv]));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_y", &(qp_solver_->results.x[robot_model_.nv + 1]));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_z", &(qp_solver_->results.x[robot_model_.nv + 2]));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_x", &(qp_solver_->results.x[robot_model_.nv + 3]));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_y", &(qp_solver_->results.x[robot_model_.nv + 4]));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_z", &(qp_solver_->results.x[robot_model_.nv + 5]));
+  }
+
   return controller_interface::CallbackReturn::SUCCESS;
-  /*
-    try {
-      // 1. build the pinocchio model from the urdf
-      RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
-      {
-        pinocchio::Model full_model;
-        pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
+}
 
-        // So pinocchio is very counter intuitive. We specify joints that are marked as FIXED in the reduced model
-        // We we built an inversed list
-        // This is needed so that the controller will only do the IK for the specified joint list
-        std::unordered_set<pinocchio::JointIndex> keep;
-
-        for (const auto& joint : params_.joints) {
-          pinocchio::JointIndex id = full_model.getJointId(joint);
-          keep.insert(id);
-
-          RCLCPP_INFO_STREAM(get_node()->get_logger(), "keeping joint: " << joint << " id=" << id);
-        }
-
-        std::vector<pinocchio::JointIndex> indices;
-
-        for (pinocchio::JointIndex j = 1; j < full_model.njoints; ++j) {
-          if (keep.find(j) == keep.end()) {
-            indices.push_back(j);
-            RCLCPP_INFO_STREAM(get_node()->get_logger(), "locking joint: " << full_model.names[j] << " id=" << j);
-          }
-        }
-        Eigen::VectorXd q0 = pinocchio::neutral(full_model);
-        pinocchio::buildReducedModel(full_model, indices, q0, pinocchio_model_);
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
-        for (pinocchio::JointIndex j = 0; j < pinocchio_model_.njoints; ++j) {
-          RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
-        }
-        pinocchio_data_ = pinocchio::Data(pinocchio_model_);
-        RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
-                    pinocchio_model_.joints.size() - 1);
-      }
-
-      // 2. Build the collision model from urdf and srdf (only if SRDF is provided)
-      if (!params_.srdf.empty()) {
-        RCLCPP_INFO(get_node()->get_logger(), "Building collision geometry...");
-        std::stringstream urdf_stream;
-        urdf_stream << get_robot_description();
-        pinocchio::urdf::buildGeom(pinocchio_model_, urdf_stream, pinocchio::COLLISION, pinocchio_geom_);
-
-        pinocchio_geom_.addAllCollisionPairs();
-        pinocchio::srdf::removeCollisionPairsFromXML(pinocchio_model_, pinocchio_geom_, params_.srdf);
-        RCLCPP_INFO(get_node()->get_logger(), "Collision geometry built with %zu collision pairs",
-                    pinocchio_geom_.collisionPairs.size());
-      } else {
-        RCLCPP_WARN(get_node()->get_logger(), "No SRDF provided - collision checking will be disabled");
-      }
-
-      // 3. Validate that all controller joints exist in the Pinocchio model
-      RCLCPP_INFO(get_node()->get_logger(), "Validating controller joints...");
-      std::vector<pinocchio::JointIndex> controller_joint_indices;
-      for (const auto& joint_name : params_.joints) {
-        if (!pinocchio_model_.existJointName(joint_name)) {
-          RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-          return controller_interface::CallbackReturn::ERROR;
-        }
-        auto joint_id = pinocchio_model_.getJointId(joint_name);
-        controller_joint_indices.push_back(joint_id);
-        RCLCPP_INFO(get_node()->get_logger(), "Joint '%s' found with index %ld", joint_name.c_str(), joint_id);
-      }
-
-      // 4. Validate kinematic chain structure (only if more than one joint)
-      if (params_.joints.size() > 1) {
-        RCLCPP_INFO(get_node()->get_logger(), "Validating kinematic chain structure...");
-        for (size_t i = 1; i < controller_joint_indices.size(); ++i) {
-          auto current_joint_id = controller_joint_indices[i];
-          auto previous_joint_id = controller_joint_indices[i - 1];
-
-          // Check if current joint is a descendant of the previous joint in the kinematic tree
-          bool is_valid_chain = false;
-          auto parent_id = pinocchio_model_.parents[current_joint_id];
-
-          // Traverse up the kinematic tree to see if we find the previous joint
-          while (parent_id != 0) {
-            if (parent_id == previous_joint_id) {
-              is_valid_chain = true;
-              break;
-            }
-            parent_id = pinocchio_model_.parents[parent_id];
-          }
-
-          RCLCPP_INFO(get_node()->get_logger(), "Chain validation for joint '%s' (id %ld) -> '%s' (id %ld): %s",
-                      params_.joints[i].c_str(), current_joint_id, params_.joints[i - 1].c_str(), previous_joint_id,
-                      is_valid_chain ? "VALID" : "INVALID");
-
-          if (!is_valid_chain) {
-            RCLCPP_ERROR(get_node()->get_logger(),
-                         "Invalid kinematic chain: Joint '%s' (index %zu) is not a descendant of joint '%s' (index %zu)
-    " "in the kinematic tree.", params_.joints[i].c_str(), i, params_.joints[i - 1].c_str(), i - 1);
-            RCLCPP_ERROR(get_node()->get_logger(), "Please check that the 'joints' parameter lists the joints in the "
-                                                   "correct kinematic order.");
-            return controller_interface::CallbackReturn::ERROR;
-          }
-        }
-      }
-
-      // 5. Validate end effector frame exists
-      if (!pinocchio_model_.existFrame(params_.end_effector_frame)) {
-        RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model.",
-                     params_.end_effector_frame.c_str());
-
-        // Debug: List all available frames
-        RCLCPP_ERROR(get_node()->get_logger(), "Available frames in Pinocchio model:");
-        for (size_t i = 0; i < pinocchio_model_.frames.size(); ++i) {
-          RCLCPP_ERROR(get_node()->get_logger(), "  [%zu]: %s", i, pinocchio_model_.frames[i].name.c_str());
-        }
-        return controller_interface::CallbackReturn::ERROR;
-      }
-
-      RCLCPP_INFO(get_node()->get_logger(),
-                  "Successfully configured controller with %zu joints and end effector frame '%s'",
-    params_.joints.size(), params_.end_effector_frame.c_str()); } catch (const std::exception& e) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
-      return controller_interface::CallbackReturn::ERROR;
+controller_interface::CallbackReturn
+CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
+{
+  if (params_.enable_introspection) {
+    RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
+    using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
+                                         // namespace natively as done in the REGISTER function
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i));
     }
-
-    // Build joint index cache (needed because pinnochio uses a different index scheme)
-    joint_indices_.clear();
-    for (const auto& joint : params_.joints) {
-      RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                         "Joint: " << joint << " pinnochio id: " << pinocchio_model_.getJointId(joint));
-      joint_indices_.push_back(pinocchio_model_.getJointId(joint));
+    for (Eigen::Index i = 0; i < robot_model_.nv; i++) {
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
     }
-
-    // Cache end effector frame id:
-    endeffector_frame_id_ = pinocchio_model_.getFrameId(params_.end_effector_frame);
-    base_frame_id_ = pinocchio_model_.getFrameId(params_.base_frame);
-
-    // Setup the pose listener
-    pose_cmd_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
-        "~/target_pose", 10, [&](const geometry_msgs::msg::PoseStamped& msg) {
-          // Write raw to RT buffer for real-time consumers
-          const auto ik_result = run_ik(msg);
-          if (!ik_result) {
-            RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to solve IK");
-            return;
-          }
-          stage_new_target(ik_result.value());
-        });
-  */
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_outer");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_setup");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_solve");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_run");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_z");
+  }
+  return controller_interface::CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn

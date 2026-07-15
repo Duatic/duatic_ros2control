@@ -80,6 +80,7 @@ public:
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
+  controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
 
 private:

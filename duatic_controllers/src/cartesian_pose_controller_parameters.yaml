@@ -44,6 +44,10 @@ cartesian_pose_controller:
     validation:
       bounds<>: [1, 10000]
   
+  enable_introspection:
+    type: bool
+    default_value: false
+    description: "If true, enables ros2control introspection for internal state monitoring."
   enable_debug_log:
     type: bool
     default_value: false
