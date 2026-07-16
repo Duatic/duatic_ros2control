@@ -44,7 +44,7 @@ cartesian_pose_controller:
       bounds<>: [0.0, 0.1]
   ik_max_iterations:
     type: int
-    default_value: 1000
+    default_value: 10000
     description: "Maximum number of iterations for the inverse kinematics solver."
     validation:
       bounds<>: [1, 10000]

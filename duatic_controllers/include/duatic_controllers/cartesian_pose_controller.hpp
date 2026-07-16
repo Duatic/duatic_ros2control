@@ -112,14 +112,19 @@ private:
   geometry::Twist3Dd target_pose_diff_;
 
   /* Quadratic programming solver
-   *   min x=[theta,error] 1/2 x^T H_diag x
-   *   subject to: J theta + error = pose_diff    <=>  [J 1] x = pose_diff
+   *   min_theta 1/2 theta^T theta + 1/2 w (J theta - pose_diff)^T (J theta - pose_diff)
+   *           = 1/2 theta^T (I + w J^T J) theta - w pose_diff^T J theta + const.
+   *   subject to: box constraints on theta (joint position limits)
+   * The cartesian tracking error is folded into the cost (weighted by 'ik_error_avoidance_weight')
+   * instead of being an equality-constrained slack variable, so the QP has no equality constraints.
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
-  Eigen::MatrixXd qp_solver_H_;
-  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_solver_A_;  // eq-constraint matrix
-  Eigen::VectorXd qp_solver_l_box_;                       // lower box bounds
-  Eigen::VectorXd qp_solver_u_box_;                       // upper box bounds
+  Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
+  Eigen::VectorXd qp_solver_g_;                                      // -w * J^T * pose_diff (linear cost term)
+  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // end-effector Jacobian J
+  Eigen::VectorXd qp_solver_l_box_;                                  // lower box bounds
+  Eigen::VectorXd qp_solver_u_box_;                                  // upper box bounds
+  Eigen::Vector<double, 6> qp_result_error_;  // remaining cart. error for the found solution (diagnostics)
 
   // state publication topics
   double topics_pub_period_;
