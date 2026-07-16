@@ -173,11 +173,14 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_->settings.eps_abs = params_.ik_precision;
   qp_solver_->settings.eps_rel = 0.1 * params_.ik_precision;
   qp_solver_->settings.max_iter = params_.ik_max_iterations;
-  qp_solver_->settings.max_iter_in = 3;  // due to the hessian diagonality, this should be enough!
+  qp_solver_->settings.max_iter_in = params_.ik_max_iterations >> 1;  // div 2
   qp_solver_->settings.verbose = params_.enable_debug_log;
   qp_solver_->settings.compute_timings =
       true;  // TODO(patrick): make this a parameter to be (debug_log or introspection)
-  qp_solver_->settings.initial_guess = proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;
+  qp_solver_->settings.initial_guess =
+      proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;  // ! IMPORTANT ! Don't reset this on
+                                                                               // error, it will cause way more required
+                                                                               // iterations, whyever ...
   // optimization-criteria
   qp_solver_H_ = Eigen::MatrixXd::Identity(qp_size, qp_size);  // joint motion minimization
   qp_solver_H_.diagonal().segment(robot_model_.nv, 6).setConstant(params_.ik_error_avoidance_weight);
@@ -334,10 +337,11 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
                    Eigen::VectorXd::Constant(qp_solver_->model.dim, 0.1)  // box constraints (joint position limits)
   );
   qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
-  if (!qp_solver_->results.x.isZero(1.0e-6)) {
+  if (!qp_solver_->results.x.isZero(params_.ik_precision)) {
     RCLCPP_ERROR(get_node()->get_logger(), "QP solver did not converge on zero-initialization. Abort Activation.");
     return controller_interface::CallbackReturn::FAILURE;
   }
+
   publish_statistics();
   publish_topics();
 
@@ -441,7 +445,7 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
         get_node()->get_logger(),
         "CartesianPoseController: QP solver did not converge, result status is "
             << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(qp_solver_->results.info.status));
-    this->publish_statistics(true);
+    publish_statistics(true);
     qp_solver_->results.x.segment(0, robot_model_.nv) *= 0.5;
 
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Continue with half the unfinished solution: "
@@ -450,8 +454,8 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
   // integrate joint position
   assert(robot_model_.nv == state_q_.size());
   control_q_ = (state_q_ + qp_solver_->results.x.segment(0, robot_model_.nv))
-                   .cwiseMax(robot_model_.lowerPositionLimit)
-                   .cwiseMin(robot_model_.upperPositionLimit);
+                   .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
+                   .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
   // TODO: update control_v_
 }
 
