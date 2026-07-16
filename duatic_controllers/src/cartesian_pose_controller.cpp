@@ -151,12 +151,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   assert(joint_v_idx_.size() == params_.joints.size());
 
   // Store end effector frame index
-  if (!robot_model_.existFrame(params_.end_effector_frame)) {
+  if (!robot_model_.existFrame(params_.target_frame)) {
     RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model. Abort configuration.",
-                 params_.end_effector_frame.c_str());
+                 params_.target_frame.c_str());
     return controller_interface::CallbackReturn::FAILURE;
   } else {
-    end_effector_frame_idx_ = robot_model_.getFrameId(params_.end_effector_frame);
+    target_frame_idx_ = robot_model_.getFrameId(params_.target_frame);
   }
 
   // setup and initialize QP
@@ -193,13 +193,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_u_box_ = Eigen::VectorXd::Constant(qp_size, 1e20);
 
   // subscriptions
-  const std::string end_effector_topic_prefix =
-      params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix;
+  const std::string topic_prefix = (params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix) + "/";
+  const std::string target_topic_prefix = topic_prefix + params_.target_frame + "/";
 
   // TARGET INPUT
   target_msg_sub_ = get_node()->create_subscription<trajectory_type::UpdateInformation::msg>(
-      end_effector_topic_prefix + "/" + params_.target_subscription_topic,
-      rclcpp::QoS(1).reliable().durability_volatile(),
+      target_topic_prefix + params_.target_topic_suffix, rclcpp::QoS(1).reliable().durability_volatile(),
       std::bind(&CartesianPoseController::handle_target_msg_sub, this, std::placeholders::_1));
 
   // create RT topic publishers for the controller end effector pose and twist
@@ -207,23 +206,23 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     topics_pub_period_ = 1.0 / params_.topic_pub_frequency;
     topics_pub_next_time_ = get_node()->now().seconds();  // force immediate publish on first update
 
-    end_effector_pose_pub_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
-        end_effector_topic_prefix + "/end_effector_pose", rclcpp::QoS(1).durability_volatile());
-    end_effector_pose_pub_realtime_ =
-        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(end_effector_pose_pub_);
+    target_pose_pub_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
+        target_topic_prefix + "pose", rclcpp::QoS(1).durability_volatile());
+    target_pose_pub_realtime_ =
+        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(target_pose_pub_);
 
-    end_effector_twist_pub_ = get_node()->create_publisher<geometry_msgs::msg::TwistStamped>(
-        end_effector_topic_prefix + "/end_effector_twist", rclcpp::QoS(1).durability_volatile());
-    end_effector_twist_pub_realtime_ =
-        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>>(end_effector_twist_pub_);
+    target_twist_pub_ = get_node()->create_publisher<geometry_msgs::msg::TwistStamped>(
+        target_topic_prefix + "twist", rclcpp::QoS(1).durability_volatile());
+    target_twist_pub_realtime_ =
+        std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>>(target_twist_pub_);
   } else {
     RCLCPP_INFO(get_node()->get_logger(), "Topic frequency is set to 0.0, not publishing anything");
     topics_pub_period_ = 0.0;
     topics_pub_next_time_ = std::numeric_limits<double>::max();
-    end_effector_pose_pub_ = nullptr;
-    end_effector_pose_pub_realtime_ = nullptr;
-    end_effector_twist_pub_ = nullptr;
-    end_effector_twist_pub_realtime_ = nullptr;
+    target_pose_pub_ = nullptr;
+    target_pose_pub_realtime_ = nullptr;
+    target_twist_pub_ = nullptr;
+    target_twist_pub_realtime_ = nullptr;
   }
 
   // ros2control introspection
@@ -315,19 +314,19 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 
   // initialize state and trajectory buffers
   current_state_buffer_.write().time = get_node()->now();
-  current_state_buffer_.write().pose.position = end_effector_pose().translation();
-  current_state_buffer_.write().pose.orientation = end_effector_pose().rotation();
-  current_state_buffer_.write().twist = end_effector_twist();
+  current_state_buffer_.write().pose.position = target_pose().translation();
+  current_state_buffer_.write().pose.orientation = target_pose().rotation();
+  current_state_buffer_.write().twist = target_twist();
   current_state_buffer_.publish_write();
   trajectory_buffer_.write().update(current_state_buffer_.read(),
                                     trajectory_type::NeutralUpdate(current_state_buffer_.update_read()));
   trajectory_buffer_.publish_write();
 
   // initialize IK QP
-  auto end_effector_jacobian = qp_solver_A_.block(0, 0, 6, robot_model_.nv);
-  end_effector_jacobian.setZero();
-  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
-                                  pinocchio::ReferenceFrame::WORLD, end_effector_jacobian);
+  auto target_jacobian = qp_solver_A_.block(0, 0, 6, robot_model_.nv);
+  target_jacobian.setZero();
+  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
+                                  pinocchio::ReferenceFrame::WORLD, target_jacobian);
   qp_solver_->init(qp_solver_H_, proxsuite::nullopt,                            // optimization criteria
                    qp_solver_A_, Eigen::VectorXd::Zero(6),                      // equality constraints (goal)
                    proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
@@ -399,29 +398,28 @@ void CartesianPoseController::update_state()
 
   // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
-  pinocchio::updateFramePlacement(robot_model_, state_data_, end_effector_frame_idx_);
-  state_end_effector_twist_ =
-      pinocchio::getFrameVelocity(robot_model_, state_data_, end_effector_frame_idx_, pinocchio::ReferenceFrame::WORLD);
+  pinocchio::updateFramePlacement(robot_model_, state_data_, target_frame_idx_);
+  state_target_twist_ =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::WORLD);
 }
 
 void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
 {
   // update rt state buffer
   current_state_buffer_.write().time = now;
-  current_state_buffer_.write().pose.position = end_effector_pose().translation();
-  current_state_buffer_.write().pose.orientation = end_effector_pose().rotation();
-  current_state_buffer_.write().twist = end_effector_twist();
+  current_state_buffer_.write().pose.position = target_pose().translation();
+  current_state_buffer_.write().pose.orientation = target_pose().rotation();
+  current_state_buffer_.write().twist = target_twist();
   current_state_buffer_.publish_write();
 }
 
 void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& period, const bool verbose)
 {
   // Get 6D-diff between current pose and target pose
-  target_pose_diff_ =
-      target_state_.pose - geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation());
+  target_pose_diff_ = target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
 
   // Fill QP Equality constraint with current EE-Jacobian
-  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, end_effector_frame_idx_,
+  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_solver_A_.block(0, 0, 6, robot_model_.nv));
   // Fill QP box bounds with position displacement limits
   qp_solver_l_box_.segment(0, robot_model_.nv) =
@@ -511,13 +509,11 @@ void CartesianPoseController::publish_statistics(const bool always_publish)
     RCLCPP_INFO_STREAM(get_node()->get_logger(),
                        "IK solver: Problem Solution"
                            << std::endl  // Print the solver's solution
-                           << " - pose  - end_effector: "
-                           << geometry::Pose3Dd(end_effector_pose().translation(), end_effector_pose().rotation())
-                           << std::endl
+                           << " - pose  - target: "
+                           << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation()) << std::endl
                            << " - pose  - target      : " << target_state_.pose << std::endl
-                           << " - twist - end_effector: "
-                           << geometry::Twist3Dd(end_effector_twist().linear(), end_effector_twist().angular())
-                           << std::endl
+                           << " - twist - target      : "
+                           << geometry::Twist3Dd(target_twist().linear(), target_twist().angular()) << std::endl
                            << " - twist - target      : " << target_state_.twist << std::endl
                            << " - solver - solution   : "
                            << qp_solver_->results.x.segment(0, robot_model_.nv).transpose() << std::endl
@@ -534,34 +530,34 @@ void CartesianPoseController::publish_statistics(const bool always_publish)
 void CartesianPoseController::publish_topics()
 {
   // Publish Pose
-  if (end_effector_pose_pub_realtime_->trylock()) {
-    end_effector_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
-    end_effector_pose_pub_realtime_->msg_.header.frame_id =
+  if (target_pose_pub_realtime_->trylock()) {
+    target_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
+    target_pose_pub_realtime_->msg_.header.frame_id =
         params_.base_frame;  // TODO(patrick) this frame_id is not yet taken into account in the rest of the code !
-    const auto& pose_trans = end_effector_pose().translation();
-    end_effector_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
-    end_effector_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
-    end_effector_pose_pub_realtime_->msg_.pose.position.z = pose_trans(2);
-    const Eigen::Quaterniond pose_quat(end_effector_pose().rotation());
-    end_effector_pose_pub_realtime_->msg_.pose.orientation.w = pose_quat.w();
-    end_effector_pose_pub_realtime_->msg_.pose.orientation.x = pose_quat.x();
-    end_effector_pose_pub_realtime_->msg_.pose.orientation.y = pose_quat.y();
-    end_effector_pose_pub_realtime_->msg_.pose.orientation.z = pose_quat.z();
-    end_effector_pose_pub_realtime_->unlockAndPublish();
+    const auto& pose_trans = target_pose().translation();
+    target_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
+    target_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
+    target_pose_pub_realtime_->msg_.pose.position.z = pose_trans(2);
+    const Eigen::Quaterniond pose_quat(target_pose().rotation());
+    target_pose_pub_realtime_->msg_.pose.orientation.w = pose_quat.w();
+    target_pose_pub_realtime_->msg_.pose.orientation.x = pose_quat.x();
+    target_pose_pub_realtime_->msg_.pose.orientation.y = pose_quat.y();
+    target_pose_pub_realtime_->msg_.pose.orientation.z = pose_quat.z();
+    target_pose_pub_realtime_->unlockAndPublish();
   }
   // Publish Twist
-  if (end_effector_twist_pub_realtime_->trylock()) {
-    end_effector_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
-    end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.base_frame;
-    const auto& twist_lin = end_effector_twist().linear();
-    end_effector_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
-    end_effector_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);
-    end_effector_twist_pub_realtime_->msg_.twist.linear.z = twist_lin(2);
-    const auto& twist_ang = end_effector_twist().angular();
-    end_effector_twist_pub_realtime_->msg_.twist.angular.x = twist_ang(0);
-    end_effector_twist_pub_realtime_->msg_.twist.angular.y = twist_ang(1);
-    end_effector_twist_pub_realtime_->msg_.twist.angular.z = twist_ang(2);
-    end_effector_twist_pub_realtime_->unlockAndPublish();
+  if (target_twist_pub_realtime_->trylock()) {
+    target_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
+    target_twist_pub_realtime_->msg_.header.frame_id = params_.base_frame;
+    const auto& twist_lin = target_twist().linear();
+    target_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
+    target_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);
+    target_twist_pub_realtime_->msg_.twist.linear.z = twist_lin(2);
+    const auto& twist_ang = target_twist().angular();
+    target_twist_pub_realtime_->msg_.twist.angular.x = twist_ang(0);
+    target_twist_pub_realtime_->msg_.twist.angular.y = twist_ang(1);
+    target_twist_pub_realtime_->msg_.twist.angular.z = twist_ang(2);
+    target_twist_pub_realtime_->unlockAndPublish();
   }
 }
 

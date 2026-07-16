@@ -91,12 +91,12 @@ private:
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
   std::vector<Eigen::Index> joint_v_idx_;
-  pinocchio::FrameIndex end_effector_frame_idx_;
+  pinocchio::FrameIndex target_frame_idx_;
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
   Eigen::VectorXd state_v_;
-  pinocchio::Motion state_end_effector_twist_;
+  pinocchio::Motion state_target_twist_;
 
   Eigen::VectorXd control_q_;
   Eigen::VectorXd control_v_;
@@ -124,10 +124,10 @@ private:
   // state publication topics
   double topics_pub_period_;
   double topics_pub_next_time_;
-  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr end_effector_pose_pub_;
-  realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr end_effector_pose_pub_realtime_;
-  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr end_effector_twist_pub_;
-  realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr end_effector_twist_pub_realtime_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr target_pose_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr target_pose_pub_realtime_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr target_twist_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr target_twist_pub_realtime_;
 
   void handle_target_msg_sub(const trajectory_type::UpdateInformation::msg::SharedPtr msg);
 
@@ -143,13 +143,13 @@ private:
 
   void publish_topics();
 
-  inline const pinocchio::SE3& end_effector_pose()
+  inline const pinocchio::SE3& target_pose()
   {  // for convenience
-    return state_data_.oMf[end_effector_frame_idx_];
+    return state_data_.oMf[target_frame_idx_];
   }
-  inline const pinocchio::Motion& end_effector_twist()
+  inline const pinocchio::Motion& target_twist()
   {  // for convenience
-    return state_end_effector_twist_;
+    return state_target_twist_;
   }
 
   ////////////////////////////////////////////////////////
