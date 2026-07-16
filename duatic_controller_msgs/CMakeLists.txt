@@ -18,7 +18,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PIDGains.msg"
   "msg/GravityCompensationControllerStatus.msg"
   "msg/PoseTarget.msg"
-  "msg/PoseTwistStamped.msg"
+  "msg/State.msg"
+  "msg/StateStamped.msg"
   "msg/MultiPoseTarget.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )

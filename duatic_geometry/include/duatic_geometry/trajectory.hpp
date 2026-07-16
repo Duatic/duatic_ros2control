@@ -1,30 +1,34 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include <duatic_geometry/pose_3d.hpp>
 #include <duatic_geometry/state_3d.hpp>
-#include <pinocchio/spatial/se3.hpp>
-#include <pinocchio/spatial/motion.hpp>
 #include <rclcpp/time.hpp>
 
 namespace duatic::geometry
 {
 
-struct alignas(std::hardware_destructive_interference_size) TrajectoryUpdateInformation
-{
-  StampedState3Dd target_state;
-};
-
-class ConstantTargetPoseTwist
+class ConstantTargetPose
 {
 public:
-  inline ConstantTargetPoseTwist() = default;
-  inline ConstantTargetPoseTwist(const StampedState3Dd& current_state, const TrajectoryUpdateInformation& update_info)
-    : ConstantTargetPoseTwist()
+  struct UpdateInformation
+  {
+    using msg = StampedPose3Dd::msg;
+
+    Pose3Dd target_pose;
+
+    inline UpdateInformation() = default;
+    inline explicit UpdateInformation(const Pose3Dd& pose) : target_pose(pose){};
+    inline explicit UpdateInformation(const msg& msg) : target_pose(msg){};
+  };
+
+  inline ConstantTargetPose() = default;
+  inline ConstantTargetPose(const TimedState3Dd& current_state, const UpdateInformation& update_info)
+    : ConstantTargetPose()
   {
     update(current_state, update_info);
   }
 
-  void update(const StampedState3Dd& current_state, const TrajectoryUpdateInformation& update_info);
+  void update(const TimedState3Dd& current_state, const UpdateInformation& update_info);
 
   void evaluate_at(const rclcpp::Time& time, State3Dd& out_state) const;
 
@@ -34,6 +38,46 @@ public:
     evaluate_at(time, out_state);
     return out_state;
   }
+
+  static UpdateInformation NeutralUpdate(const TimedState3Dd& current_state);
+
+private:
+  Pose3Dd target_pose_;
+};
+
+class ConstantTargetState
+{
+public:
+  struct UpdateInformation
+  {
+    using msg = StampedState3Dd::msg;
+
+    State3Dd target_state;
+
+    inline UpdateInformation() = default;
+    inline explicit UpdateInformation(const State3Dd& state) : target_state(state){};
+    inline explicit UpdateInformation(const msg& msg) : target_state(msg){};
+  };
+
+  inline ConstantTargetState() = default;
+  inline ConstantTargetState(const TimedState3Dd& current_state, const UpdateInformation& update_info)
+    : ConstantTargetState()
+  {
+    update(current_state, update_info);
+  }
+
+  void update(const TimedState3Dd& current_state, const UpdateInformation& update_info);
+
+  void evaluate_at(const rclcpp::Time& time, State3Dd& out_state) const;
+
+  inline State3Dd evaluate_at(const rclcpp::Time& time) const
+  {
+    State3Dd out_state;
+    evaluate_at(time, out_state);
+    return out_state;
+  }
+
+  static UpdateInformation NeutralUpdate(const TimedState3Dd& current_state);
 
 private:
   State3Dd target_state_;

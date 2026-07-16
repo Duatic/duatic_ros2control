@@ -4,6 +4,8 @@ project(duatic_geometry)
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
+find_package(duatic_controller_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(pinocchio REQUIRED)
 find_package(rclcpp REQUIRED)
 
@@ -24,6 +26,11 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   rclcpp::rclcpp
 )
 
+ament_target_dependencies(${PROJECT_NAME} PUBLIC
+  duatic_controller_msgs
+  geometry_msgs
+)
+
 install(
   TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
@@ -39,6 +46,6 @@ install(
 
 ament_export_targets(export_${PROJECT_NAME})
 ament_export_include_directories("include/${PROJECT_NAME}")
-ament_export_dependencies(Eigen3 pinocchio rclcpp)
+ament_export_dependencies(Eigen3 duatic_controller_msgs geometry_msgs pinocchio rclcpp)
 
 ament_package()

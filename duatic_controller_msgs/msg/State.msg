@@ -1,3 +1,2 @@
 geometry_msgs/Pose pose
 geometry_msgs/Twist twist
-builtin_interfaces/Time timestamp

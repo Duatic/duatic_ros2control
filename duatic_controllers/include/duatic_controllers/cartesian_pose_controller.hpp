@@ -54,11 +54,9 @@
 // ROS2
 #include <realtime_tools/realtime_publisher.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
 #include <duatic_concurrency/unidirectional_buffer.hpp>
-#include <duatic_controller_msgs/msg/pose_twist_stamped.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
 #include <duatic_geometry/twist_3d.hpp>
@@ -71,6 +69,8 @@ namespace duatic::controllers
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
+  using trajectory_type = geometry::ConstantTargetPose;  // TODO(patrick): convert into a template parameter
+
   inline CartesianPoseController() : controller_interface::ControllerInterface()
   {
   }
@@ -102,11 +102,11 @@ private:
   Eigen::VectorXd control_v_;
 
   // input topic subscriptions
-  std::shared_ptr<rclcpp::Subscription<duatic_controller_msgs::msg::PoseTwistStamped>> target_pose_twist_sub_;
+  std::shared_ptr<rclcpp::Subscription<trajectory_type::UpdateInformation::msg>> target_msg_sub_;
 
   // lock-free RT Non-RT data exchange buffer
-  duatic::concurrency::UnidirectionalBuffer<geometry::StampedState3Dd> current_state_buffer_;
-  duatic::concurrency::UnidirectionalBuffer<geometry::ConstantTargetPoseTwist> trajectory_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<geometry::TimedState3Dd> current_state_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
   geometry::State3Dd target_state_;
   geometry::Twist3Dd target_pose_diff_;
@@ -129,7 +129,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr end_effector_twist_pub_;
   realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr end_effector_twist_pub_realtime_;
 
-  void handle_target_pose_twist_sub(const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg);
+  void handle_target_msg_sub(const trajectory_type::UpdateInformation::msg::SharedPtr msg);
 
   void update_state();
 

@@ -197,10 +197,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix;
 
   // TARGET INPUT
-  target_pose_twist_sub_ = get_node()->create_subscription<duatic_controller_msgs::msg::PoseTwistStamped>(
+  target_msg_sub_ = get_node()->create_subscription<trajectory_type::UpdateInformation::msg>(
       end_effector_topic_prefix + "/" + params_.target_subscription_topic,
       rclcpp::QoS(1).reliable().durability_volatile(),
-      std::bind(&CartesianPoseController::handle_target_pose_twist_sub, this, std::placeholders::_1));
+      std::bind(&CartesianPoseController::handle_target_msg_sub, this, std::placeholders::_1));
 
   // create RT topic publishers for the controller end effector pose and twist
   if (params_.topic_pub_frequency > 0.0) {
@@ -319,9 +319,8 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   current_state_buffer_.write().pose.orientation = end_effector_pose().rotation();
   current_state_buffer_.write().twist = end_effector_twist();
   current_state_buffer_.publish_write();
-  current_state_buffer_.update_read();
-  trajectory_buffer_.write().update(current_state_buffer_.read(), geometry::TrajectoryUpdateInformation{
-                                                                      .target_state = current_state_buffer_.read() });
+  trajectory_buffer_.write().update(current_state_buffer_.read(),
+                                    trajectory_type::NeutralUpdate(current_state_buffer_.update_read()));
   trajectory_buffer_.publish_write();
 
   // initialize IK QP
@@ -347,27 +346,10 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-void CartesianPoseController::handle_target_pose_twist_sub(
-    const duatic_controller_msgs::msg::PoseTwistStamped::SharedPtr msg)
+void CartesianPoseController::handle_target_msg_sub(const trajectory_type::UpdateInformation::msg::SharedPtr msg)
 {
-  // create Update-Info from msg
-  geometry::TrajectoryUpdateInformation update_info;
-  update_info.target_state.time = msg->timestamp;
-  update_info.target_state.pose.position(0) = msg->pose.position.x;
-  update_info.target_state.pose.position(1) = msg->pose.position.y;
-  update_info.target_state.pose.position(2) = msg->pose.position.z;
-  update_info.target_state.pose.orientation.w() = msg->pose.orientation.w;
-  update_info.target_state.pose.orientation.x() = msg->pose.orientation.x;
-  update_info.target_state.pose.orientation.y() = msg->pose.orientation.y;
-  update_info.target_state.pose.orientation.z() = msg->pose.orientation.z;
-  update_info.target_state.twist.vector(0) = msg->twist.linear.x;
-  update_info.target_state.twist.vector(1) = msg->twist.linear.y;
-  update_info.target_state.twist.vector(2) = msg->twist.linear.z;
-  update_info.target_state.twist.vector(3) = msg->twist.angular.x;
-  update_info.target_state.twist.vector(4) = msg->twist.angular.y;
-  update_info.target_state.twist.vector(5) = msg->twist.angular.z;
   // Update/Calculate new trajectory outside the realtime-loop
-  trajectory_buffer_.write().update(current_state_buffer_.update_read(), update_info);
+  trajectory_buffer_.write().update(current_state_buffer_.update_read(), trajectory_type::UpdateInformation(*msg));
   trajectory_buffer_.publish_write();
 }
 

@@ -2,9 +2,10 @@
 
 #include <utility>
 #include <ostream>
-
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <Eigen/Dense>
-
+#include <duatic_geometry/timed.hpp>
 #include <duatic_geometry/stamped.hpp>
 
 namespace duatic::geometry
@@ -17,6 +18,9 @@ public:
   using Scalar = ScalarT;
   using Self = Twist3D<Scalar>;
 
+  using msg = geometry_msgs::msg::Twist;
+  using msg_stamped = geometry_msgs::msg::TwistStamped;
+
   using VectorType = Eigen::Vector<Scalar, 6>;
   using TranslationType = decltype(std::declval<VectorType>().segment(0, 3));
   using TranslationTypeConst = decltype(std::declval<const VectorType>().segment(0, 3));
@@ -27,8 +31,18 @@ public:
 
   inline constexpr Twist3D() = default;
   inline constexpr Twist3D(const Self& other) = default;
+  inline constexpr Twist3D(Self&& other) = default;
+
+  inline explicit constexpr Twist3D(const msg& msg)
+    : vector(msg.linear.x, msg.linear.y, msg.linear.z, msg.angular.x, msg.angular.y, msg.angular.z)
+  {
+  }
+  inline explicit constexpr Twist3D(const msg_stamped& msg) : Twist3D(msg.twist)  // delegate
+  {
+  }
 
   inline Self& operator=(const Self& other) = default;
+  inline Self& operator=(Self&& other) = default;
 
   template <typename VectorCtor>
   inline constexpr Twist3D(const VectorCtor& init) : vector(init)
@@ -42,7 +56,12 @@ public:
     Rotation() = rotation_init;
   }
 
-  static constexpr Self Neutral = Self(VectorType::Zero());
+  Self& setNeutral()
+  {
+    vector.setZero();
+    return *this;
+  }
+  static const Self Neutral;
 
   inline TranslationType Translation()
   {
@@ -63,12 +82,19 @@ public:
   }
 };
 
-// Stamped Type Def
+// static initializations
+template <typename ScalarT>
+const Twist3D<ScalarT> Twist3D<ScalarT>::Neutral = Twist3D<ScalarT>().setNeutral();
+
+// Type Defs
+template <typename ScalarT = double>
+using TimedTwist3D = Timed<Twist3D<ScalarT>>;
 template <typename ScalarT = double>
 using StampedTwist3D = Stamped<Twist3D<ScalarT>>;
 
 // Explicit Types
 using Twist3Dd = Twist3D<double>;
+using TimedTwist3Dd = TimedTwist3D<double>;
 using StampedTwist3Dd = StampedTwist3D<double>;
 
 }  // namespace duatic::geometry

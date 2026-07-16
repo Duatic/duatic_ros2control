@@ -11,6 +11,8 @@
 
   <depend>eigen</depend>
   <depend>eigen3_cmake_module</depend>
+  <depend>duatic_controller_msgs</depend>
+  <depend>geometry_msgs</depend>
   <depend>pinocchio</depend>
   <depend>rclcpp</depend>
 
