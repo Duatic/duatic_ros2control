@@ -554,7 +554,8 @@ void CartesianPoseController::publish_topics()
   // Publish Pose
   if (end_effector_pose_pub_realtime_->trylock()) {
     end_effector_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
-    end_effector_pose_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+    end_effector_pose_pub_realtime_->msg_.header.frame_id =
+        params_.base_frame;  // TODO(patrick) this frame_id is not yet taken into account in the rest of the code !
     const auto& pose_trans = end_effector_pose().translation();
     end_effector_pose_pub_realtime_->msg_.pose.position.x = pose_trans(0);
     end_effector_pose_pub_realtime_->msg_.pose.position.y = pose_trans(1);
@@ -569,7 +570,7 @@ void CartesianPoseController::publish_topics()
   // Publish Twist
   if (end_effector_twist_pub_realtime_->trylock()) {
     end_effector_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
-    end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.end_effector_frame;
+    end_effector_twist_pub_realtime_->msg_.header.frame_id = params_.base_frame;
     const auto& twist_lin = end_effector_twist().linear();
     end_effector_twist_pub_realtime_->msg_.twist.linear.x = twist_lin(0);
     end_effector_twist_pub_realtime_->msg_.twist.linear.y = twist_lin(1);

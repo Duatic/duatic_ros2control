@@ -9,6 +9,10 @@ cartesian_pose_controller:
     type: string
     default_value: "flange"
     description: "Name of the end effector frame to be controlled."
+  base_frame:
+    type: string
+    default_value: "base_link"
+    description: "Name of the base frame"
 
   topic_prefix:
     type: string
@@ -71,11 +75,6 @@ cartesian_pose_controller:
     default_value: ""
     description: "The full srdf"
 
-  
-  base_frame:
-    type: string
-    default_value: "base"
-    description: "Name of the base frame"
   interpolation_time:
     type: double
     default_value: 0.1
