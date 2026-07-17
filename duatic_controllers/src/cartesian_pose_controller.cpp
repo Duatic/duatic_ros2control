@@ -162,20 +162,17 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // setup and initialize QP
   assert(robot_model_.nv == params_.joints.size() && "At this stage, it is assumed that ALL joints are to be "
                                                      "controlled! -> This is an open TODO");
-  const Eigen::Index qp_size = robot_model_.nv;  // TODO(patrick): always make a full model and use the joints
-                                                 // parameters to define actively controlled joints
-                                                 // The result is structured as [delta_theta]
+  // TODO(patrick): always make a full model and use the joints parameters to define actively controlled joints
   qp_solver_ = std::make_unique<proxsuite::proxqp::dense::QP<double>>(
-      qp_size, 0, 0, true,  // variables, eq-constraints, in-eq-constraints, box_constrained
+      robot_model_.nv, 0, 0, true,             // variables, eq-constraints, in-eq-constraints, box_constrained
       proxsuite::proxqp::HessianType::Dense);  // H = I + w * J^T * J is dense, not diagonal
   // settings
   qp_solver_->settings.eps_abs = params_.ik_precision;
   qp_solver_->settings.eps_rel = 0.1 * params_.ik_precision;
   qp_solver_->settings.max_iter = params_.ik_max_iterations;
-  qp_solver_->settings.max_iter_in = params_.ik_max_iterations >> 1;  // div 2
+  qp_solver_->settings.max_iter_in = params_.ik_max_iterations - 2;
   qp_solver_->settings.verbose = params_.enable_debug_log;
-  qp_solver_->settings.compute_timings =
-      true;  // TODO(patrick): make this a parameter to be (debug_log or introspection)
+  qp_solver_->settings.compute_timings = (params_.enable_debug_log || params_.enable_introspection);
   qp_solver_->settings.initial_guess =
       proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;  // ! IMPORTANT ! Don't reset this on
                                                                                // error, it will cause way more required
@@ -183,20 +180,13 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // optimization-criteria: H = I + w * J^T * J, g = -w * J^T * pose_diff (recomputed every cycle, see
   // computeStateJointMotion); the cartesian tracking error is folded into the cost instead of being an
   // equality-constrained slack variable.
-  qp_solver_H_ = Eigen::MatrixXd::Identity(qp_size, qp_size);
-  qp_solver_g_ = Eigen::VectorXd::Zero(qp_size);
-  // NOTE: deliberately NOT setting settings.default_H_eigenvalue_estimate here. proxsuite's
-  // update_default_rho_with_minimal_Hessian_eigen_value() runs on *every* init()/update() call and does
-  // `settings.default_rho += abs(minimal_H_eigenvalue_estimate)` -- an accumulation, not an assignment. Since H
-  // is now recomputed every cycle (see computeStateJointMotion) and we never refresh this estimate per-call, a
-  // nonzero fixed value here would make default_rho grow without bound across the controller's lifetime,
-  // eventually over-regularizing the proximal step until the solver stops converging. Leaving the estimate at
-  // its default (0.0) keeps default_rho at proxsuite's own well-tuned constant baseline.
-  qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, qp_size);
+  qp_solver_H_ = Eigen::MatrixXd::Zero(robot_model_.nv, robot_model_.nv);
+  qp_solver_g_ = Eigen::VectorXd::Zero(robot_model_.nv);
+  qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
   // ik-limits: (in-eq constraints) TODO(patrick) add cartesian speed limits here
   // position (box) limits
-  qp_solver_l_box_ = Eigen::VectorXd::Constant(qp_size, -1e20);  // TODO(patrick): make this a parameter
-  qp_solver_u_box_ = Eigen::VectorXd::Constant(qp_size, 1e20);
+  qp_solver_l_box_ = Eigen::VectorXd::Constant(robot_model_.nv, -1e10);
+  qp_solver_u_box_ = Eigen::VectorXd::Constant(robot_model_.nv, 1e10);
   qp_result_error_.setZero();
 
   // subscriptions
@@ -333,11 +323,11 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   qp_jacobian_.setZero();
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
-  qp_solver_H_.noalias() = Eigen::MatrixXd::Identity(robot_model_.nv, robot_model_.nv) +
-                           params_.ik_error_avoidance_weight * qp_jacobian_.transpose() * qp_jacobian_;
-  qp_solver_g_.setZero();  // pose_diff is zero on initialization
-  qp_solver_->init(qp_solver_H_, qp_solver_g_,                                    // optimization criteria
-                   proxsuite::nullopt, proxsuite::nullopt,                       // no equality constraints
+  qp_solver_H_ = qp_jacobian_.transpose() * qp_jacobian_;
+  qp_solver_H_.diagonal().array() += params_.ik_damping;
+  qp_solver_g_.setZero();                                                       // pose_diff is zero on initialization
+  qp_solver_->init(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
+                   proxsuite::nullopt, proxsuite::nullopt,                      // no equality constraints
                    proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
                    Eigen::VectorXd::Constant(qp_solver_->model.dim, -0.1),
                    Eigen::VectorXd::Constant(qp_solver_->model.dim, 0.1)  // box constraints (joint position limits)
@@ -427,15 +417,16 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
 {
   // Get 6D-diff between current pose and target pose
   target_pose_diff_ = target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
+  // TODO: limit to safe-velocity (by parameter, linear and angular independent)
 
   // Update current EE-Jacobian
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
   // Fold the cartesian tracking error into the optimization criteria instead of using an equality
   // constraint: H = I + w * J^T * J, g = -w * J^T * pose_diff
-  qp_solver_H_.noalias() = Eigen::MatrixXd::Identity(robot_model_.nv, robot_model_.nv) +
-                           params_.ik_error_avoidance_weight * qp_jacobian_.transpose() * qp_jacobian_;
-  qp_solver_g_.noalias() = -params_.ik_error_avoidance_weight * qp_jacobian_.transpose() * target_pose_diff_.vector;
+  qp_solver_H_ = qp_jacobian_.transpose() * qp_jacobian_;
+  qp_solver_H_.diagonal().array() += params_.ik_damping;
+  qp_solver_g_ = -(qp_jacobian_.transpose() * target_pose_diff_.vector);
   // Fill QP box bounds with position displacement limits
   qp_solver_l_box_ = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);  // soft limits: don't enforce going
                                                                                   // back if already out of scope
@@ -443,15 +434,11 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
                                                                                   // back if already out of scope
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
-  // NOTE: unlike the previous (constant-Hessian) formulation, H = I + w * J^T * J now changes every cycle with
-  // the robot pose, so the Ruiz preconditioner must be recomputed each time (update_preconditioner = true).
-  // Leaving it stale (computed once for the activation-time Jacobian) badly conditions the dense Hessian and
-  // makes the solver hit max_iter instead of converging.
   qp_solver_->update(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
-                     proxsuite::nullopt, proxsuite::nullopt,                     // no equality constraints
-                     proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt, // inequality constraints
+                     proxsuite::nullopt, proxsuite::nullopt,                      // no equality constraints
+                     proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
                      qp_solver_l_box_, qp_solver_u_box_,  // box constraints (joint position limits)
-                     true  // update_preconditioner
+                     true                                 // update_preconditioner
   );
   qp_solver_->solve();  // warm start with previous result by settings
   if (qp_solver_->results.info.status != proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED) {
@@ -463,10 +450,10 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
     qp_solver_->results.x *= 0.5;
 
     RCLCPP_ERROR_STREAM(get_node()->get_logger(),
-                       "Continue with half the unfinished solution: " << qp_solver_->results.x.transpose());
+                        "Continue with half the unfinished solution: " << qp_solver_->results.x.transpose());
   }
   // remaining cartesian error for the found solution (diagnostics only, no longer a decision variable)
-  qp_result_error_ = target_pose_diff_.vector - qp_jacobian_ * qp_solver_->results.x;
+  qp_result_error_ = target_pose_diff_.vector - (qp_jacobian_ * qp_solver_->results.x);
   // integrate joint position
   assert(robot_model_.nv == state_q_.size());
   control_q_ = (state_q_ + qp_solver_->results.x)
@@ -518,15 +505,15 @@ void CartesianPoseController::publish_statistics(const bool always_publish)
                            << " - time - setup: " << qp_solver_->results.info.setup_time << " µs" << std::endl
                            << " - time - solve: " << qp_solver_->results.info.solve_time << " µs" << std::endl
                            << " - time - run: " << qp_solver_->results.info.run_time << " µs" << std::endl
-                           << " - inner_iterations: " << qp_solver_->results.info.iter << std::endl
-                           << " - outer_iterations: " << qp_solver_->results.info.iter_ext << std::endl);
+                           << " - inner iterations: " << qp_solver_->results.info.iter << std::endl
+                           << " - outer iterations: " << qp_solver_->results.info.iter_ext << std::endl);
     Eigen::VectorXd control_positions = Eigen::VectorXd::Zero(control_q_.size());
     Eigen::VectorXd control_velocities = Eigen::VectorXd::Zero(control_v_.size());
     assert(control_q_.size() == control_v_.size());
     assert(control_q_.size() == static_cast<Eigen::Index>(params_.joints.size()));
     for (Eigen::Index i = 0; i < control_q_.size(); ++i) {
-      control_positions[i] = control_q_[joint_q_idx_[i]];
-      control_velocities[i] = control_v_[joint_v_idx_[i]];
+      control_positions[i] = control_q_[joint_q_idx_[static_cast<size_t>(i)]];
+      control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
     }
     RCLCPP_INFO_STREAM(get_node()->get_logger(),
                        "IK solver: Problem Solution"
@@ -580,279 +567,6 @@ void CartesianPoseController::publish_topics()
     target_twist_pub_realtime_->unlockAndPublish();
   }
 }
-
-////////////////////////////////////////////////////////////////////////
-// OLD UNDERNEATH
-////////////////////////////////////////////////////////////////////////
-/*
-static Eigen::VectorXd sample_target(const Eigen::VectorXd& start_state, const Eigen::VectorXd& target_state,
-                                     rclcpp::Time start_time, rclcpp::Time current_time, double duration_sec)
-{
-  // Handle edge cases
-  if (duration_sec <= 0.0) {
-    return target_state;
-  }
-
-  // Compute elapsed time
-  double elapsed = (current_time - start_time).seconds();
-
-  // Compute interpolation factor
-  double alpha = elapsed / duration_sec;
-
-  // Clamp between 0 and 1
-  alpha = std::min(1.0, std::max(0.0, alpha));
-
-  // Linear interpolation
-  return (1.0 - alpha) * start_state + alpha * target_state;
-  ;
-}
-  */
-/*
-static pinocchio::SE3 ROS_pose_to_SE3(const geometry_msgs::msg::Pose& pose)
-{
- Eigen::Quaterniond q(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
- q.normalize();
- Eigen::Vector3d t(pose.position.x, pose.position.y, pose.position.z);
- return pinocchio::SE3(q.normalized(), t);
-}
-*/
-/*
-static std::optional<pinocchio::SE3> transform_pose_to_model_base_frame(
-    const std::string& frame_id, const pinocchio::FrameIndex& base_frame_idx, const pinocchio::SE3& target_pose,
-    const pinocchio::Model& model, pinocchio::Data& data, const Eigen::VectorXd& q_current, rclcpp::Logger logger)
-{
-  // If no frame_id specified or it's "world", assume pose is already in model base frame
-  if (frame_id.empty() || frame_id == "world") {
-    return target_pose;
-  }
-
-  // Get the transformation from the target frame to the model base frame
-  pinocchio::FrameIndex target_frame_id;
-  try {
-    target_frame_id = model.getFrameId(frame_id);
-  } catch (const std::exception& e) {
-    RCLCPP_ERROR(logger, "Frame '%s' not found in Pinocchio model: %s", frame_id.c_str(), e.what());
-    // Return original pose with failure flag
-    return std::nullopt;
-  }
-
-  // Compute forward kinematics to get the transformation
-  pinocchio::forwardKinematics(model, data, q_current);
-  pinocchio::updateFramePlacements(model, data);
-
-  const pinocchio::SE3& world_T_base = data.oMf[base_frame_idx];
-  const pinocchio::SE3& world_T_ref = data.oMf[target_frame_id];
-
-  // Get the pose of the target frame in model base frame
-  pinocchio::SE3 base_T_ref = world_T_base.inverse() * world_T_ref;
-  pinocchio::SE3 base_T_target = base_T_ref * target_pose;
-
-  return base_T_target;
-}
-*/
-/*
-std::optional<CartesianPoseController::IKResult> CartesianPoseController::compute_ik(
-    const pinocchio::Model& model, pinocchio::Data& data, const pinocchio::SE3& target_pose,
-    const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in, rclcpp::Logger logger)
-{
-  // Update once
-  pinocchio::forwardKinematics(model, data, q_in);
-  pinocchio::updateFramePlacement(model, data, target_pose_frame_id);
-  const pinocchio::SE3 desired_pose_world = data.oMf[target_pose_frame_id] * target_pose;
-
-  Eigen::VectorXd q_out = q_in;
-
-  // Tunable parameters
-  const double eps = 1e-5;  // Convergence threshold
-  const int IT_MAX = 4000;  // Max iterations
-  const double DT = 5e-2;   // Step size
-  const double w_rot = 0.5;
-  const double w_trans = 1.0;
-  const double w_q = 0.1;
-  const double w_limits = 0.02;
-
-  pinocchio::Data::Matrix6x J(6, model.nv);
-  J.setZero();
-  Eigen::VectorXd v(model.nv);
-  Eigen::Matrix<double, 6, 1> err;
-  bool success = false;
-
-  for (int i = 0; i < IT_MAX; i++) {
-    // Update kinematics
-    pinocchio::forwardKinematics(model, data, q_out);
-    pinocchio::updateFramePlacement(model, data, target_pose_frame_id);
-
-    // Compute error (target_pose vs current end-effector pose)
-    const pinocchio::SE3 dMi = desired_pose_world.actInv(data.oMf[target_pose_frame_id]);
-    err = pinocchio::log6(dMi).toVector();
-
-    // Log error for debugging
-    /*if (i % 100 == 0) {
-      RCLCPP_INFO_STREAM(logger, "q " << q_out.transpose());
-      RCLCPP_INFO_STREAM(logger, "error" << err.transpose());
-      RCLCPP_INFO(logger, "Iteration %d: error norm = %f", i, err.norm());
-    }*//*
-
-    // Check convergence
-    if (err.norm() < eps) {
-      success = true;
-      RCLCPP_INFO_STREAM(logger, "Converged after: " << i << " iteration with error: " << err.norm());
-      break;
-    }
-
-    // Compute Jacobian at the end-effector
-    pinocchio::computeFrameJacobian(model, data, q_out, target_pose_frame_id, pinocchio::LOCAL, J);
-
-    // Check if Jacobian is ill-conditioned
-    if (J.isZero(1e-10)) {
-      RCLCPP_ERROR(logger, "Jacobian is ill-conditioned at iteration %d.", i);
-      return std::nullopt;
-    }
-
-    // SVD solver
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeFullU | Eigen::ComputeFullV);
-
-    auto U = svd.matrixU();
-    auto V = svd.matrixV();
-    auto S = svd.singularValues();
-
-    // Dynamic lambda
-    double sigma_max = S(0);
-    double sigma_min = S(S.size() - 1);
-
-    if (sigma_min < 1e-4)  // near singularity
-      std::cout << "sigma_min: " << sigma_min << std::endl;
-
-    double kappa = sigma_max / (sigma_min + 1e-12);
-
-    double lambda = 1e-3 * kappa;
-    lambda = std::clamp(lambda, 1e-4, 1e-1);
-
-    Eigen::VectorXd Sinv = S;
-    for (int j = 0; j < S.size(); j++) {
-      Sinv(j) = S(j) / (S(j) * S(j) + lambda * lambda);
-    }
-    v = -V * Sinv.asDiagonal() * U.transpose() * err;
-
-    // add a target which makes configuration that deviate less from the initial position better
-    Eigen::MatrixXd J_pinv = V * Sinv.asDiagonal() * U.transpose();
-    Eigen::MatrixXd N = Eigen::MatrixXd::Identity(model.nv, model.nv) - J_pinv * J;
-
-    Eigen::VectorXd q_err = q_in - q_out;
-
-    // Joint limit avoidance term
-    // Currently does not work. Probably needs a different approach
-    Eigen::VectorXd q_limit_err = Eigen::VectorXd::Zero(model.nv);
-    for (int j = 0; j < model.nv; ++j) {
-      const double lower = model.lowerPositionLimit[j];
-      const double upper = model.upperPositionLimit[j];
-
-      if (!std::isfinite(lower) || !std::isfinite(upper))
-        continue;
-
-      const double range = upper - lower;
-      if (range < 1e-6)
-        continue;
-
-      const double dist_lower = q_out(j) - lower;
-      const double dist_upper = upper - q_out(j);
-
-      // Activate only near limits
-      const double activation = 0.2 * range;
-      const double w = std::clamp(1.0 - std::min(dist_lower, dist_upper) / activation, 0.0, 1.0);
-      const double eps = 1e-3;
-
-      q_limit_err(j) = w * std::clamp(((1.0 / (dist_lower + eps) - 1.0 / (dist_upper + eps)) / range), -5.0, 5.0);
-    }
-    // RCLCPP_INFO_STREAM(logger, q_limit_err.transpose());
-
-    Eigen::VectorXd q_secondary = w_q * q_err + w_limits * q_limit_err;
-    v += N * q_secondary;
-
-    // Update joint configuration
-    q_out = pinocchio::integrate(model, q_out, v * DT);
-  }
-  // For testing we currently accept all solutions. This allows us to push through singularities
-  success = true;
-  if (success) {
-    RCLCPP_INFO_STREAM(logger, err.norm());
-    CartesianPoseController::IKResult result;
-    result.q_out = q_out;
-    return result;
-  } else {
-    RCLCPP_ERROR_STREAM(logger, "Inverse kinematics did not converge within: " << IT_MAX
-                                                                               << " iterations. Error: " << err.norm());
-    return std::nullopt;
-  }
-}
-*/
-/*
-std::optional<CartesianPoseController::IKResult>
-CartesianPoseController::run_ik(const geometry_msgs::msg::PoseStamped& msg)
-{
-  const auto start_time = std::chrono::system_clock::now();
-  // Run IK in the non rt thread
-  const auto pose_for_ik = transform_pose_to_model_base_frame(
-      msg.header.frame_id, endeffector_frame_id_, ROS_pose_to_SE3(msg.pose), pinocchio_model_, pinocchio_data_,
-      last_system_state_->q, get_node()->get_logger());
-
-  if (!pose_for_ik) {
-    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to transform pose to IK chain base frame");
-    return std::nullopt;
-  }
-
-  const auto ik_result = compute_ik(pinocchio_model_, pinocchio_data_, pose_for_ik.value(), endeffector_frame_id_,
-                                    last_system_state_->q, get_node()->get_logger());
-  const auto ik_duration = std::chrono::system_clock::now() - start_time;
-  RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                     "IK took: " << std::chrono::duration_cast<std::chrono::milliseconds>(ik_duration));
-  return ik_result;
-}
-std::optional<pinocchio::SE3> CartesianPoseController::get_current_ee_pose()
-{
-  // Compute forward kinematics to get the transformation
-  pinocchio::forwardKinematics(pinocchio_model_, pinocchio_data_, last_system_state_->q);
-  pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
-
-  const pinocchio::SE3& oM_ee = pinocchio_data_.oMf[endeffector_frame_id_];
-  const pinocchio::SE3& oM_ref = pinocchio_data_.oMf[base_frame_id_];
-  pinocchio::SE3 refM_ee = oM_ref.inverse() * oM_ee;
-
-  return refM_ee;
-}
-*/
-/*
-std::optional<CartesianPoseController::PinocchioState> CartesianPoseController::build_current_state()
-{
-  const std::size_t joint_count = joint_position_state_interfaces_.size();
-
-  // Build full-size vectors for all robot joints (Pinocchio expects this)
-  PinocchioState state{ .q = Eigen::VectorXd::Zero(pinocchio_model_.nq),
-                        .v = Eigen::VectorXd::Zero(pinocchio_model_.nv),
-                        .a = Eigen::VectorXd::Zero(pinocchio_model_.nv) };
-
-  // Map: Pinocchio joint name -> index in q/v
-  for (std::size_t i = 0; i < joint_count; i++) {
-    const std::string& joint_name = params_.joints[i];
-    const auto idx = joint_indices_[i];
-
-    try {
-      state.q[pinocchio_model_.joints[idx].idx_q()] =
-          duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-
-      state.v[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-
-      state.a[pinocchio_model_.joints[idx].idx_v()] =
-          duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-    } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
-      return std::nullopt;
-    }
-  }
-  return state;
-}
-*/
 
 }  // namespace duatic::controllers
 

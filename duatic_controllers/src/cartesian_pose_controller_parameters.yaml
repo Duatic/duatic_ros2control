@@ -13,6 +13,25 @@ cartesian_pose_controller:
     type: string
     default_value: "flange"
     description: "Name of the end effector frame to be controlled."
+  limit_frames:
+    type: string_array
+    default_value: []
+    description: "Additional frames that are limited in motion."
+    validation:
+      unique<>: null
+
+  linear_velocity_limit:
+    type: double
+    default_value: 1.0
+    description: "Maximum velocity for linear, Cartesian motions. Set negative to disable velocity limits."
+    validation:
+      bounds<>: [-1.0, 10.0]
+  angular_velocity_limit:
+    type: double
+    default_value: -1.0
+    description: "Maximum velocity for rotational motions. Set negative to synchronize with linear velocities"
+    validation:
+      bounds<>: [-1.0, 62.83]
 
   topic_prefix:
     type: string
@@ -22,7 +41,6 @@ cartesian_pose_controller:
     type: string
     default_value: "target"
     description: "Suffix added to the target frame topic for receiving control inputs."
-
   topic_pub_frequency:
     type: double
     default_value: 10.0
@@ -30,12 +48,12 @@ cartesian_pose_controller:
     validation:
       bounds<>: [0.0,1000.0]
 
-  ik_error_avoidance_weight:
+  ik_damping:
     type: double
-    default_value: 10.0
-    description: "Weight for the result error avoidance criteria in the inverse kinematics solver."
+    default_value: 1.0
+    description: "Weight to dampen all joint motions and stabilize the IK solution."
     validation:
-      bounds<>: [0.001, 1000.0]
+      bounds<>: [0.001, 10.0]
   ik_precision:
     type: double
     default_value: 1.0e-3
@@ -44,10 +62,10 @@ cartesian_pose_controller:
       bounds<>: [0.0, 0.1]
   ik_max_iterations:
     type: int
-    default_value: 10000
+    default_value: 10
     description: "Maximum number of iterations for the inverse kinematics solver."
     validation:
-      bounds<>: [1, 10000]
+      bounds<>: [3, 30]
   
   enable_introspection:
     type: bool
