@@ -87,6 +87,10 @@ private:
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
   cartesian_pose_controller::Params params_;
 
+  // optimization horizon and limits
+  double motion_horizon_;
+  double v_sq_limit_lin_, v_sq_limit_ang_;
+
   pinocchio::Model robot_model_;
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
@@ -109,7 +113,6 @@ private:
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
   geometry::State3Dd target_state_;
-  geometry::Twist3Dd target_pose_diff_;
 
   /* Quadratic programming solver
    *   min_theta 1/2 theta^T theta + 1/2 w (J theta - pose_diff)^T (J theta - pose_diff)
@@ -124,7 +127,7 @@ private:
   Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // end-effector Jacobian J
   Eigen::VectorXd qp_solver_l_box_;                                  // lower box bounds
   Eigen::VectorXd qp_solver_u_box_;                                  // upper box bounds
-  Eigen::Vector<double, 6> qp_result_error_;  // remaining cart. error for the found solution (diagnostics)
+  Eigen::VectorXd pose_diff_ik_result_;                              // solution vector
 
   // state publication topics
   double topics_pub_period_;
@@ -140,27 +143,43 @@ private:
 
   void update_rt_state_buffer(const rclcpp::Time& now);
 
-  void computeStateJointMotion(const rclcpp::Duration& period, const bool verbose = false);
+  void run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
+                        const bool verbose = false);
 
   void command_controls();
 
-  void publish_statistics(const bool always_publish = false);
+  void log_statistics() const;
 
   void publish_topics();
 
-  inline const pinocchio::SE3& target_pose()
+  inline const pinocchio::SE3& target_pose() const
   {  // for convenience
     return state_data_.oMf[target_frame_idx_];
   }
-  inline const pinocchio::Motion& target_twist()
+  inline const pinocchio::Motion& target_twist() const
   {  // for convenience
     return state_target_twist_;
   }
 
-  ////////////////////////////////////////////////////////
-  /// OLD UNDERNEATH
-  ////////////////////////////////////////////////////////
-  pinocchio::GeometryModel pinocchio_geom_;
+  inline bool is_v_limited_lin() const
+  {
+    return v_sq_limit_lin_ > 0.0;
+  }
+
+  inline bool is_v_limited_ang() const
+  {
+    return v_sq_limit_ang_ > 0.0;
+  }
+
+  template <typename Vector>
+  inline static double scale_sq(Vector&& v, const double limit_sq)
+  {
+    assert(limit_sq > 0.0);
+    const double scale = std::sqrt(limit_sq / std::fmax(limit_sq, v.squaredNorm()));
+    assert((0.0 <= scale) && (scale <= 1.0));
+    v *= scale;
+    return scale;
+  }
 };
 
 }  // namespace duatic::controllers

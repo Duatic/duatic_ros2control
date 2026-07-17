@@ -76,9 +76,42 @@ public:
   {
     return vector.segment(3, 3);
   }
-  inline const RotationTypeConst Rotation() const
+  inline RotationTypeConst Rotation() const
   {
     return vector.segment(3, 3);
+  }
+
+  inline Self& operator+=(const Self& other)
+  {
+    vector += other.vector;
+    return *this;
+  }
+
+  inline Self operator+(const Self& other) const
+  {
+    return Self(vector + other.vector);
+  }
+
+  inline Self& operator-=(const Self& other)
+  {
+    vector -= other.vector;
+    return *this;
+  }
+
+  inline Self operator-(const Self& other) const
+  {
+    return Self(vector - other.vector);
+  }
+
+  inline Self& operator*=(const Scalar& scalar)
+  {
+    vector *= scalar;
+    return *this;
+  }
+
+  inline Self operator*(const Scalar& scalar) const
+  {
+    return Self(vector * scalar);
   }
 };
 

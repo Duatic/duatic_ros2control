@@ -128,6 +128,26 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty. Abort configuration.");
     return controller_interface::CallbackReturn::FAILURE;
   }
+
+  // evaluate optimization horizon and respective limits
+  motion_horizon_ = params_.motion_horizon;
+  assert(motion_horizon_ > 0.0);
+  RCLCPP_INFO(get_node()->get_logger(), "Optimizing with a motion horizon of %.2f s", motion_horizon_);
+  v_sq_limit_lin_ = params_.linear_velocity_limit;
+  if (is_v_limited_lin()) {
+    RCLCPP_INFO(get_node()->get_logger(), "Linear velocity limit at %.2f m/s", v_sq_limit_lin_);
+    v_sq_limit_lin_ *= motion_horizon_;  // displacement instead of velocity
+    v_sq_limit_lin_ *= v_sq_limit_lin_;  // squared displacement to simplify optimization
+  }
+  v_sq_limit_ang_ = params_.angular_velocity_limit;
+  if (is_v_limited_ang()) {
+    RCLCPP_INFO(get_node()->get_logger(), "Angular velocity limit at %.2f rad/s", v_sq_limit_ang_);
+    v_sq_limit_ang_ *= motion_horizon_;  // displacement instead of velocity
+    v_sq_limit_ang_ *= v_sq_limit_ang_;  // squared displacement to simplify optimization
+  } else if (is_v_limited_lin()) {       // the special case of synchronized angular limit
+    RCLCPP_INFO(get_node()->get_logger(), "Angular velocity synchronized with limited linear velocity");
+  }
+
   // build model joint caches
   joint_model_idx_.clear();
   joint_model_idx_.reserve(params_.joints.size());
@@ -177,9 +197,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;  // ! IMPORTANT ! Don't reset this on
                                                                                // error, it will cause way more required
                                                                                // iterations, whyever ...
-  // optimization-criteria: H = I + w * J^T * J, g = -w * J^T * pose_diff (recomputed every cycle, see
-  // computeStateJointMotion); the cartesian tracking error is folded into the cost instead of being an
-  // equality-constrained slack variable.
+  // variables setup
   qp_solver_H_ = Eigen::MatrixXd::Zero(robot_model_.nv, robot_model_.nv);
   qp_solver_g_ = Eigen::VectorXd::Zero(robot_model_.nv);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
@@ -187,7 +205,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // position (box) limits
   qp_solver_l_box_ = Eigen::VectorXd::Constant(robot_model_.nv, -1e10);
   qp_solver_u_box_ = Eigen::VectorXd::Constant(robot_model_.nv, 1e10);
-  qp_result_error_.setZero();
+  pose_diff_ik_result_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // subscriptions
   const std::string topic_prefix = (params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix) + "/";
@@ -237,12 +255,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_setup", &(qp_solver_->results.info.setup_time));
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_solve", &(qp_solver_->results.info.solve_time));
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_run", &(qp_solver_->results.info.run_time));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_x", &(qp_result_error_[0]));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_y", &(qp_result_error_[1]));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_z", &(qp_result_error_[2]));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_x", &(qp_result_error_[3]));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_y", &(qp_result_error_[4]));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_z", &(qp_result_error_[5]));
   }
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -267,12 +279,6 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_setup");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_solve");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_time_run");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_x");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_y");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_position_z");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_x");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_y");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_error_orientation_z");
   }
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -338,7 +344,9 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  publish_statistics();
+  if (params_.enable_debug_log) {
+    log_statistics();
+  }
   publish_topics();
 
   // Everything functional and ready for RT operation
@@ -358,13 +366,36 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   // Publish the current end effector pose and twist iff the time is right
   const double seconds = time.seconds();
   const bool do_publications = (seconds > topics_pub_next_time_);
+  const double problem_scale = motion_horizon_ / period.seconds();
 
   update_state();
 
   update_rt_state_buffer(time);
 
+  // Get 6D-diff between current pose and target pose
   trajectory_buffer_.update_read().evaluate_at(time, target_state_);
-  computeStateJointMotion(period, params_.enable_debug_log && do_publications);
+  geometry::Twist3Dd target_pose_diff =
+      target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
+  target_pose_diff *= problem_scale;
+
+  // Limit error to safe target frame velocity limits
+  // ! IMPORTANT: This estimation is based on the assumption of consistent time steps !
+  const double lin_scale = is_v_limited_lin() ? scale_sq(target_pose_diff.Translation(), v_sq_limit_lin_) : 1.0;
+  if (is_v_limited_ang()) {
+    scale_sq(target_pose_diff.Rotation(), v_sq_limit_ang_);
+  } else {  // synchronized
+    target_pose_diff.Rotation() *= lin_scale;
+  }
+
+  // Run the Optimization
+  run_pose_diff_ik(problem_scale, target_pose_diff, params_.enable_debug_log && do_publications);
+
+  // integrate joint position
+  assert(robot_model_.nv == state_q_.size());
+  control_q_ = (state_q_ + (pose_diff_ik_result_))
+                   .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
+                   .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
+  // TODO: update control_v_
 
   // Write to HW
   if (!params_.dry_run) {
@@ -373,7 +404,9 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   // Publish the current end effector pose and twist iff the time is right
   if (do_publications) {
-    publish_statistics();
+    if (params_.enable_debug_log) {
+      log_statistics();
+    }
     publish_topics();
 
     // update the next publish time
@@ -381,7 +414,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   }
 
   return controller_interface::return_type::OK;
-}  // namespace duatic::controllers
+}
 
 void CartesianPoseController::update_state()
 {
@@ -413,25 +446,23 @@ void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
   current_state_buffer_.publish_write();
 }
 
-void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& period, const bool verbose)
+void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
+                                               const bool verbose)
 {
-  // Get 6D-diff between current pose and target pose
-  target_pose_diff_ = target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
-  // TODO: limit to safe-velocity (by parameter, linear and angular independent)
-
   // Update current EE-Jacobian
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
-  // Fold the cartesian tracking error into the optimization criteria instead of using an equality
   // constraint: H = I + w * J^T * J, g = -w * J^T * pose_diff
   qp_solver_H_ = qp_jacobian_.transpose() * qp_jacobian_;
   qp_solver_H_.diagonal().array() += params_.ik_damping;
-  qp_solver_g_ = -(qp_jacobian_.transpose() * target_pose_diff_.vector);
+  qp_solver_g_ = -(qp_jacobian_.transpose() * scaled_target_diff.vector);
   // Fill QP box bounds with position displacement limits
   qp_solver_l_box_ = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);  // soft limits: don't enforce going
                                                                                   // back if already out of scope
+  qp_solver_l_box_ *= problem_scale;
   qp_solver_u_box_ = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);  // soft limits: don't enforce going
                                                                                   // back if already out of scope
+  qp_solver_u_box_ *= problem_scale;
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
   qp_solver_->update(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
@@ -441,25 +472,20 @@ void CartesianPoseController::computeStateJointMotion(const rclcpp::Duration& pe
                      true                                 // update_preconditioner
   );
   qp_solver_->solve();  // warm start with previous result by settings
+  // ERROR HANDLING
   if (qp_solver_->results.info.status != proxsuite::proxqp::QPSolverOutput::PROXQP_SOLVED) {
     RCLCPP_ERROR_STREAM(
         get_node()->get_logger(),
         "CartesianPoseController: QP solver did not converge, result status is "
             << static_cast<std::underlying_type_t<proxsuite::proxqp::QPSolverOutput>>(qp_solver_->results.info.status));
-    publish_statistics(true);
+    log_statistics();
     qp_solver_->results.x *= 0.5;
 
     RCLCPP_ERROR_STREAM(get_node()->get_logger(),
                         "Continue with half the unfinished solution: " << qp_solver_->results.x.transpose());
   }
-  // remaining cartesian error for the found solution (diagnostics only, no longer a decision variable)
-  qp_result_error_ = target_pose_diff_.vector - (qp_jacobian_ * qp_solver_->results.x);
-  // integrate joint position
-  assert(robot_model_.nv == state_q_.size());
-  control_q_ = (state_q_ + qp_solver_->results.x)
-                   .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
-                   .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
-  // TODO: update control_v_
+  // rescale result
+  pose_diff_ik_result_ = qp_solver_->results.x / problem_scale;
 }
 
 void CartesianPoseController::command_controls()
@@ -481,57 +507,51 @@ void CartesianPoseController::command_controls()
   assert(command_itr == command_interfaces_.end());
 }
 
-void CartesianPoseController::publish_statistics(const bool always_publish)
+void CartesianPoseController::log_statistics() const
 {
-  // debug log
-  if (always_publish || params_.enable_debug_log) {
-    RCLCPP_INFO_STREAM(get_node()->get_logger(), "IK solver: Problem Description"
-                                                     << std::endl  // print out the entire QP Problem
-                                                     << " - Hessian (I + w * J^T * J)" << std::endl
-                                                     << qp_solver_H_ << std::endl
-                                                     << " - Linear term (-w * J^T * pose_diff)" << std::endl
-                                                     << qp_solver_g_ << std::endl
-                                                     << " - Jacobian" << std::endl
-                                                     << qp_jacobian_ << std::endl
-                                                     << " - Target Pose Diff" << std::endl
-                                                     << target_pose_diff_.vector << std::endl
-                                                     << " - Lower Box Bounds" << std::endl
-                                                     << qp_solver_l_box_ << std::endl
-                                                     << " - Upper Box Bounds" << std::endl
-                                                     << qp_solver_u_box_);
-    RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                       "IK solver: Statistics"
-                           << std::endl  // Print solver statistics
-                           << " - time - setup: " << qp_solver_->results.info.setup_time << " µs" << std::endl
-                           << " - time - solve: " << qp_solver_->results.info.solve_time << " µs" << std::endl
-                           << " - time - run: " << qp_solver_->results.info.run_time << " µs" << std::endl
-                           << " - inner iterations: " << qp_solver_->results.info.iter << std::endl
-                           << " - outer iterations: " << qp_solver_->results.info.iter_ext << std::endl);
-    Eigen::VectorXd control_positions = Eigen::VectorXd::Zero(control_q_.size());
-    Eigen::VectorXd control_velocities = Eigen::VectorXd::Zero(control_v_.size());
-    assert(control_q_.size() == control_v_.size());
-    assert(control_q_.size() == static_cast<Eigen::Index>(params_.joints.size()));
-    for (Eigen::Index i = 0; i < control_q_.size(); ++i) {
-      control_positions[i] = control_q_[joint_q_idx_[static_cast<size_t>(i)]];
-      control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
-    }
-    RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                       "IK solver: Problem Solution"
-                           << std::endl  // Print the solver's solution
-                           << " - pose  - target: "
-                           << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation()) << std::endl
-                           << " - pose  - target      : " << target_state_.pose << std::endl
-                           << " - twist - target      : "
-                           << geometry::Twist3Dd(target_twist().linear(), target_twist().angular()) << std::endl
-                           << " - twist - target      : " << target_state_.twist << std::endl
-                           << " - solver - solution   : " << qp_solver_->results.x.transpose() << std::endl
-                           << " - solver - cart. error: " << qp_result_error_.transpose() << std::endl
-                           << " - solver - target-diff: " << target_pose_diff_.vector.transpose() << std::endl
-                           << " - state   - position: " << state_q_.transpose() << std::endl
-                           << " - control - position: " << control_positions.transpose() << std::endl
-                           << " - state   - velocity: " << state_v_.transpose() << std::endl
-                           << " - control - velocity: " << control_velocities.transpose());
+  RCLCPP_INFO_STREAM(get_node()->get_logger(), "IK solver: Problem Description"
+                                                   << std::endl  // print out the entire QP Problem
+                                                   << " - Hessian (I + w * J^T * J)" << std::endl
+                                                   << qp_solver_H_ << std::endl
+                                                   << " - Linear term (-w * J^T * pose_diff)" << std::endl
+                                                   << qp_solver_g_ << std::endl
+                                                   << " - Jacobian" << std::endl
+                                                   << qp_jacobian_ << std::endl
+                                                   << " - Lower Box Bounds" << std::endl
+                                                   << qp_solver_l_box_ << std::endl
+                                                   << " - Upper Box Bounds" << std::endl
+                                                   << qp_solver_u_box_);
+  RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                     "IK solver: Statistics"
+                         << std::endl  // Print solver statistics
+                         << " - time - setup: " << qp_solver_->results.info.setup_time << " µs" << std::endl
+                         << " - time - solve: " << qp_solver_->results.info.solve_time << " µs" << std::endl
+                         << " - time - run: " << qp_solver_->results.info.run_time << " µs" << std::endl
+                         << " - inner iterations: " << qp_solver_->results.info.iter << std::endl
+                         << " - outer iterations: " << qp_solver_->results.info.iter_ext << std::endl);
+  Eigen::VectorXd control_positions = Eigen::VectorXd::Zero(control_q_.size());
+  Eigen::VectorXd control_velocities = Eigen::VectorXd::Zero(control_v_.size());
+  assert(control_q_.size() == control_v_.size());
+  assert(control_q_.size() == static_cast<Eigen::Index>(params_.joints.size()));
+  for (Eigen::Index i = 0; i < control_q_.size(); ++i) {
+    control_positions[i] = control_q_[joint_q_idx_[static_cast<size_t>(i)]];
+    control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
   }
+  RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                     "IK solver: Problem Solution"
+                         << std::endl  // Print the solver's solution
+                         << " - pose  - target: "
+                         << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation()) << std::endl
+                         << " - pose  - target      : " << target_state_.pose << std::endl
+                         << " - twist - target      : "
+                         << geometry::Twist3Dd(target_twist().linear(), target_twist().angular()) << std::endl
+                         << " - twist - target      : " << target_state_.twist << std::endl
+                         << " - solver - solution   : " << qp_solver_->results.x.transpose() << std::endl
+                         << " - result              : " << pose_diff_ik_result_.transpose() << std::endl
+                         << " - state   - position: " << state_q_.transpose() << std::endl
+                         << " - control - position: " << control_positions.transpose() << std::endl
+                         << " - state   - velocity: " << state_v_.transpose() << std::endl
+                         << " - control - velocity: " << control_velocities.transpose());
 }
 
 void CartesianPoseController::publish_topics()

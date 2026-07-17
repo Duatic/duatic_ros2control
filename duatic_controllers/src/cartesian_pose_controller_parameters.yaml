@@ -20,18 +20,24 @@ cartesian_pose_controller:
     validation:
       unique<>: null
 
+  motion_horizon:
+    type: double
+    default_value: 0.1
+    description: "Time horizon in seconds the IK algorithm is running in. This will create exponential boundary approximation, the bigger, the slower"
+    validation:
+      bounds<>: [0.001, 1.0]
   linear_velocity_limit:
     type: double
     default_value: 1.0
-    description: "Maximum velocity for linear, Cartesian motions. Set negative to disable velocity limits."
+    description: "Maximum velocity for linear, Cartesian motions. Set zero to disable velocity limits."
     validation:
-      bounds<>: [-1.0, 10.0]
+      bounds<>: [0.0, 10.0]
   angular_velocity_limit:
     type: double
-    default_value: -1.0
-    description: "Maximum velocity for rotational motions. Set negative to synchronize with linear velocities"
+    default_value: 0.0
+    description: "Maximum velocity for rotational motions. Set zero to synchronize with linear velocities"
     validation:
-      bounds<>: [-1.0, 62.83]
+      bounds<>: [0.0, 62.83]
 
   topic_prefix:
     type: string
@@ -50,16 +56,16 @@ cartesian_pose_controller:
 
   ik_damping:
     type: double
-    default_value: 1.0
+    default_value: 0.001
     description: "Weight to dampen all joint motions and stabilize the IK solution."
     validation:
-      bounds<>: [0.001, 10.0]
+      bounds<>: [0.000001, 1.0]
   ik_precision:
     type: double
-    default_value: 1.0e-3
+    default_value: 0.0001
     description: "Precision of the inverse kinematics solver."
     validation:
-      bounds<>: [0.0, 0.1]
+      bounds<>: [0.000001, 0.1]
   ik_max_iterations:
     type: int
     default_value: 10
@@ -79,24 +85,3 @@ cartesian_pose_controller:
     type: bool
     default_value: false
     description: "If true, the controller will not send commands to the robot."
-
-
-
-
-
-  enable_state_topic:
-    type: bool
-    default_value: true
-    description: "Publish a status message on the ~/state topic"
-
-  srdf:
-    type: string
-    default_value: ""
-    description: "The full srdf"
-
-  interpolation_time:
-    type: double
-    default_value: 0.1
-    description: "Interpolation time between joint target commands"
-    validation:
-      bounds<>: [0.0,2.0]
