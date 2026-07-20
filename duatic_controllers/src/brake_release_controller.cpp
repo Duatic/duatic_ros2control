@@ -99,10 +99,6 @@ controller_interface::CallbackReturn BrakeReleaseController::on_init()
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
-
-  // Start IK worker thread
-  // IK worker will be started in on_activate after Pinocchio model is built
-
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -189,6 +185,8 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
 controller_interface::CallbackReturn
 BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
+  mode_ = mode_from_str(params_.mode);
+  RCLCPP_INFO_STREAM(get_node()->get_logger(), "Release mode: " << params_.mode);
   // clear out vectors in case of restart (reactivation to be precise)
   joint_position_command_interfaces_.clear();
   brake_target_command_interfaces_.clear();
@@ -233,6 +231,10 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 controller_interface::CallbackReturn
 BrakeReleaseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
+  for (auto& interface : brake_target_command_interfaces_) {
+    // Put the brakes into hold mode
+    interface.get().set_value<int>(2);
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -243,84 +245,112 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     return controller_interface::return_type::OK;
   }
 
+  // 1. In all mode at the beginning we need to excite the brake (high power try to pull the pin)
   if (current_state_ == State::Init && !last_state_change_time_) {
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Releasing brakes");
     for (auto& interface : brake_target_command_interfaces_) {
       // Excite the brakes
       interface.get().set_value<int>(1);
     }
-    current_state_ = State::Exciting;
+    // Depending on the mode we now need to go into a different state
+    // Auto and Semi need now to command a new target position into the right direction
+    // Manual just says: just stay here (aka we say we already commanded a position)
+    if (mode_ == Mode::Auto || mode_ == Mode::Semi) {
+      current_state_ = State::Exciting;
+    } else {
+      current_state_ = State::Commanding;
+    }
     last_state_change_time_ = time;
   }
 
-  if (current_state_ == State::Exciting && (time - last_state_change_time_.value()) > rclcpp::Duration(1, 0)) {
-    const std::size_t joint_count = joint_position_state_interfaces_.size();
+  if (mode_ == Mode::Auto || mode_ == Mode::Semi) {
+    if (current_state_ == State::Exciting && (time - last_state_change_time_.value()) > rclcpp::Duration(1, 0)) {
+      const std::size_t joint_count = joint_position_state_interfaces_.size();
 
-    // Build full-size vectors for all robot joints (Pinocchio expects this)
-    Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-    Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-    Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+      // Build full-size vectors for all robot joints (Pinocchio expects this)
+      Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
+      Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+      Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
 
-    for (std::size_t i = 0; i < joint_count; i++) {
-      const std::string& joint_name = params_.joints[i];
-      const auto idx = pinocchio_model_.getJointId(joint_name);
+      for (std::size_t i = 0; i < joint_count; i++) {
+        const std::string& joint_name = params_.joints[i];
+        const auto idx = pinocchio_model_.getJointId(joint_name);
 
-      try {
-        q[pinocchio_model_.joints[idx].idx_q()] =
-            duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
+        try {
+          q[pinocchio_model_.joints[idx].idx_q()] =
+              duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
 
-        v[pinocchio_model_.joints[idx].idx_v()] =
-            duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
+          v[pinocchio_model_.joints[idx].idx_v()] =
+              duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
 
-        a[pinocchio_model_.joints[idx].idx_v()] =
-            duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-      } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(), e.what());
+          a[pinocchio_model_.joints[idx].idx_v()] =
+              duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
+        } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
+          RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(),
+                       e.what());
+          return controller_interface::return_type::ERROR;
+        }
+      }
+
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Current configuration: " << q.transpose());
+
+      // Calculate the necessary torques to hold the arm at is current location
+      Eigen::VectorXd tau = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q);
+
+      // Determine the direction we need to move into in order to unload the brake pins
+      Eigen::VectorXd direction = Eigen::VectorXd::Zero(tau.size());
+
+      for (int i = 0; i < tau.size(); ++i) {
+        // Need to move into the opposite direction
+        if (tau[i] > 1e-6)
+          direction[i] = -1.0;
+        else if (tau[i] < -1e-6)
+          direction[i] = 1.0;
+      }
+      // Define the new targets
+      Eigen::VectorXd q_target = q + direction * params_.position_kick;
+
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Command new target positions: " << q_target.transpose());
+
+      // And command it
+      for (std::size_t i = 0; i < params_.joints.size(); i++) {
+        const std::string& joint_name = params_.joints[i];
+        const auto idx = pinocchio_model_.getJointId(joint_name);
+        if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
+                q_target[pinocchio_model_.joints[idx].idx_q()])) {
+          RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
+        }
+      }
+
+      current_state_ = State::Commanding;
+      last_state_change_time_ = time;
+    }
+
+    // Only auto mode goes directly into brake holding state
+    if (mode_ == Mode::Auto) {
+      if (current_state_ == State::Commanding && (time - last_state_change_time_.value()) > rclcpp::Duration(3, 0)) {
+        RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
+        for (auto& interface : brake_target_command_interfaces_) {
+          // Put the brakes into holding state
+          interface.get().set_value<int>(2);
+        }
+        current_state_ = State::Holding;
+        last_state_change_time_ = time;
       }
     }
-
-    RCLCPP_INFO_STREAM(get_node()->get_logger(), "Current configuration: " << q.transpose());
-
-    // Calculate the necessary torques to hold the arm at is current location
-    Eigen::VectorXd tau = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q);
-
-    // Determine the direction we need to move into in order to unload the brake pins
-    Eigen::VectorXd direction = Eigen::VectorXd::Zero(tau.size());
-
-    for (int i = 0; i < tau.size(); ++i) {
-      // Need to move into the opposite direction
-      if (tau[i] > 1e-6)
-        direction[i] = -1.0;
-      else if (tau[i] < -1e-6)
-        direction[i] = 1.0;
-    }
-    // Define the new targets
-    Eigen::VectorXd q_target = q + direction * params_.position_kick;
-
-    RCLCPP_INFO_STREAM(get_node()->get_logger(), "Command new target positions: " << q_target.transpose());
-
-    // And command it
-    for (std::size_t i = 0; i < params_.joints.size(); i++) {
-      const std::string& joint_name = params_.joints[i];
-      const auto idx = pinocchio_model_.getJointId(joint_name);
-      if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
-              q_target[pinocchio_model_.joints[idx].idx_q()])) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
-      }
-    }
-
-    current_state_ = State::Commanding;
-    last_state_change_time_ = time;
   }
-
-  if (current_state_ == State::Commanding && (time - last_state_change_time_.value()) > rclcpp::Duration(3, 0)) {
-    RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
-    for (auto& interface : brake_target_command_interfaces_) {
-      // Put the brakes into holding state
-      interface.get().set_value<int>(2);
+  // Semi and manual modes wait for a user configurable amount of time
+  if (mode_ == Mode::Semi || mode_ == Mode::Manual) {
+    if (current_state_ == State::Commanding &&
+        time - last_state_change_time_.value() > rclcpp::Duration(std::chrono::duration<double>(params_.timeout))) {
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
+      for (auto& interface : brake_target_command_interfaces_) {
+        // Put the brakes into holding state
+        interface.get().set_value<int>(2);
+      }
+      current_state_ = State::Holding;
+      last_state_change_time_ = time;
     }
-    current_state_ = State::Holding;
-    last_state_change_time_ = time;
   }
 
   return controller_interface::return_type::OK;
