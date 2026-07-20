@@ -74,7 +74,6 @@ public:
   {
     Auto,
     Manual,
-    Semi
   };
 
   BrakeReleaseController();
@@ -108,10 +107,10 @@ private:
 
   State current_state_{ State::Init };
   std::optional<rclcpp::Time> last_state_change_time_;
-  Mode mode_{Mode::Auto};
+  Mode mode_{ Mode::Auto };
 
   /**
-   * @brief convert the mode argument in the parameter file into a better managable Mode enum
+   * @brief convert the mode argument in the parameter file into a better manageable Mode enum
    */
   Mode mode_from_str(const std::string& str)
   {
@@ -119,8 +118,6 @@ private:
       return Mode::Auto;
     } else if (str == "manual") {
       return Mode::Manual;
-    } else if (str == "semi") {
-      return Mode::Semi;
     }
     throw std::invalid_argument("Invalid mode: '" + str + "'");
   }

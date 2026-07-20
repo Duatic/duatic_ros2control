@@ -14,12 +14,12 @@ brake_release_controller:
   mode:
     type: string
     default_value: "auto"
-    description: "Select between 'auto', 'manual', 'semi' mode for brake release. In manual the user has a certain amount of time to manually move all drives around. In 'semi' mode the controller tries to releases the brakes automatically but gives the user time afterwards to manually move around the joints"
+    description: "Select between 'auto', 'manual', 'semi' mode for brake release. In manual the user has a certain amount of time to manually move all drives around."
     validation:
-      one_of<>: [["auto", "manual", "semi"]]
+      one_of<>: [["auto", "manual"]]
   timeout:
     type: double
     default_value: 50.0
-    description: "Timeout in 'manual' or 'semi' mode until the brakes are put into mode 'hold'"
+    description: "Timeout in 'manual' mode until the brakes are put into mode 'hold'"
     validation:
       gt_eq<>: [0.0]

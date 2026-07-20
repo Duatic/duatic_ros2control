@@ -64,8 +64,10 @@ controller_interface::InterfaceConfiguration BrakeReleaseController::command_int
   for (auto& joint : joints) {
     // Even though we are only commanding positions we also claim the velocity interface in order to put the drive into
     // the right control mode
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    if (mode_ == Mode::Auto) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    }
     config.names.emplace_back(joint + "/" + "target_brake_state");
   }
 
@@ -95,6 +97,8 @@ controller_interface::CallbackReturn BrakeReleaseController::on_init()
     param_listener_ = std::make_unique<brake_release_controller::ParamListener>(get_node());
     param_listener_->refresh_dynamic_parameters();
     params_ = param_listener_->get_params();
+
+    RCLCPP_INFO_STREAM(get_node()->get_logger(), "Release mode: " << params_.mode);
   } catch (const std::exception& e) {
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -118,6 +122,8 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
   }
 
   try {
+    // obtain the operation mode
+    mode_ = mode_from_str(params_.mode);
     // 1. build the pinocchio model from the urdf
     RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
     {
@@ -185,8 +191,6 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
 controller_interface::CallbackReturn
 BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  mode_ = mode_from_str(params_.mode);
-  RCLCPP_INFO_STREAM(get_node()->get_logger(), "Release mode: " << params_.mode);
   // clear out vectors in case of restart (reactivation to be precise)
   joint_position_command_interfaces_.clear();
   brake_target_command_interfaces_.clear();
@@ -213,11 +217,13 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
-                                                    hardware_interface::HW_IF_POSITION,
-                                                    joint_position_command_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - position");
-    return controller_interface::CallbackReturn::FAILURE;
+  if (mode_ == Mode::Auto) {
+    if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
+                                                      hardware_interface::HW_IF_POSITION,
+                                                      joint_position_command_interfaces_)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - position");
+      return controller_interface::CallbackReturn::FAILURE;
+    }
   }
   if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, "target_brake_state",
                                                     brake_target_command_interfaces_)) {
@@ -233,7 +239,10 @@ BrakeReleaseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::S
 {
   for (auto& interface : brake_target_command_interfaces_) {
     // Put the brakes into hold mode
-    interface.get().set_value<int>(2);
+    if (!interface.get().set_value<int>(2)) {
+      RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to put brake into holding state for: "
+                                                        << interface.get().get_name() << " during deactivation");
+    }
   }
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -250,12 +259,15 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Releasing brakes");
     for (auto& interface : brake_target_command_interfaces_) {
       // Excite the brakes
-      interface.get().set_value<int>(1);
+      if (!interface.get().set_value<int>(1)) {
+        RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                            "Failed to put brake into 'excite' state for: " << interface.get().get_name());
+      }
     }
     // Depending on the mode we now need to go into a different state
-    // Auto and Semi need now to command a new target position into the right direction
+    // Auto needs now to command a new target position into the right direction
     // Manual just says: just stay here (aka we say we already commanded a position)
-    if (mode_ == Mode::Auto || mode_ == Mode::Semi) {
+    if (mode_ == Mode::Auto) {
       current_state_ = State::Exciting;
     } else {
       current_state_ = State::Commanding;
@@ -263,7 +275,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     last_state_change_time_ = time;
   }
 
-  if (mode_ == Mode::Auto || mode_ == Mode::Semi) {
+  if (mode_ == Mode::Auto) {
     if (current_state_ == State::Exciting && (time - last_state_change_time_.value()) > rclcpp::Duration(1, 0)) {
       const std::size_t joint_count = joint_position_state_interfaces_.size();
 
@@ -303,12 +315,13 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
       for (int i = 0; i < tau.size(); ++i) {
         // Need to move into the opposite direction
         if (tau[i] > 1e-6)
-          direction[i] = -1.0;
-        else if (tau[i] < -1e-6)
           direction[i] = 1.0;
+        else if (tau[i] < -1e-6)
+          direction[i] = -1.0;
       }
       // Define the new targets
-      Eigen::VectorXd q_target = q + direction * params_.position_kick;
+      Eigen::VectorXd nudge = direction * params_.position_kick;  // size nv
+      Eigen::VectorXd q_target = pinocchio::integrate(pinocchio_model_, q, nudge);
 
       RCLCPP_INFO_STREAM(get_node()->get_logger(), "Command new target positions: " << q_target.transpose());
 
@@ -327,26 +340,30 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     }
 
     // Only auto mode goes directly into brake holding state
-    if (mode_ == Mode::Auto) {
-      if (current_state_ == State::Commanding && (time - last_state_change_time_.value()) > rclcpp::Duration(3, 0)) {
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
-        for (auto& interface : brake_target_command_interfaces_) {
-          // Put the brakes into holding state
-          interface.get().set_value<int>(2);
+    if (current_state_ == State::Commanding && (time - last_state_change_time_.value()) > rclcpp::Duration(3, 0)) {
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
+      for (auto& interface : brake_target_command_interfaces_) {
+        // Put the brakes into holding state
+        if (!interface.get().set_value<int>(2)) {
+          RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                              "Failed to put brake into 'holding' state for: " << interface.get().get_name());
         }
-        current_state_ = State::Holding;
-        last_state_change_time_ = time;
       }
+      current_state_ = State::Holding;
+      last_state_change_time_ = time;
     }
   }
-  // Semi and manual modes wait for a user configurable amount of time
-  if (mode_ == Mode::Semi || mode_ == Mode::Manual) {
+  // Manual mode waits for a user configurable amount of time
+  if (mode_ == Mode::Manual) {
     if (current_state_ == State::Commanding &&
         time - last_state_change_time_.value() > rclcpp::Duration(std::chrono::duration<double>(params_.timeout))) {
       RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
       for (auto& interface : brake_target_command_interfaces_) {
         // Put the brakes into holding state
-        interface.get().set_value<int>(2);
+        if (!interface.get().set_value<int>(2)) {
+          RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                              "Failed to put brake into 'holding' state for: " << interface.get().get_name());
+        }
       }
       current_state_ = State::Holding;
       last_state_change_time_ = time;
