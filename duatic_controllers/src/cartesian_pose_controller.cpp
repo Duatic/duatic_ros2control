@@ -132,20 +132,30 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // evaluate optimization horizon and respective limits
   motion_horizon_ = params_.motion_horizon;
   assert(motion_horizon_ > 0.0);
-  RCLCPP_INFO(get_node()->get_logger(), "Optimizing with a motion horizon of %.2f s", motion_horizon_);
-  v_sq_limit_lin_ = params_.linear_velocity_limit;
-  if (is_v_limited_lin()) {
-    RCLCPP_INFO(get_node()->get_logger(), "Linear velocity limit at %.2f m/s", v_sq_limit_lin_);
-    v_sq_limit_lin_ *= motion_horizon_;  // displacement instead of velocity
-    v_sq_limit_lin_ *= v_sq_limit_lin_;  // squared displacement to simplify optimization
-  }
-  v_sq_limit_ang_ = params_.angular_velocity_limit;
-  if (is_v_limited_ang()) {
-    RCLCPP_INFO(get_node()->get_logger(), "Angular velocity limit at %.2f rad/s", v_sq_limit_ang_);
-    v_sq_limit_ang_ *= motion_horizon_;  // displacement instead of velocity
-    v_sq_limit_ang_ *= v_sq_limit_ang_;  // squared displacement to simplify optimization
-  } else if (is_v_limited_lin()) {       // the special case of synchronized angular limit
-    RCLCPP_INFO(get_node()->get_logger(), "Angular velocity synchronized with limited linear velocity");
+  RCLCPP_INFO(get_node()->get_logger(), "Configuring optimizing with a motion horizon of %.2f seconds.",
+              motion_horizon_);
+  v_limit_lin_ = params_.linear_velocity_limit * motion_horizon_;  // displacement instead of velocity
+  assert(v_limit_lin_ >= 0.0);
+  v_limit_ang_ = params_.angular_velocity_limit * motion_horizon_;  // displacement instead of velocity;
+  assert(v_limit_ang_ >= 0.0);
+  // Log limits
+  switch (velocity_limit_state()) {
+    case VelocityLimitState::None:
+      RCLCPP_WARN(get_node()->get_logger(), "Working with unlimited motions");
+      break;
+    case VelocityLimitState::LinearSync:
+      RCLCPP_INFO(get_node()->get_logger(), "Linear displacement limit at %.2f m. Angular displacement synchronized.",
+                  v_limit_lin_);
+      break;
+    case VelocityLimitState::AngularOnly:
+      RCLCPP_WARN(get_node()->get_logger(), "Linear velocity unlimited. Angular displacement limit at %.2f rad.",
+                  v_limit_ang_);
+      break;
+    case VelocityLimitState::Both:
+      RCLCPP_INFO(get_node()->get_logger(),
+                  "Linear displacement limit at %.2f m. Angular displacement limit at %.2f rad.", v_limit_lin_,
+                  v_limit_ang_);
+      break;
   }
 
   // build model joint caches
@@ -179,13 +189,52 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     target_frame_idx_ = robot_model_.getFrameId(params_.target_frame);
   }
 
+  // Store limit frame indices
+  limit_frame_indices_.clear();
+  limit_frame_indices_.reserve(params_.limit_frames.size());
+  for (const std::string& frame : params_.limit_frames) {
+    if (!robot_model_.existFrame(frame)) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Limit frame '%s' not found in Pinocchio model.", frame.c_str());
+      return controller_interface::CallbackReturn::FAILURE;
+    } else {
+      limit_frame_indices_.push_back(robot_model_.getFrameId(frame));
+    }
+  }
+
   // setup and initialize QP
   assert(robot_model_.nv == params_.joints.size() && "At this stage, it is assumed that ALL joints are to be "
                                                      "controlled! -> This is an open TODO");
   // TODO(patrick): always make a full model and use the joints parameters to define actively controlled joints
+
+  // accumulate constraints
+  Eigen::Index qp_constraints_n = 0;
+  switch (velocity_limit_state()) {
+    case VelocityLimitState::None:
+      break;
+    case VelocityLimitState::LinearSync:
+    case VelocityLimitState::AngularOnly:
+      qp_constraints_n += static_cast<Eigen::Index>(limit_frame_indices_.size());  // linear or angular limits
+      break;
+    case VelocityLimitState::Both:
+      qp_constraints_n += static_cast<Eigen::Index>(limit_frame_indices_.size()) * 2;  // both limits
+      break;
+  }
+  // create QP solver
+  RCLCPP_INFO(get_node()->get_logger(), "Setting up QP solver with %d result variables and %d constraint variables",
+              robot_model_.nv, static_cast<int>(qp_constraints_n));
   qp_solver_ = std::make_unique<proxsuite::proxqp::dense::QP<double>>(
-      robot_model_.nv, 0, 0, true,             // variables, eq-constraints, in-eq-constraints, box_constrained
-      proxsuite::proxqp::HessianType::Dense);  // H = I + w * J^T * J is dense, not diagonal
+      robot_model_.nv + qp_constraints_n, 0, 0,  // variables, eq-constraints != 0, in-eq-constraints != 0
+      true,                                      // box_constrained
+      proxsuite::proxqp::HessianType::Dense);
+  /*
+   * H = [1 + w * J^T * J | 0 ]  +  [ C^T * C | C^T]
+   *     [      0         | 0 ]     [    C    |  1 ]
+   * g = [-J^T * pose_diff ]
+   *     [      0          ]
+   * with C being the constraints-projection matrix
+   * and the result being structured as [theta; c] with c being the linearized constraints variables
+   */
+  assert(qp_solver_->model.dim == robot_model_.nv + static_cast<Eigen::Index>(qp_constraints_n));
   // settings
   qp_solver_->settings.eps_abs = params_.ik_precision;
   qp_solver_->settings.eps_rel = 0.1 * params_.ik_precision;
@@ -198,13 +247,14 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
                                                                                // error, it will cause way more required
                                                                                // iterations, whyever ...
   // variables setup
-  qp_solver_H_ = Eigen::MatrixXd::Zero(robot_model_.nv, robot_model_.nv);
-  qp_solver_g_ = Eigen::VectorXd::Zero(robot_model_.nv);
+  qp_solver_H_ =
+      Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix. The
+                                                                                // lower right block will stay constant
+  qp_solver_g_ = Eigen::VectorXd::Zero(qp_solver_->model.dim);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
-  // ik-limits: (in-eq constraints) TODO(patrick) add cartesian speed limits here
   // position (box) limits
-  qp_solver_l_box_ = Eigen::VectorXd::Constant(robot_model_.nv, -1e10);
-  qp_solver_u_box_ = Eigen::VectorXd::Constant(robot_model_.nv, 1e10);
+  qp_solver_l_box_ = Eigen::VectorXd::Constant(qp_solver_->model.dim, -1e10);
+  qp_solver_u_box_ = Eigen::VectorXd::Constant(qp_solver_->model.dim, 1e10);
   pose_diff_ik_result_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // subscriptions
@@ -247,7 +297,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
     }
-    for (Eigen::Index i = 0; i < robot_model_.nv; i++) {
+    for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
     }
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner", &(qp_solver_->results.info.iter));
@@ -271,7 +321,7 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i));
     }
-    for (Eigen::Index i = 0; i < robot_model_.nv; i++) {
+    for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
     }
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner");
@@ -329,14 +379,16 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   qp_jacobian_.setZero();
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
                                   pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
-  qp_solver_H_ = qp_jacobian_.transpose() * qp_jacobian_;
-  qp_solver_H_.diagonal().array() += params_.ik_damping;
-  qp_solver_g_.setZero();                                                       // pose_diff is zero on initialization
+  qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_.transpose() * qp_jacobian_;
+  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_.ik_damping;
+  qp_solver_g_.setZero();  // pose_diff is zero on initialization
+  // TODO(patrick): maybe it's better to initialize with the current velocity
   qp_solver_->init(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
                    proxsuite::nullopt, proxsuite::nullopt,                      // no equality constraints
                    proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
                    Eigen::VectorXd::Constant(qp_solver_->model.dim, -0.1),
-                   Eigen::VectorXd::Constant(qp_solver_->model.dim, 0.1)  // box constraints (joint position limits)
+                   Eigen::VectorXd::Constant(qp_solver_->model.dim, 0.1)  // box constraints (joint position and frame
+                                                                          // displacement limits)
   );
   qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
   if (!qp_solver_->results.x.isZero(params_.ik_precision)) {
@@ -344,9 +396,6 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  if (params_.enable_debug_log) {
-    log_statistics();
-  }
   publish_topics();
 
   // Everything functional and ready for RT operation
@@ -380,11 +429,18 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   // Limit error to safe target frame velocity limits
   // ! IMPORTANT: This estimation is based on the assumption of consistent time steps !
-  const double lin_scale = is_v_limited_lin() ? scale_sq(target_pose_diff.Translation(), v_sq_limit_lin_) : 1.0;
-  if (is_v_limited_ang()) {
-    scale_sq(target_pose_diff.Rotation(), v_sq_limit_ang_);
-  } else {  // synchronized
-    target_pose_diff.Rotation() *= lin_scale;
+  switch (velocity_limit_state()) {
+    case VelocityLimitState::None:
+      break;
+    case VelocityLimitState::LinearSync:
+      target_pose_diff.Rotation() *= scale_limit(target_pose_diff.Translation(), v_limit_lin_);
+      break;
+    case VelocityLimitState::AngularOnly:
+      scale_limit(target_pose_diff.Rotation(), v_limit_ang_);
+      // Continue !
+    case VelocityLimitState::Both:
+      scale_limit(target_pose_diff.Translation(), v_limit_lin_);
+      break;
   }
 
   // Run the Optimization
@@ -431,6 +487,9 @@ void CartesianPoseController::update_state()
 
   // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
+  pinocchio::computeJointJacobians(robot_model_, state_data_);  // Note, that if there is only a single target and none
+                                                                // or only a single limit frame, computing all might be
+                                                                // slower but this should be fine anyhow.
   pinocchio::updateFramePlacement(robot_model_, state_data_, target_frame_idx_);
   state_target_twist_ =
       pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::WORLD);
@@ -449,27 +508,69 @@ void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
 void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
                                                const bool verbose)
 {
-  // Update current EE-Jacobian
-  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
-                                  pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
-  // constraint: H = I + w * J^T * J, g = -w * J^T * pose_diff
-  qp_solver_H_ = qp_jacobian_.transpose() * qp_jacobian_;
-  qp_solver_H_.diagonal().array() += params_.ik_damping;
+  // Construct Target Error Problem
+  qp_jacobian_.setZero();
+  pinocchio::getFrameJacobian(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::WORLD,
+                              qp_jacobian_);
+  qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_.transpose() * qp_jacobian_;
+  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_.ik_damping;
   qp_solver_g_ = -(qp_jacobian_.transpose() * scaled_target_diff.vector);
-  // Fill QP box bounds with position displacement limits
-  qp_solver_l_box_ = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);  // soft limits: don't enforce going
-                                                                                  // back if already out of scope
-  qp_solver_l_box_ *= problem_scale;
-  qp_solver_u_box_ = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);  // soft limits: don't enforce going
-                                                                                  // back if already out of scope
-  qp_solver_u_box_ *= problem_scale;
+  // Fill QP box bounds with soft position displacement limits
+  qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
+  qp_solver_u_box_.segment(0, robot_model_.nv) = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);
+  // Construct Constraints Problem
+  switch (velocity_limit_state()) {
+    case VelocityLimitState::None:
+      assert(qp_solver_->model.dim == robot_model_.nv);
+      break;
+    case VelocityLimitState::LinearSync:
+    {
+      assert(qp_solver_->model.dim == robot_model_.nv + limit_frame_indices_.size());
+      Eigen::Index H_idx = robot_model_.nv;
+      for (const auto frame_idx : limit_frame_indices_) {
+        qp_jacobian_.setZero();  // reuse jacobian memory
+        pinocchio::getFrameJacobian(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL,
+                                    qp_jacobian_);
+        auto frame_v_lin =
+            pinocchio::getFrameVelocity(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL)
+                .linear();
+        qp_solver_H_.block(H_idx, 0, 1, robot_model_.nv) =
+            frame_v_lin.transpose() * qp_jacobian_.block(0, 0, 3, robot_model_.nv);
+        // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
+        const double frame_v_lin_length = frame_v_lin.norm();
+        qp_solver_u_box_[H_idx] = std::fmax(v_limit_lin_ * frame_v_lin_length,
+                                            params_.ik_precision);  // guarantee some minimal numerical space
+        qp_solver_l_box_[H_idx] = -qp_solver_u_box_[H_idx];
+        // move on to the next index
+        H_idx++;
+      }
+      assert(H_idx == qp_solver_->model.dim);
+      break;
+    }
+    case VelocityLimitState::AngularOnly:
+      assert(qp_solver_->model.dim == robot_model_.nv + limit_frame_indices_.size());
+      assert(false && "Not Yet Implemented");  // TODO(patrick): implement
+      break;
+    case VelocityLimitState::Both:
+      assert(qp_solver_->model.dim == robot_model_.nv + 2 * limit_frame_indices_.size());
+      assert(false && "Not Yet Implemented");  // TODO(patrick): implement
+      break;
+  }
+  // copy over C to the rest of H
+  const Eigen::Index constraints_n = qp_solver_->model.dim - robot_model_.nv;
+  if (constraints_n > 0) {  // if there are constraints available
+    auto qp_solver_C = qp_solver_H_.block(robot_model_.nv, 0, constraints_n, robot_model_.nv);
+    qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n) = qp_solver_C.transpose();
+    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_solver_C.transpose() * qp_solver_C;
+  }
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
   qp_solver_->update(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
                      proxsuite::nullopt, proxsuite::nullopt,                      // no equality constraints
                      proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
-                     qp_solver_l_box_, qp_solver_u_box_,  // box constraints (joint position limits)
-                     true                                 // update_preconditioner
+                     qp_solver_l_box_ * problem_scale,
+                     qp_solver_u_box_ * problem_scale,  // box constraints (joint position limits)
+                     true                               // update_preconditioner
   );
   qp_solver_->solve();  // warm start with previous result by settings
   // ERROR HANDLING

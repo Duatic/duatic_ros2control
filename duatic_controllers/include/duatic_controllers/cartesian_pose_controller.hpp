@@ -89,13 +89,32 @@ private:
 
   // optimization horizon and limits
   double motion_horizon_;
-  double v_sq_limit_lin_, v_sq_limit_ang_;
+  double v_limit_lin_, v_limit_ang_;
+  enum class VelocityLimitState
+  {  // first bit -> angular limit, last bit -> linear limit
+    None = 0b00,
+    LinearSync = 0b01,
+    AngularOnly = 0b10,
+    Both = 0b11
+  };
+  using VelocityLimitStateT = std::underlying_type_t<VelocityLimitState>;
+  static_assert(std::is_literal_type_v<VelocityLimitStateT>);
+  inline VelocityLimitState velocity_limit_state() const
+  {
+    assert(v_limit_lin_ >= 0.0);
+    assert(v_limit_ang_ >= 0.0);
+    return static_cast<VelocityLimitState>((static_cast<VelocityLimitStateT>(v_limit_ang_ > 0.0) << 1) |
+                                           static_cast<VelocityLimitStateT>(v_limit_lin_ > 0.0));
+  }
+  static_assert(static_cast<VelocityLimitStateT>(bool(false)) == 0b0);
+  static_assert(static_cast<VelocityLimitStateT>(bool(true)) == 0b1);
 
   pinocchio::Model robot_model_;
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
   std::vector<Eigen::Index> joint_v_idx_;
   pinocchio::FrameIndex target_frame_idx_;
+  std::vector<pinocchio::FrameIndex> limit_frame_indices_;
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
@@ -118,8 +137,12 @@ private:
    *   min_theta 1/2 theta^T theta + 1/2 w (J theta - pose_diff)^T (J theta - pose_diff)
    *           = 1/2 theta^T (I + w J^T J) theta - w pose_diff^T J theta + const.
    *   subject to: box constraints on theta (joint position limits)
-   * The cartesian tracking error is folded into the cost (weighted by 'ik_error_avoidance_weight')
-   * instead of being an equality-constrained slack variable, so the QP has no equality constraints.
+   * H = [1 + w * J^T * J | 0 ]  +  [ C^T * C | C^T]
+   *     [      0         | 0 ]     [    C    |  1 ]
+   * g = [-J^T * pose_diff ]
+   *     [      0          ]
+   * with C being the constraints-projection matrix
+   * and the result being structured as [theta; c] with c being the linearized constraints variables
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
   Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
@@ -161,20 +184,11 @@ private:
     return state_target_twist_;
   }
 
-  inline bool is_v_limited_lin() const
-  {
-    return v_sq_limit_lin_ > 0.0;
-  }
-
-  inline bool is_v_limited_ang() const
-  {
-    return v_sq_limit_ang_ > 0.0;
-  }
-
   template <typename Vector>
-  inline static double scale_sq(Vector&& v, const double limit_sq)
+  inline static double scale_limit(Vector&& v, const double limit)
   {
-    assert(limit_sq > 0.0);
+    assert(limit > 0.0);
+    const double limit_sq = limit * limit;
     const double scale = std::sqrt(limit_sq / std::fmax(limit_sq, v.squaredNorm()));
     assert((0.0 <= scale) && (scale <= 1.0));
     v *= scale;
