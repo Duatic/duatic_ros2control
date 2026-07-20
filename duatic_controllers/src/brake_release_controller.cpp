@@ -290,12 +290,13 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     for (int i = 0; i < tau.size(); ++i) {
       // Need to move into the opposite direction
       if (tau[i] > 1e-6)
-        direction[i] = -1.0;
-      else if (tau[i] < -1e-6)
         direction[i] = 1.0;
+      else if (tau[i] < -1e-6)
+        direction[i] = -1.0;
     }
     // Define the new targets
-    Eigen::VectorXd q_target = q + direction * params_.position_kick;
+    Eigen::VectorXd nudge = direction * params_.position_kick;  // size nv
+    Eigen::VectorXd q_target = pinocchio::integrate(pinocchio_model_, q, nudge);
 
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Command new target positions: " << q_target.transpose());
 
