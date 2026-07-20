@@ -11,3 +11,15 @@ brake_release_controller:
     description: "Distance to move the actuator in order to move the brake in [rad]"
     validation:
       bounds<>: [0.0,0.2]
+  mode:
+    type: string
+    default_value: "auto"
+    description: "Select between 'auto', 'manual', 'semi' mode for brake release. In manual the user has a certain amount of time to manually move all drives around. In 'semi' mode the controller tries to releases the brakes automatically but gives the user time afterwards to manually move around the joints"
+    validation:
+      one_of<>: [["auto", "manual", "semi"]]
+  timeout:
+    type: double
+    default_value: 50.0
+    description: "Timeout in 'manual' or 'semi' mode until the brakes are put into mode 'hold'"
+    validation:
+      gt_eq<>: [0.0]
