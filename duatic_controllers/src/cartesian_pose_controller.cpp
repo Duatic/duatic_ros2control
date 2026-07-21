@@ -226,14 +226,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       robot_model_.nv + qp_constraints_n, 0, 0,  // variables, eq-constraints != 0, in-eq-constraints != 0
       true,                                      // box_constrained
       proxsuite::proxqp::HessianType::Dense);
-  /*
-   * H = [1 + w * J^T * J | 0 ]  +  [ C^T * C | C^T]
-   *     [      0         | 0 ]     [    C    |  1 ]
-   * g = [-J^T * pose_diff ]
-   *     [      0          ]
-   * with C being the constraints-projection matrix
-   * and the result being structured as [theta; c] with c being the linearized constraints variables
-   */
   assert(qp_solver_->model.dim == robot_model_.nv + static_cast<Eigen::Index>(qp_constraints_n));
   // settings
   qp_solver_->settings.eps_abs = params_.ik_precision;
@@ -248,8 +240,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
                                                                                // iterations, whyever ...
   // variables setup
   qp_solver_H_ =
-      Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix. The
-                                                                                // lower right block will stay constant
+      Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix.
+  if (qp_constraints_n > 0) {  // initialize the lower-right weighted identity block matrix within H (it stays constant)
+    qp_solver_H_.diagonal().segment(robot_model_.nv, qp_constraints_n).setConstant(params_.ik_limit_frames_weight);
+  }
   qp_solver_g_ = Eigen::VectorXd::Zero(qp_solver_->model.dim);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
   // position (box) limits
@@ -299,6 +293,8 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
+      REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i), &(qp_solver_u_box_[i]));
+      REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_l_box_" + std::to_string(i), &(qp_solver_l_box_[i]));
     }
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner", &(qp_solver_->results.info.iter));
     REGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_outer", &(qp_solver_->results.info.iter_ext));
@@ -323,6 +319,8 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i));
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_l_box_" + std::to_string(i));
     }
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_inner");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_iterations_outer");
@@ -448,7 +446,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
   // integrate joint position
   assert(robot_model_.nv == state_q_.size());
-  control_q_ = (state_q_ + (pose_diff_ik_result_))
+  control_q_ = (state_q_ + pose_diff_ik_result_)
                    .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
                    .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
   // TODO: update control_v_
@@ -514,7 +512,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
                               qp_jacobian_);
   qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_.transpose() * qp_jacobian_;
   qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_.ik_damping;
-  qp_solver_g_ = -(qp_jacobian_.transpose() * scaled_target_diff.vector);
+  qp_solver_g_.segment(0, robot_model_.nv) = -(qp_jacobian_.transpose() * scaled_target_diff.vector);
   // Fill QP box bounds with soft position displacement limits
   qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
   qp_solver_u_box_.segment(0, robot_model_.nv) = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);
@@ -538,9 +536,9 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
             frame_v_lin.transpose() * qp_jacobian_.block(0, 0, 3, robot_model_.nv);
         // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
         const double frame_v_lin_length = frame_v_lin.norm();
-        qp_solver_u_box_[H_idx] = std::fmax(v_limit_lin_ * frame_v_lin_length,
+        qp_solver_u_box_(H_idx) = std::fmax(v_limit_lin_ * frame_v_lin_length,
                                             params_.ik_precision);  // guarantee some minimal numerical space
-        qp_solver_l_box_[H_idx] = -qp_solver_u_box_[H_idx];
+        qp_solver_l_box_(H_idx) = -qp_solver_u_box_(H_idx);
         // move on to the next index
         H_idx++;
       }
@@ -560,8 +558,10 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   const Eigen::Index constraints_n = qp_solver_->model.dim - robot_model_.nv;
   if (constraints_n > 0) {  // if there are constraints available
     auto qp_solver_C = qp_solver_H_.block(robot_model_.nv, 0, constraints_n, robot_model_.nv);
+    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) +=
+        params_.ik_limit_frames_weight * qp_solver_C.transpose() * qp_solver_C;
+    qp_solver_C *= params_.ik_limit_frames_weight;
     qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n) = qp_solver_C.transpose();
-    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_solver_C.transpose() * qp_solver_C;
   }
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
@@ -586,7 +586,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
                         "Continue with half the unfinished solution: " << qp_solver_->results.x.transpose());
   }
   // rescale result
-  pose_diff_ik_result_ = qp_solver_->results.x / problem_scale;
+  pose_diff_ik_result_ = qp_solver_->results.x.segment(0, robot_model_.nv) / problem_scale;
 }
 
 void CartesianPoseController::command_controls()
@@ -616,8 +616,6 @@ void CartesianPoseController::log_statistics() const
                                                    << qp_solver_H_ << std::endl
                                                    << " - Linear term (-w * J^T * pose_diff)" << std::endl
                                                    << qp_solver_g_ << std::endl
-                                                   << " - Jacobian" << std::endl
-                                                   << qp_jacobian_ << std::endl
                                                    << " - Lower Box Bounds" << std::endl
                                                    << qp_solver_l_box_ << std::endl
                                                    << " - Upper Box Bounds" << std::endl

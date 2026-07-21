@@ -60,6 +60,12 @@ cartesian_pose_controller:
     description: "Weight to dampen all joint motions and stabilize the IK solution."
     validation:
       bounds<>: [0.000001, 1.0]
+  ik_limit_frames_weight:
+    type: double
+    default_value: 100.0
+    description: "Weight for satisfying motion limits of the limit_frames within the inverse kinematics optimization problem."
+    validation:
+      bounds<>: [0.001, 1000.0]
   ik_precision:
     type: double
     default_value: 0.0001

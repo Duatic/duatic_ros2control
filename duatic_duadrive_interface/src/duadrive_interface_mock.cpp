@@ -86,11 +86,11 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
     // Especially support the joint velocity mode where we calculate the position from the last position and the
     // velocity
     state_.joint_velocity = command_.joint_velocity;
-    state_.joint_position += command_.joint_velocity * period.to_chrono<std::chrono::duration<float>>().count();
+    state_.joint_position += command_.joint_velocity * period.seconds();
   } else {
     state_.joint_torque = command_.joint_torque;
     state_.joint_acceleration = command_.joint_acceleration;
-    state_.joint_velocity = command_.joint_velocity;
+    state_.joint_velocity = (command_.joint_position - state_.joint_position) / period.seconds();
     state_.joint_position = command_.joint_position;
   }
 

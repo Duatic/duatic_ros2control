@@ -134,15 +134,15 @@ private:
   geometry::State3Dd target_state_;
 
   /* Quadratic programming solver
-   *   min_theta 1/2 theta^T theta + 1/2 w (J theta - pose_diff)^T (J theta - pose_diff)
-   *           = 1/2 theta^T (I + w J^T J) theta - w pose_diff^T J theta + const.
-   *   subject to: box constraints on theta (joint position limits)
-   * H = [1 + w * J^T * J | 0 ]  +  [ C^T * C | C^T]
-   *     [      0         | 0 ]     [    C    |  1 ]
+   *   min_x 1/2 x^T H x + x^T g
+       s.t.  l_box <= x <= u_box
+   *
+   * H = [1 + w * J^T * J | 0 ]  +  W_L * [ C^T * C | C^T]
+   *     [      0         | 0 ]           [    C    |  1 ]
    * g = [-J^T * pose_diff ]
    *     [      0          ]
-   * with C being the constraints-projection matrix
-   * and the result being structured as [theta; c] with c being the linearized constraints variables
+   * with C being the constraints-projection matrix and W_L being the ik_limit_frames_weight
+   * and the result x being structured as x = [theta; c] with c being the linearized constraints variables
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
   Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
