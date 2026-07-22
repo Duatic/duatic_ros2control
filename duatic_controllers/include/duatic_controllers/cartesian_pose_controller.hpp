@@ -132,6 +132,7 @@ private:
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
   geometry::State3Dd target_state_;
+  geometry::Twist3Dd target_pose_diff_;
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g
