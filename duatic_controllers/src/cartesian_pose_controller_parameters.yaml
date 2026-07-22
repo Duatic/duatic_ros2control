@@ -13,12 +13,19 @@ cartesian_pose_controller:
     type: string
     default_value: "flange"
     description: "Name of the end effector frame to be controlled."
-  limit_frames:
+  
+  linear_limit_frames:
     type: string_array
     default_value: []
-    description: "Additional frames that are limited in motion."
+    description: "Additional frames that are limited in linear motion."
     validation:
       unique<>: null
+  linear_limit_frames_weight:
+    type: double
+    default_value: 100.0
+    description: "Weight for satisfying motion limits of the limit_frames within the inverse kinematics optimization problem. Set to zero to ignore the linear limit frames."
+    validation:
+      bounds<>: [0.0, 1000.0]
 
   motion_horizon:
     type: double
@@ -29,13 +36,13 @@ cartesian_pose_controller:
   linear_velocity_limit:
     type: double
     default_value: 1.0
-    description: "Maximum velocity for linear, Cartesian motions. Set zero to disable velocity limits."
+    description: "Maximum velocity for linear, Cartesian motions. Set zero to disable linear motion."
     validation:
       bounds<>: [0.0, 10.0]
   angular_velocity_limit:
     type: double
-    default_value: 0.0
-    description: "Maximum velocity for rotational motions. Set zero to synchronize with linear velocities"
+    default_value: 6.283
+    description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
     validation:
       bounds<>: [0.0, 62.83]
 
@@ -60,12 +67,12 @@ cartesian_pose_controller:
     description: "Weight to dampen all joint motions and stabilize the IK solution."
     validation:
       bounds<>: [0.000001, 1.0]
-  ik_limit_frames_weight:
+  ik_meter_to_revolution_error_correlation:
     type: double
-    default_value: 100.0
-    description: "Weight for satisfying motion limits of the limit_frames within the inverse kinematics optimization problem."
+    default_value: 25.0
+    description: "Correlation between linear (one meter) and angular (one revolution) errors in the IK solver."
     validation:
-      bounds<>: [0.001, 1000.0]
+      bounds<>: [1.0, 100.0]
   ik_precision:
     type: double
     default_value: 0.0001

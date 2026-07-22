@@ -90,31 +90,14 @@ private:
   // optimization horizon and limits
   double motion_horizon_;
   double v_limit_lin_, v_limit_ang_;
-  enum class VelocityLimitState
-  {  // first bit -> angular limit, last bit -> linear limit
-    None = 0b00,
-    LinearSync = 0b01,
-    AngularOnly = 0b10,
-    Both = 0b11
-  };
-  using VelocityLimitStateT = std::underlying_type_t<VelocityLimitState>;
-  static_assert(std::is_literal_type_v<VelocityLimitStateT>);
-  inline VelocityLimitState velocity_limit_state() const
-  {
-    assert(v_limit_lin_ >= 0.0);
-    assert(v_limit_ang_ >= 0.0);
-    return static_cast<VelocityLimitState>((static_cast<VelocityLimitStateT>(v_limit_ang_ > 0.0) << 1) |
-                                           static_cast<VelocityLimitStateT>(v_limit_lin_ > 0.0));
-  }
-  static_assert(static_cast<VelocityLimitStateT>(bool(false)) == 0b0);
-  static_assert(static_cast<VelocityLimitStateT>(bool(true)) == 0b1);
+  double linear_error_weight_;
 
   pinocchio::Model robot_model_;
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
   std::vector<Eigen::Index> joint_v_idx_;
   pinocchio::FrameIndex target_frame_idx_;
-  std::vector<pinocchio::FrameIndex> limit_frame_indices_;
+  std::vector<pinocchio::FrameIndex> linear_limit_frame_indices_;
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
@@ -135,29 +118,28 @@ private:
   geometry::State3Dd target_state_;
 
   geometry::Twist3Dd target_pose_diff_;
-  double target_pose_diff_norm_;           // TODO: delete
-  geometry::Twist3Dd solution_pose_diff_;  // TODO: check
-  double solution_pose_diff_norm_;         // TODO: delete
-  double pose_diff_norm_diff_;             // TODO: delete
+  geometry::Twist3Dd solution_pose_diff_;
+  double backtracking_scale_;
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g
        s.t.  l_box <= x <= u_box
    *
-   * H = [1 + w * J^T * J | 0 ]  +  W_L * [ C^T * C | C^T]
-   *     [      0         | 0 ]           [    C    |  1 ]
+   * H = [1 + J^T * J | 0 ]  +  W_L * [ C^T * C | C^T]
+   *     [     0      | 0 ]           [    C    |  1 ]
    * g = [-J^T * pose_diff ]
    *     [      0          ]
-   * with C being the constraints-projection matrix and W_L being the ik_limit_frames_weight
+   * with C being the constraints-projection matrix and W_L being the linear_limit_frames_weight
    * and the result x being structured as x = [theta; c] with c being the linearized constraints variables
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
   Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
   Eigen::VectorXd qp_solver_g_;                                      // -w * J^T * pose_diff (linear cost term)
-  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // end-effector Jacobian J
   Eigen::VectorXd qp_solver_l_box_;                                  // lower box bounds
   Eigen::VectorXd qp_solver_u_box_;                                  // upper box bounds
   Eigen::VectorXd pose_diff_ik_result_;                              // solution vector
+  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // Jacobian memory space
+  Eigen::Matrix<double, Eigen::Dynamic, 6> qp_jacobian_t_;           // Jacobian transpose memory space
 
   // state publication topics
   double topics_pub_period_;
@@ -192,14 +174,13 @@ private:
   }
 
   template <typename Vector>
-  inline static double scale_limit(Vector&& v, const double limit)
+  inline static void scale_limit(Vector&& v, const double limit)
   {
     assert(limit > 0.0);
     const double limit_sq = limit * limit;
     const double scale = std::sqrt(limit_sq / std::fmax(limit_sq, v.squaredNorm()));
     assert((0.0 <= scale) && (scale <= 1.0));
     v *= scale;
-    return scale;
   }
 };
 
