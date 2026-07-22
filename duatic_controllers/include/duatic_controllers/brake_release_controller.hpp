@@ -70,6 +70,12 @@ public:
     Holding
   };
 
+  enum class Mode
+  {
+    Auto,
+    Manual,
+  };
+
   BrakeReleaseController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -101,6 +107,20 @@ private:
 
   State current_state_{ State::Init };
   std::optional<rclcpp::Time> last_state_change_time_;
+  Mode mode_{ Mode::Auto };
+
+  /**
+   * @brief convert the mode argument in the parameter file into a better manageable Mode enum
+   */
+  Mode mode_from_str(const std::string& str)
+  {
+    if (str == "auto") {
+      return Mode::Auto;
+    } else if (str == "manual") {
+      return Mode::Manual;
+    }
+    throw std::invalid_argument("Invalid mode: '" + str + "'");
+  }
 };
 
 }  // namespace duatic::controllers

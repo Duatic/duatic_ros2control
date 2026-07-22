@@ -60,11 +60,9 @@ public:
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
+  controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_error(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_shutdown(const rclcpp_lifecycle::State& previous_state) override;
 
 private:
   // Access to controller parameters via generate_parameter_library
@@ -78,8 +76,6 @@ private:
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
-  std::atomic_bool active_{ false };
 
   using StatusMsg = duatic_controller_msgs::msg::GravityCompensationControllerStatus;
   using StatusMsgPublisher = realtime_tools::RealtimePublisher<StatusMsg>;
@@ -90,13 +86,17 @@ private:
   rclcpp::Time activation_time_;
   bool activation_time_set_ = false;
 
-  std::vector<pinocchio::JointIndex> joint_indices_;
+  std::vector<Eigen::Index> joint_q_idx_;
+  std::vector<Eigen::Index> joint_v_idx_;
 
   // State buffer
-  Eigen::VectorXd q;
-  Eigen::VectorXd v;
-  Eigen::VectorXd a;
+  Eigen::VectorXd q_;
+  Eigen::VectorXd v_;
+  // target buffer
+  Eigen::VectorXd tau_gravity_;
+  Eigen::VectorXd tau_coriolis_;
+  std::vector<double> joint_effort_;
 
-  StatusMsg state_msg;
+  StatusMsg state_msg_;
 };
 }  // namespace duatic::controllers
