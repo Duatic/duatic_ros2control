@@ -120,6 +120,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
   // control output variables
+  control_data_ = std::move(robot_model_.createData());
+  if (!robot_model_.check(state_data_)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'control_data_' is not consistent with "
+                                           "'robot_model_'");
+    return controller_interface::CallbackReturn::ERROR;
+  }
   control_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   control_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
@@ -299,6 +305,14 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rx", &target_pose_diff_.vector(3));
     REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_ry", &target_pose_diff_.vector(4));
     REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rz", &target_pose_diff_.vector(5));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_norm", &target_pose_diff_norm_);
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x", &solution_pose_diff_.vector(0));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y", &solution_pose_diff_.vector(1));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z", &solution_pose_diff_.vector(2));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rx", &solution_pose_diff_.vector(3));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry", &solution_pose_diff_.vector(4));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz", &solution_pose_diff_.vector(5));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_norm", &solution_pose_diff_norm_);
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i), &(qp_solver_u_box_[i]));
@@ -333,6 +347,14 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rx");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_ry");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_norm");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rx");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_norm");
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i));
@@ -438,6 +460,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   // Get 6D-diff between current pose and target pose
   trajectory_buffer_.update_read().evaluate_at(time, target_state_);
   target_pose_diff_ = target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
+  target_pose_diff_norm_ = target_pose_diff_.vector.norm();
   geometry::Twist3Dd problem_pose_diff = target_pose_diff_ * problem_scale;
 
   // Limit error to safe target frame velocity limits
@@ -459,11 +482,19 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   // Run the Optimization
   run_pose_diff_ik(problem_scale, problem_pose_diff, params_.enable_debug_log && do_publications);
 
-  // integrate joint position
+  // integrate joint positions
   assert(robot_model_.nv == state_q_.size());
   control_q_ = (state_q_ + pose_diff_ik_result_)
                    .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
                    .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
+
+  // verify result
+  pinocchio::forwardKinematics(robot_model_, control_data_, control_q_);
+  pinocchio::updateFramePlacement(robot_model_, control_data_, target_frame_idx_);  // update target frame
+  solution_pose_diff_ = target_state_.pose - geometry::Pose3Dd(control_data_.oMf[target_frame_idx_].translation(),
+                                                               control_data_.oMf[target_frame_idx_].rotation());
+  solution_pose_diff_norm_ = solution_pose_diff_.vector.norm();
+
   // TODO: update control_v_
 
   // Write to HW

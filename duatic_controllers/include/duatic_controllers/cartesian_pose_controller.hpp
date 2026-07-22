@@ -121,6 +121,7 @@ private:
   Eigen::VectorXd state_v_;
   pinocchio::Motion state_target_twist_;
 
+  pinocchio::Data control_data_;
   Eigen::VectorXd control_q_;
   Eigen::VectorXd control_v_;
 
@@ -132,7 +133,11 @@ private:
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
   geometry::State3Dd target_state_;
+
   geometry::Twist3Dd target_pose_diff_;
+  double target_pose_diff_norm_;           // TODO: delete
+  geometry::Twist3Dd solution_pose_diff_;  // TODO: check
+  double solution_pose_diff_norm_;         // TODO: delete
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g
