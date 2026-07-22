@@ -12,14 +12,16 @@ set(PACKAGE_DEPENDENCIES
   hardware_interface
   urdf
   rsl_drive_sdk
+  pinocchio
+  Eigen3
 )
 
 foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
   find_package(${Dependency} REQUIRED)
 endforeach()
 
-
 add_library(duatic_duadrive_interface
+  src/dynamic_model/pinocchio_model.cpp
   src/duadrive_interface.cpp
   src/duadrive_interface_base.cpp
   src/duadrive_interface_mock.cpp
@@ -31,20 +33,24 @@ target_include_directories(duatic_duadrive_interface PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
-
 # Support ros distros older than lyrical
 if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME}  ${PACKAGE_DEPENDENCIES})
+  ament_target_dependencies(${PROJECT_NAME}  ${PACKAGE_DEPENDENCIES})
 else()
-    target_link_libraries(${PROJECT_NAME}
+  target_link_libraries(${PROJECT_NAME}
     rclcpp::rclcpp
     pluginlib::pluginlib
     hardware_interface::hardware_interface
     urdf::urdf
-    rsl_drive_sdk::rsl_drive_sdk)
+    rsl_drive_sdk::rsl_drive_sdk
+    Eigen3::Eigen
+  )
 endif()
 
-target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES})
+target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES}
+  pinocchio::pinocchio
+)
+
 # enable additional warnings
 target_compile_options(duatic_duadrive_interface PRIVATE
   -Wall
