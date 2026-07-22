@@ -138,6 +138,7 @@ private:
   double target_pose_diff_norm_;           // TODO: delete
   geometry::Twist3Dd solution_pose_diff_;  // TODO: check
   double solution_pose_diff_norm_;         // TODO: delete
+  double pose_diff_norm_diff_;             // TODO: delete
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g
@@ -168,7 +169,7 @@ private:
 
   void handle_target_msg_sub(const trajectory_type::UpdateInformation::msg::SharedPtr msg);
 
-  void update_state();
+  void update_state(const bool use_hw_positions);
 
   void update_rt_state_buffer(const rclcpp::Time& now);
 

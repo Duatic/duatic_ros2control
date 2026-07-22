@@ -313,6 +313,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry", &solution_pose_diff_.vector(4));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz", &solution_pose_diff_.vector(5));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_norm", &solution_pose_diff_norm_);
+    REGISTER_ROS2_CONTROL_INTROSPECTION("pose_diff_norm_diff", &pose_diff_norm_diff_);
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i), &(qp_solver_u_box_[i]));
@@ -355,6 +356,7 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_norm");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("pose_diff_norm_diff");
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i));
@@ -399,7 +401,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   }
 
   // initialize current state (data availability is guaranteed by the previous loop)
-  update_state();
+  update_state(true);
 
   // initialize state and trajectory buffers
   current_state_buffer_.write().time = get_node()->now();
@@ -453,7 +455,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   const bool do_publications = (seconds > topics_pub_next_time_);
   const double problem_scale = motion_horizon_ / period.seconds();
 
-  update_state();
+  update_state(false);
 
   update_rt_state_buffer(time);
 
@@ -494,8 +496,10 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   solution_pose_diff_ = target_state_.pose - geometry::Pose3Dd(control_data_.oMf[target_frame_idx_].translation(),
                                                                control_data_.oMf[target_frame_idx_].rotation());
   solution_pose_diff_norm_ = solution_pose_diff_.vector.norm();
+  pose_diff_norm_diff_ = target_pose_diff_norm_ - solution_pose_diff_norm_;
 
-  // TODO: update control_v_
+  // update control_v_
+  control_v_.setZero();  // TODO: take into account the trajectory velocity
 
   // Write to HW
   if (!params_.dry_run) {
@@ -516,7 +520,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   return controller_interface::return_type::OK;
 }
 
-void CartesianPoseController::update_state()
+void CartesianPoseController::update_state(const bool use_hw_positions)
 {
   auto interface_iter = state_interfaces_.begin();
   for (const auto idx : joint_q_idx_) {
@@ -532,6 +536,13 @@ void CartesianPoseController::update_state()
     interface_iter++;
   }
   assert(interface_iter == state_interfaces_.end());
+
+  if (use_hw_positions) {
+    control_q_ = state_q_;
+  } else {
+    state_q_ = control_q_;  // TODO(patrick): Bad workaround: the robot is not fast enough to follow the control, so the
+                            // control would follow the robot if real state updates would be used here!
+  }
 
   // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
