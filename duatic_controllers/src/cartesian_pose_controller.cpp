@@ -57,11 +57,16 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
   } else {
     config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
     // ensure the exact same order as for the state interfaces! (Used in on_activate)
-    for (const std::string& joint : params_.joints) {
-      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+    static_assert((0 <= order_of_time_derivative) && (order_of_time_derivative <= 1));
+    if constexpr (order_of_time_derivative >= 0) {
+      for (const std::string& joint : params_.joints) {
+        config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+      }
     }
-    for (const std::string& joint : params_.joints) {
-      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    if constexpr (order_of_time_derivative >= 1) {
+      for (const std::string& joint : params_.joints) {
+        config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+      }
     }
   }
   return config;
@@ -72,15 +77,18 @@ controller_interface::InterfaceConfiguration CartesianPoseController::state_inte
   // Claim the necessary state interfaces
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-
   // ensure the exact same order as for the command interfaces! (Used in on_activate)
-  for (const std::string& joint : params_.joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+  static_assert((0 <= order_of_time_derivative) && (order_of_time_derivative <= 1));
+  if constexpr (order_of_time_derivative >= 0) {
+    for (const std::string& joint : params_.joints) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+    }
   }
-  for (const std::string& joint : params_.joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+  if constexpr (order_of_time_derivative >= 1) {
+    for (const std::string& joint : params_.joints) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    }
   }
-
   return config;
 }
 
@@ -478,8 +486,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   control_q_ += (backtracking_scale_ - 1.0) * pose_diff_ik_result_;
 
   // update control_v_
-  control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: do correct!
-  // control_v_.setZero();  // TODO: take into account the trajectory velocitythun
+  control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: do correct or do not !
 
   // Write to HW
   if (!params_.dry_run) {
@@ -503,17 +510,17 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 void CartesianPoseController::update_state(const bool use_hw_positions)
 {
   auto interface_iter = state_interfaces_.begin();
-  for (const auto idx : joint_q_idx_) {
-    state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
-    interface_iter++;
+  if constexpr (order_of_time_derivative >= 0) {
+    for (const auto idx : joint_q_idx_) {
+      state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
+      interface_iter++;
+    }
   }
-  for (const auto idx : joint_v_idx_) {
-    //    x = (1-a)*x + a*y
-    //      = x - ax + ay
-    //      = x + a(y -x)
-    // TODO: parameterize or remove these filters!
-    state_v_[idx] += 0.1 * (interface_iter->get_optional().value_or(state_v_[idx]) - state_v_[idx]);
-    interface_iter++;
+  if constexpr (order_of_time_derivative >= 1) {
+    for (const auto idx : joint_v_idx_) {
+      state_v_[idx] += interface_iter->get_optional().value_or(state_v_[idx]);
+      interface_iter++;
+    }
   }
   assert(interface_iter == state_interfaces_.end());
 
@@ -621,18 +628,24 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
 
 void CartesianPoseController::command_controls()
 {
-  // make sure to have the same order as initially claimed within 'command_interface_configuration'
   auto command_itr = command_interfaces_.begin();
-  for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
-    // set position
-    if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
-      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", params_.joints[i].c_str());
+  // make sure to have the same order as initially claimed within 'command_interface_configuration'
+  if constexpr (order_of_time_derivative >= 0) {
+    for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
+      // set position
+      if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'",
+                    params_.joints[i].c_str());
+      }
     }
   }
-  for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
-    // set velocity
-    if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
-      RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'", params_.joints[i].c_str());
+  if constexpr (order_of_time_derivative >= 0) {
+    for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
+      // set velocity
+      if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'",
+                    params_.joints[i].c_str());
+      }
     }
   }
   assert(command_itr == command_interfaces_.end());

@@ -41,10 +41,10 @@ cartesian_pose_controller:
       bounds<>: [0.0, 10.0]
   angular_velocity_limit:
     type: double
-    default_value: 6.283
+    default_value: 0.6283
     description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
     validation:
-      bounds<>: [0.0, 62.83]
+      bounds<>: [0.0, 6.283]
 
   topic_prefix:
     type: string
@@ -63,7 +63,7 @@ cartesian_pose_controller:
 
   ik_damping:
     type: double
-    default_value: 0.001
+    default_value: 0.01
     description: "Weight to dampen all joint motions and stabilize the IK solution."
     validation:
       bounds<>: [0.000001, 1.0]

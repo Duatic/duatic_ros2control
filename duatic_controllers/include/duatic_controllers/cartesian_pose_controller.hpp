@@ -70,6 +70,11 @@ class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
   using trajectory_type = geometry::ConstantTargetPose;  // TODO(patrick): convert into a template parameter
+  using trajectory_target_type = decltype(std::declval<trajectory_type>().evaluate_at(
+      std::declval<rclcpp::Time>()));  // TODO move into a trajectory trait
+
+  constexpr static uint order_of_time_derivative =
+      std::is_same_v<trajectory_target_type, duatic::geometry::Pose3Dd> ? 0 : 1;  // TODO: rework into useful trait
 
   inline CartesianPoseController() : controller_interface::ControllerInterface()
   {
