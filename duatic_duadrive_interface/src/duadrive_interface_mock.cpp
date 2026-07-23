@@ -99,6 +99,14 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
         state_.joint_velocity = command_.joint_velocity;
         state_.joint_position += command_.joint_velocity * dt;
         break;
+      case rsl_drive_sdk::mode::ModeEnum::JointPosition:
+      case rsl_drive_sdk::mode::ModeEnum::JointPositionTorque:
+        state_.joint_torque = command_.joint_torque;
+        state_.joint_acceleration = command_.joint_acceleration;
+        state_.joint_velocity =
+            (command_.joint_position - state_.joint_position) / dt;  // compute velocity from position
+        state_.joint_position = command_.joint_position;
+        break;
       case rsl_drive_sdk::mode::ModeEnum::JointTorque:
       {
         state_.joint_velocity *=
@@ -114,8 +122,9 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
       default:
         state_.joint_torque = command_.joint_torque;
         state_.joint_acceleration = command_.joint_acceleration;
-        state_.joint_velocity = (command_.joint_position - state_.joint_position) / dt;
+        state_.joint_velocity = command_.joint_velocity;
         state_.joint_position = command_.joint_position;
+        break;
     }
     // LIMIT MOCK SIMULATION
     state_.joint_velocity = std::max(
