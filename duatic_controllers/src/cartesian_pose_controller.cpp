@@ -280,12 +280,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
     }
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_x", &target_pose_diff_.vector(0));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_y", &target_pose_diff_.vector(1));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_z", &target_pose_diff_.vector(2));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rx", &target_pose_diff_.vector(3));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_ry", &target_pose_diff_.vector(4));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rz", &target_pose_diff_.vector(5));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_x", &trajectory_target_pose_diff_.vector(0));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y", &trajectory_target_pose_diff_.vector(1));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z", &trajectory_target_pose_diff_.vector(2));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rx", &trajectory_target_pose_diff_.vector(3));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_ry", &trajectory_target_pose_diff_.vector(4));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rz", &trajectory_target_pose_diff_.vector(5));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x", &solution_pose_diff_.vector(0));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y", &solution_pose_diff_.vector(1));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z", &solution_pose_diff_.vector(2));
@@ -321,12 +321,12 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i));
     }
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_x");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_y");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_z");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rx");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_ry");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("target_pose_diff_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rx");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_ry");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rz");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z");
@@ -438,12 +438,16 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   update_rt_state_buffer(time);
 
   // Get 6D-diff between current pose and target pose
-  trajectory_buffer_.update_read().evaluate_at(time, target_state_);
-  target_pose_diff_ = target_state_.pose - geometry::Pose3Dd(target_pose().translation(), target_pose().rotation());
+  trajectory_buffer_.update_read().evaluate_at(time, trajectory_target_);
+  // convert the trajectory target into the world-aligned target_frame_idx frame: position relative to the current
+  // target_frame_idx origin, orientation kept in world-frame axes
+  trajectory_target_.pose.position -= target_pose().translation();  // from now on in local-world-aligned frame
+  trajectory_target_pose_diff_ =
+      trajectory_target_.pose - geometry::Pose3Dd(Eigen::Vector3d::Zero(), target_pose().rotation());
 
-  geometry::Twist3Dd problem_pose_diff = target_pose_diff_ * problem_scale;
-  scale_limit(problem_pose_diff.Translation(), v_limit_lin_);
-  scale_limit(problem_pose_diff.Rotation(), v_limit_ang_);
+  geometry::Twist3Dd problem_pose_diff = trajectory_target_pose_diff_ * problem_scale;  // local-world-aligned frame
+  scale_limit(problem_pose_diff.translation(), v_limit_lin_);
+  scale_limit(problem_pose_diff.rotation(), v_limit_ang_);
 
   // Run the Optimization
   run_pose_diff_ik(problem_scale, problem_pose_diff, params_.enable_debug_log && do_publications);
@@ -457,18 +461,24 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   // verify result
   pinocchio::forwardKinematics(robot_model_, control_data_, control_q_);
   pinocchio::updateFramePlacement(robot_model_, control_data_, target_frame_idx_);  // update target frame
-  solution_pose_diff_ = target_state_.pose - geometry::Pose3Dd(control_data_.oMf[target_frame_idx_].translation(),
-                                                               control_data_.oMf[target_frame_idx_].rotation());
+
+  // express the candidate solution pose in the same original world-aligned local reference frame as
+  // trajectory_target_
+  const geometry::Pose3Dd solution_pose(control_data_.oMf[target_frame_idx_].translation() -
+                                            target_pose().translation(),
+                                        control_data_.oMf[target_frame_idx_].rotation());
+  solution_pose_diff_ = trajectory_target_.pose - solution_pose;
 
   // backtrack to prevent overshoot
   backtracking_scale_ = std::fmax(
-      -1.0, std::fmin((target_pose_diff_.vector.transpose() * solution_pose_diff_.vector + params_.ik_precision) /
-                          (solution_pose_diff_.vector.squaredNorm() + params_.ik_precision),
-                      1.0));
+      -1.0,
+      std::fmin((trajectory_target_pose_diff_.vector.transpose() * solution_pose_diff_.vector + params_.ik_precision) /
+                    (solution_pose_diff_.vector.squaredNorm() + params_.ik_precision),
+                1.0));
   control_q_ += (backtracking_scale_ - 1.0) * pose_diff_ik_result_;
 
   // update control_v_
-  control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: make correct!
+  control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: do correct!
   // control_v_.setZero();  // TODO: take into account the trajectory velocitythun
 
   // Write to HW
@@ -539,8 +549,8 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
 {
   // Construct Target Error Problem
   qp_jacobian_.setZero();
-  pinocchio::getFrameJacobian(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::WORLD,
-                              qp_jacobian_);
+  pinocchio::getFrameJacobian(robot_model_, state_data_, target_frame_idx_,
+                              pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, qp_jacobian_);
   qp_jacobian_t_ = qp_jacobian_.transpose();
   qp_jacobian_t_.block(0, 0, robot_model_.nv, 3) *= linear_error_weight_;
   qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_t_ * qp_jacobian_;
@@ -549,6 +559,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   // Fill QP box bounds with soft position displacement limits
   qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
   qp_solver_u_box_.segment(0, robot_model_.nv) = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);
+
   // Construct Constraints Problem
   Eigen::Index H_idx = robot_model_.nv;
   for (const auto frame_idx : linear_limit_frame_indices_) {
@@ -576,9 +587,11 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
     qp_solver_C *= params_.linear_limit_frames_weight;
     qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n) = qp_solver_C.transpose();
   }
+
   // scale box constraints
   qp_solver_l_box_ *= problem_scale;
   qp_solver_u_box_ *= problem_scale;
+
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
   qp_solver_->update(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
@@ -601,6 +614,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
     RCLCPP_ERROR_STREAM(get_node()->get_logger(),
                         "Continue with half the unfinished solution: " << qp_solver_->results.x.transpose());
   }
+
   // rescale result
   pose_diff_ik_result_ = qp_solver_->results.x.segment(0, robot_model_.nv) / problem_scale;
 }
@@ -655,12 +669,12 @@ void CartesianPoseController::log_statistics() const
   RCLCPP_INFO_STREAM(get_node()->get_logger(),
                      "IK solver: Problem Solution"
                          << std::endl  // Print the solver's solution
-                         << " - pose  - target: "
+                         << " - target - world pose : "
                          << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation()) << std::endl
-                         << " - pose  - target      : " << target_state_.pose << std::endl
-                         << " - twist - target      : "
+                         << " - target - world twist: "
                          << geometry::Twist3Dd(target_twist().linear(), target_twist().angular()) << std::endl
-                         << " - twist - target      : " << target_state_.twist << std::endl
+                         << " - trajectory - target-local pose : " << trajectory_target_.pose << std::endl
+                         << " - trajectory - target-local twist: " << trajectory_target_.twist << std::endl
                          << " - solver - solution   : " << qp_solver_->results.x.transpose() << std::endl
                          << " - result              : " << pose_diff_ik_result_.transpose() << std::endl
                          << " - state   - position: " << state_q_.transpose() << std::endl

@@ -52,8 +52,8 @@ public:
   template <typename TranslationCtor, typename RotationCtor>
   inline constexpr Twist3D(const TranslationCtor& translation_init, const RotationCtor& rotation_init) : vector()
   {
-    Translation() = translation_init;
-    Rotation() = rotation_init;
+    translation() = translation_init;
+    rotation() = rotation_init;
   }
 
   Self& setNeutral()
@@ -63,20 +63,20 @@ public:
   }
   static const Self Neutral;
 
-  inline TranslationType Translation()
+  inline TranslationType translation()
   {
     return vector.segment(0, 3);
   }
-  inline TranslationTypeConst Translation() const
+  inline TranslationTypeConst translation() const
   {
     return vector.segment(0, 3);
   }
 
-  inline RotationType Rotation()
+  inline RotationType rotation()
   {
     return vector.segment(3, 3);
   }
-  inline RotationTypeConst Rotation() const
+  inline RotationTypeConst rotation() const
   {
     return vector.segment(3, 3);
   }
@@ -136,7 +136,7 @@ using StampedTwist3Dd = StampedTwist3D<double>;
 template <typename ScalarT>
 inline std::ostream& operator<<(std::ostream& os, const duatic::geometry::Twist3D<ScalarT>& twist)
 {
-  os << "Twist3D(translation: " << twist.Translation().transpose() << ", rotation: " << twist.Rotation().transpose()
+  os << "Twist3D(translation: " << twist.translation().transpose() << ", rotation: " << twist.rotation().transpose()
      << ")";
   return os;
 }

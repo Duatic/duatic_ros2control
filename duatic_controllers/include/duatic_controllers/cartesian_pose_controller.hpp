@@ -115,9 +115,8 @@ private:
   duatic::concurrency::UnidirectionalBuffer<geometry::TimedState3Dd> current_state_buffer_;
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
-  geometry::State3Dd target_state_;
-
-  geometry::Twist3Dd target_pose_diff_;
+  geometry::State3Dd trajectory_target_;
+  geometry::Twist3Dd trajectory_target_pose_diff_;
   geometry::Twist3Dd solution_pose_diff_;
   double backtracking_scale_;
 
