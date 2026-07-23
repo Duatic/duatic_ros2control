@@ -468,7 +468,8 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   control_q_ += (backtracking_scale_ - 1.0) * pose_diff_ik_result_;
 
   // update control_v_
-  control_v_.setZero();  // TODO: take into account the trajectory velocity
+  control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: make correct!
+  // control_v_.setZero();  // TODO: take into account the trajectory velocitythun
 
   // Write to HW
   if (!params_.dry_run) {
