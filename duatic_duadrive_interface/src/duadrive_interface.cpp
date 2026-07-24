@@ -259,6 +259,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   print_drive_status_changes(get_name(), current_status_word, last_status_word_, logger_);
   last_status_word_ = current_status_word;
 
+  RCLCPP_INFO_STREAM_ONCE(logger_, state.getTemperature() << "  phase a: " << state.getCoilTemp1());
+
   // Now update the state vector
   state_.joint_position = state.getJointPosition();
   state_.joint_velocity = state.getJointVelocity();
