@@ -84,7 +84,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
 
   // And attach it to the ethercat master
   if (!ecat_master_handle_.ecat_master->attachDevice(drive_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Could not attach the slave drive to the master.");
+    RCLCPP_FATAL_STREAM(logger_, "Could not attach the slave drive to the master for joint: " << joint_name);
+    return hardware_interface::CallbackReturn::FAILURE;
   }
 
   RCLCPP_INFO_STREAM(logger_, "Registered drive: " << joint_name << " at bus address: " << address);
