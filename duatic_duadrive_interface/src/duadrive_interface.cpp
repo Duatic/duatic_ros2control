@@ -176,6 +176,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
+  // Check if the drive is in error state
+  // If so we try to clear the errors
   const bool is_in_error_state = status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error;
   if (is_in_error_state) {
     RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");
