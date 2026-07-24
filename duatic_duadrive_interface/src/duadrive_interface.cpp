@@ -171,6 +171,10 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   // Print the current drive state (e.g. warnings, errors, fatals)
   print_drive_status(drive_->getName(), status_word, logger_);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Fatal) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " is in Fatal state - aborting startup!");
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
   if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error) {
     RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");
     drive_->setControlword(RSL_DRIVE_CW_ID_CLEAR_ERRORS_TO_STANDBY);
