@@ -366,10 +366,16 @@ public:
       state.acceleration_commanded = latest_reading.joint_acceleration_commanded;
       state.torque_commanded = latest_reading.joint_torque_commanded;
 
+      // Error handling section
       if (latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Error ||
           latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Fatal) {
         RCLCPP_ERROR_STREAM_ONCE(logger_,
                                  "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
+        error_active_ = true;
+      }
+      if (drive->communication_has_timeout()) {
+        RCLCPP_ERROR_STREAM_ONCE(logger_, "Drive: " << drive->get_name()
+                                                    << " reports a communication timeout. Freezing the system");
         error_active_ = true;
       }
     }
