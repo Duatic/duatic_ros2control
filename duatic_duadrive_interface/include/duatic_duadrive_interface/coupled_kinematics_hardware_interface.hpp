@@ -183,6 +183,7 @@ public:
       const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
       const auto urdf_joint = urdf_model.getJoint(joint_name);
       const auto has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
+      const std::chrono::milliseconds communication_timeout{ std::stoi(joint.parameters.at("communication_timeout")) };
 
       if (!urdf_joint) {
         RCLCPP_FATAL_STREAM(logger_, "Failed to obtain joint from urdf: " << joint_name);
@@ -231,7 +232,8 @@ public:
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
                                                         .device_address = ethercat_address,
-                                                        .has_brake = has_brake });
+                                                        .has_brake = has_brake,
+                                                        .communication_timeout = communication_timeout });
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
