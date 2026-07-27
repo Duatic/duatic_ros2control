@@ -51,6 +51,8 @@ struct DuaDriveInterfaceParameters
   std::string drive_parameter_file_path;
   int device_address;
   bool has_brake;
+  // interval after which we assume there is a communication issue
+  std::chrono::milliseconds communication_timeout{ 100 };
 };
 struct DuaDriveInterfaceInfo
 {
@@ -206,6 +208,11 @@ public:
     return command_interface_mapping_;
   }
 
+  bool communication_has_timeout() const
+  {
+    return std::chrono::system_clock::now() - last_reading_update_ > params_.communication_timeout;
+  };
+
 protected:
   rclcpp::Logger logger_;
 
@@ -213,6 +220,8 @@ protected:
   DuaDriveInterfaceCommands command_;
   DuaDriveInterfaceParameters params_;
   DuaDriveInterfaceInfo drive_info_;
+
+  std::chrono::system_clock::time_point last_reading_update_;
 
   rsl_drive_sdk::mode::ModeEnum active_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
   rsl_drive_sdk::mode::ModeEnum previous_mode_{ rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains };
