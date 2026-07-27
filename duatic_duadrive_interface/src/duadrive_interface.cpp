@@ -218,6 +218,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     // return hardware_interface::CallbackReturn::ERROR;
   }
+
+  last_reading_update_ = std::chrono::system_clock::now();
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
@@ -254,6 +256,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   const auto current_status_word = state.getStatusword();
   print_drive_status_changes(get_name(), current_status_word, last_status_word_, logger_);
   last_status_word_ = current_status_word;
+  last_reading_update_ = state.getStamp();
 
   // Now update the state vector
   state_.joint_position = state.getJointPosition();
