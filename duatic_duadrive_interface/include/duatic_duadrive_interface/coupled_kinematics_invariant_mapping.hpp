@@ -60,6 +60,16 @@ struct InvariantKinematicsMapping
     return in;
   }
 
+  static VectorType map_from_serial_to_coupled_coordinate_limits(const VectorType& in)
+  {
+    return in;
+  }
+
+  static VectorType map_from_serial_to_coupled_torque_limits(const VectorType& in)
+  {
+    return in;
+  }
+
   static constexpr std::size_t input_size()
   {
     return expected_input_size;
