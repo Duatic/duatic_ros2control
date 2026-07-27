@@ -65,6 +65,7 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::deactivate()
 hardware_interface::return_type DuaDriveInterfaceMock::read([[maybe_unused]] const rclcpp::Time& time,
                                                             [[maybe_unused]] const rclcpp::Duration& period)
 {
+  last_reading_update_ = std::chrono::system_clock::now();
   return hardware_interface::return_type::OK;
 }
 
