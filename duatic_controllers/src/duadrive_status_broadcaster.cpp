@@ -279,6 +279,7 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
     DriveState& drive_state_msg = state_msg.states.at(i);
 
     try {
+      drive_state_msg.name = params_.joints.at(i);
       drive_state_msg.joint_position =
           duatic::controllers::compat::require_value(joint_position_interfaces_.at(i).get());
       drive_state_msg.joint_velocity =
