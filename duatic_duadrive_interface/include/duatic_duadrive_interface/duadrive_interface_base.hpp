@@ -44,6 +44,10 @@
 
 namespace duatic::duadrive_interface
 {
+// Factor by which we extend the hard limits so that what an application uses as limit for the input and what we use as
+// hard safe factors is a bit scaled
+inline constexpr double velocity_range_extension_factor = 1.1;
+
 struct DuaDriveInterfaceParameters
 {
   std::string ethercat_bus;
@@ -210,6 +214,7 @@ public:
 
 protected:
   rclcpp::Logger logger_;
+  rclcpp::Clock throttle_clock_{ RCL_STEADY_TIME };
 
   DuaDriveInterfaceState state_;
   DuaDriveInterfaceCommands command_;
