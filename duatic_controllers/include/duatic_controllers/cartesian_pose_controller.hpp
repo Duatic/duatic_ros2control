@@ -59,9 +59,9 @@
 #include <duatic_concurrency/unidirectional_buffer.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
-#include <duatic_geometry/twist_3d.hpp>
-#include <duatic_geometry/state_3d.hpp>
-#include <duatic_geometry/trajectory.hpp>
+#include <duatic_geometry/geometry.hpp>
+#include <duatic_geometry_msgs/duatic_geometry_msgs.hpp>
+#include <duatic_trajectory/trajectory.hpp>
 
 namespace duatic::controllers
 {
@@ -69,12 +69,22 @@ namespace duatic::controllers
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
-  using trajectory_type = geometry::ConstantTargetPose;  // TODO(patrick): convert into a template parameter
-  using trajectory_target_type = decltype(std::declval<trajectory_type>().evaluate_at(
-      std::declval<rclcpp::Time>()));  // TODO move into a trajectory trait
+  using trajectory_type = trajectory::ExponentialApproachPose3D<double, geometry::KinematicOrder::Pose, rclcpp::Time>;
 
-  constexpr static uint order_of_time_derivative =
-      std::is_same_v<trajectory_target_type, duatic::geometry::Pose3Dd> ? 0 : 1;  // TODO: rework into useful trait
+  using trajectory_target_type = typename trajectory_type::TrajectoryUpdateType;
+  using trajectory_target_msg_type = duatic_geometry_msgs::msg_stamped_t<trajectory_target_type>;
+
+  using trajectory_rt_state_type = typename trajectory_type::KinematicUpdateState;
+  static_assert(geometry::is_kinematic_state_v<trajectory_rt_state_type>);
+  static constexpr auto trajectory_rt_state_order_depth = trajectory_rt_state_type::kinematic_order_depth;
+
+  using trajectory_eval_type = typename trajectory_type::KinematicEvalState;
+  static_assert(geometry::is_kinematic_state_v<trajectory_eval_type>);
+  static constexpr auto eval_order_depth = trajectory_eval_type::kinematic_order_depth;
+
+  static constexpr auto required_state_order_depth =
+      geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
+  static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_rt_state_order_depth);
 
   inline CartesianPoseController() : controller_interface::ControllerInterface()
   {
@@ -114,13 +124,13 @@ private:
   Eigen::VectorXd control_v_;
 
   // input topic subscriptions
-  std::shared_ptr<rclcpp::Subscription<trajectory_type::UpdateInformation::msg>> target_msg_sub_;
+  std::shared_ptr<rclcpp::Subscription<trajectory_target_msg_type>> target_msg_sub_;
 
   // lock-free RT Non-RT data exchange buffer
-  duatic::concurrency::UnidirectionalBuffer<geometry::TimedState3Dd> current_state_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<trajectory_rt_state_type> current_state_buffer_;
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
-  geometry::State3Dd trajectory_target_;
+  trajectory_eval_type trajectory_target_;
   geometry::Twist3Dd trajectory_target_pose_diff_;
   geometry::Twist3Dd solution_pose_diff_;
   double backtracking_scale_;
@@ -153,7 +163,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr target_twist_pub_;
   realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr target_twist_pub_realtime_;
 
-  void handle_target_msg_sub(const trajectory_type::UpdateInformation::msg::SharedPtr msg);
+  void handle_target_msg_sub(const trajectory_target_msg_type::SharedPtr msg);
 
   void update_state(const bool use_hw_positions);
 

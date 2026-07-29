@@ -11,6 +11,8 @@ find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(duatic_controller_msgs REQUIRED)
 find_package(duatic_geometry REQUIRED)
+find_package(duatic_geometry_msgs REQUIRED)
+find_package(duatic_trajectory REQUIRED)
 find_package(duatic_concurrency REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -85,6 +87,14 @@ target_compile_options(${PROJECT_NAME} PRIVATE
   -Wnull-dereference
   -Werror=return-type
 )
+# Pinocchio's own exported target (pinocchioTargets.cmake) declares the Boost MPL/Fusion
+# compile definitions it needs (BOOST_MPL_LIMIT_LIST_SIZE, BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS,
+# etc.) as INTERFACE_COMPILE_DEFINITIONS on pinocchio::pinocchio. There is no legacy
+# PINOCCHIO_CFLAGS_OTHER variable exposing these (pinocchio's CMake config only sets
+# PINOCCHIO_USE_* feature flags), and the ament_target_dependencies() legacy path used below
+# doesn't propagate a modern target's INTERFACE_COMPILE_DEFINITIONS -- so link the real
+# imported target directly to pick them up regardless of which branch below is taken.
+target_link_libraries(${PROJECT_NAME} pinocchio::pinocchio)
 
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -113,6 +123,8 @@ if(COMMAND ament_target_dependencies)
       realtime_tools
       duatic_controller_msgs
       duatic_geometry
+      duatic_geometry_msgs
+      duatic_trajectory
       duatic_concurrency
       std_srvs
       Eigen3
@@ -128,6 +140,8 @@ else()
       realtime_tools::realtime_tools
       duatic_controller_msgs::duatic_controller_msgs
       duatic_geometry::duatic_geometry
+      duatic_geometry_msgs::duatic_geometry_msgs_factory
+      duatic_trajectory::duatic_trajectory
       duatic_concurrency::duatic_concurrency
       std_srvs::std_srvs
       Eigen3::Eigen

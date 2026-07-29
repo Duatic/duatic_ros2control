@@ -19,6 +19,8 @@
   <depend>realtime_tools</depend>
   <depend>duatic_controller_msgs</depend>
   <depend>duatic_geometry</depend>
+  <depend>duatic_geometry_msgs</depend>
+  <depend>duatic_trajectory</depend>
   <depend>duatic_concurrency</depend>
   <depend>std_srvs</depend>
   <depend>eigen</depend>
