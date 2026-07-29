@@ -58,10 +58,12 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
     // ensure the exact same order as for the state interfaces! (Used in on_activate)
     for (const std::string& joint : params_.joints) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+      RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
     }
     if constexpr (eval_order_depth >= geometry::KinematicOrder::Twist) {
       for (const std::string& joint : params_.joints) {
         config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+        RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
       }
     }
     static_assert(eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
@@ -78,10 +80,12 @@ controller_interface::InterfaceConfiguration CartesianPoseController::state_inte
   // ensure the exact same order as for the command interfaces! (Used in on_activate)
   for (const std::string& joint : params_.joints) {
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+    RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
   }
   if constexpr (state_order_depth >= geometry::KinematicOrder::Twist) {
     for (const std::string& joint : params_.joints) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+      RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
     }
   }
   static_assert(state_order_depth <= geometry::KinematicOrder::Twist,  // line break
@@ -100,6 +104,14 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
+
+  // log some internal configurations
+  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'trajectory_rt_state_order_depth' = %s",
+               geometry::to_string(trajectory_rt_state_order_depth).c_str());
+  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'eval_order_depth' = %s",
+               geometry::to_string(eval_order_depth).c_str());
+  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'state_order_depth' = %s",
+               geometry::to_string(state_order_depth).c_str());
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -285,6 +297,13 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
     }
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_x", &trajectory_target_.pose().linear()(0));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_y", &trajectory_target_.pose().linear()(1));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_z", &trajectory_target_.pose().linear()(2));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rx", &trajectory_target_.pose().angular().x());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_ry", &trajectory_target_.pose().angular().y());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rz", &trajectory_target_.pose().angular().z());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rw", &trajectory_target_.pose().angular().w());
     REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_x", &trajectory_target_pose_diff_.vector()(0));
     REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y", &trajectory_target_pose_diff_.vector()(1));
     REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z", &trajectory_target_pose_diff_.vector()(2));
@@ -326,7 +345,13 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i));
     }
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rx");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_ry");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rw");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rx");
@@ -514,7 +539,7 @@ void CartesianPoseController::update_state(const bool use_hw_positions)
     interface_iter++;
   }
   for (const auto idx : joint_v_idx_) {
-    state_v_[idx] += interface_iter->get_optional().value_or(state_v_[idx]);
+    state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
     interface_iter++;
   }
 
@@ -679,14 +704,16 @@ void CartesianPoseController::log_statistics() const
     control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
   }
   RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                     "IK Target:" << std::endl  // Print the solver's solution
+                                  << " - target - world pose : "
+                                  << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation())
+                                  << std::endl
+                                  << " - target - world twist: "
+                                  << geometry::Twist3Dd(target_twist().linear(), target_twist().angular())
+                                  << " - trajectory target state: " << trajectory_target_);
+  RCLCPP_INFO_STREAM(get_node()->get_logger(),
                      "IK solver: Problem Solution"
                          << std::endl  // Print the solver's solution
-                         << " - target - world pose : "
-                         << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation()) << std::endl
-                         << " - target - world twist: "
-                         << geometry::Twist3Dd(target_twist().linear(), target_twist().angular()) << std::endl
-                         << " - trajectory - target-local pose : " << trajectory_target_.pose() << std::endl
-                         << " - trajectory - target-local twist: " << trajectory_target_.twist() << std::endl
                          << " - solver - solution   : " << qp_solver_->results.x.transpose() << std::endl
                          << " - result              : " << pose_diff_ik_result_.transpose() << std::endl
                          << " - state   - position: " << state_q_.transpose() << std::endl
