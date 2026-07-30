@@ -29,6 +29,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <numbers>
 
 #include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/algorithm/frames.hpp>
@@ -51,17 +52,17 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
 {
   // Claim the necessary command interfaces
   controller_interface::InterfaceConfiguration config;
-  if (params_.dry_run) {
+  if (params_->dry_run) {
     config.type = controller_interface::interface_configuration_type::NONE;
   } else {
     config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
     // ensure the exact same order as for the state interfaces! (Used in on_activate)
-    for (const std::string& joint : params_.joints) {
+    for (const std::string& joint : params_->joints) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
     }
     if constexpr (eval_order_depth >= geometry::KinematicOrder::Twist) {
-      for (const std::string& joint : params_.joints) {
+      for (const std::string& joint : params_->joints) {
         config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
         RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
       }
@@ -78,12 +79,12 @@ controller_interface::InterfaceConfiguration CartesianPoseController::state_inte
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
   // ensure the exact same order as for the command interfaces! (Used in on_activate)
-  for (const std::string& joint : params_.joints) {
+  for (const std::string& joint : params_->joints) {
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
     RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
   }
   if constexpr (state_order_depth >= geometry::KinematicOrder::Twist) {
-    for (const std::string& joint : params_.joints) {
+    for (const std::string& joint : params_->joints) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
     }
@@ -99,7 +100,7 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
     // Obtains necessary parameters
     param_listener_ = std::make_unique<cartesian_pose_controller::ParamListener>(get_node());
     param_listener_->refresh_dynamic_parameters();
-    params_ = param_listener_->get_params();
+    *params_ = param_listener_->get_params();
   } catch (const std::exception& e) {
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller init: " << e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -120,15 +121,20 @@ controller_interface::CallbackReturn
 CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
   // update parameters
-  param_listener_->refresh_dynamic_parameters();
-  params_ = param_listener_->get_params();
+  try {
+    param_listener_->refresh_dynamic_parameters();
+    *params_ = param_listener_->get_params();
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller configuration: " << e.what());
+    return controller_interface::CallbackReturn::ERROR;
+  }
 
   // create the pinocchio model from the urdf
   RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
   pinocchio::Model new_model;  // rebuilding into the old model causes data-model inconsistency
   pinocchio::urdf::buildModelFromXML(get_robot_description(), new_model);
   robot_model_ = std::move(new_model);
-  state_data_ = std::move(robot_model_.createData());
+  state_data_ = robot_model_.createData();
   if (!robot_model_.check(state_data_)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'state_data_' is not consistent with "
                                            "'robot_model_'");
@@ -137,7 +143,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
   // control output variables
-  control_data_ = std::move(robot_model_.createData());
+  control_data_ = robot_model_.createData();
   if (!robot_model_.check(state_data_)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'control_data_' is not consistent with "
                                            "'robot_model_'");
@@ -147,35 +153,35 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   control_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // evaluate joits given
-  if (params_.joints.empty()) {
+  if (params_->joints.empty()) {
     RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty. Abort configuration.");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
   // evaluate optimization horizon, respective limits, and error weights
-  motion_horizon_ = params_.motion_horizon;
+  motion_horizon_ = params_->motion_horizon;
   assert(motion_horizon_ > 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Configuring optimizing with a motion horizon of %.2f seconds.",
               motion_horizon_);
-  v_limit_lin_ = params_.linear_velocity_limit * motion_horizon_;  // displacement instead of velocity
+  v_limit_lin_ = params_->linear_velocity_limit * motion_horizon_;  // displacement instead of velocity
   assert(v_limit_lin_ >= 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Linear displacement limit at %.2f m.", v_limit_lin_);
-  v_limit_ang_ = params_.angular_velocity_limit * motion_horizon_;  // displacement instead of velocity;
+  v_limit_ang_ = params_->angular_velocity_limit * motion_horizon_;  // displacement instead of velocity;
   assert(v_limit_ang_ >= 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Angular displacement limit at %.2f rad.", v_limit_ang_);
 
-  linear_error_weight_ = params_.ik_meter_to_revolution_error_correlation * (2.0 * M_PI);
+  linear_error_weight_ = params_->ik_meter_to_revolution_error_correlation * (2.0 * std::numbers::pi);
   RCLCPP_INFO(get_node()->get_logger(), "Linear error weight: %.2f", linear_error_weight_);
-  RCLCPP_INFO(get_node()->get_logger(), "Limit frames weight: %.2f", params_.linear_limit_frames_weight);
+  RCLCPP_INFO(get_node()->get_logger(), "Limit frames weight: %.2f", params_->linear_limit_frames_weight);
 
   // build model joint caches
   joint_model_idx_.clear();
-  joint_model_idx_.reserve(params_.joints.size());
+  joint_model_idx_.reserve(params_->joints.size());
   joint_q_idx_.clear();
-  joint_q_idx_.reserve(params_.joints.size());
+  joint_q_idx_.reserve(params_->joints.size());
   joint_v_idx_.clear();
-  joint_v_idx_.reserve(params_.joints.size());
-  for (const std::string& joint : params_.joints) {
+  joint_v_idx_.reserve(params_->joints.size());
+  for (const std::string& joint : params_->joints) {
     if (!robot_model_.existJointName(joint)) {
       RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint.c_str());
       return controller_interface::CallbackReturn::FAILURE;
@@ -186,24 +192,24 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       joint_v_idx_.push_back(robot_model_.idx_vs[jidx]);
     }
   }
-  assert(joint_model_idx_.size() == params_.joints.size());
-  assert(joint_q_idx_.size() == params_.joints.size());
-  assert(joint_v_idx_.size() == params_.joints.size());
+  assert(joint_model_idx_.size() == params_->joints.size());
+  assert(joint_q_idx_.size() == params_->joints.size());
+  assert(joint_v_idx_.size() == params_->joints.size());
 
   // Store end effector frame index
-  if (!robot_model_.existFrame(params_.target_frame)) {
+  if (!robot_model_.existFrame(params_->target_frame)) {
     RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model. Abort configuration.",
-                 params_.target_frame.c_str());
+                 params_->target_frame.c_str());
     return controller_interface::CallbackReturn::FAILURE;
   } else {
-    target_frame_idx_ = robot_model_.getFrameId(params_.target_frame);
+    target_frame_idx_ = robot_model_.getFrameId(params_->target_frame);
   }
 
   // Store limit frame indices
   linear_limit_frame_indices_.clear();
-  if (params_.linear_limit_frames_weight > 0.0) {
-    linear_limit_frame_indices_.reserve(params_.linear_limit_frames.size());
-    for (const std::string& frame : params_.linear_limit_frames) {
+  if (params_->linear_limit_frames_weight > 0.0) {
+    linear_limit_frame_indices_.reserve(params_->linear_limit_frames.size());
+    for (const std::string& frame : params_->linear_limit_frames) {
       if (!robot_model_.existFrame(frame)) {
         RCLCPP_ERROR(get_node()->get_logger(), "Limit frame '%s' not found in Pinocchio model.", frame.c_str());
         return controller_interface::CallbackReturn::FAILURE;
@@ -214,8 +220,8 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   }
 
   // setup and initialize QP
-  assert(robot_model_.nv == params_.joints.size() && "At this stage, it is assumed that ALL joints are to be "
-                                                     "controlled! -> This is an open TODO");
+  assert(robot_model_.nv == params_->joints.size() && "At this stage, it is assumed that ALL joints are to be "
+                                                      "controlled! -> This is an open TODO");
   // TODO(patrick): always make a full model and use the joints parameters to define actively controlled joints
 
   // constraints
@@ -230,13 +236,16 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       true,                                      // box_constrained
       proxsuite::proxqp::HessianType::Dense);
   assert(qp_solver_->model.dim == robot_model_.nv + static_cast<Eigen::Index>(qp_constraints_n));
+  assert(params_->ik_max_iterations >= 3 && "'ik_max_iterations' must be at least 3. Please update the parameter "
+                                            "bounds accordingly.");
+
   // settings
-  qp_solver_->settings.eps_abs = params_.ik_precision;
-  qp_solver_->settings.eps_rel = 0.1 * params_.ik_precision;
-  qp_solver_->settings.max_iter = params_.ik_max_iterations;
-  qp_solver_->settings.max_iter_in = params_.ik_max_iterations - 2;
-  qp_solver_->settings.verbose = params_.enable_debug_log;
-  qp_solver_->settings.compute_timings = (params_.enable_debug_log || params_.enable_introspection);
+  qp_solver_->settings.eps_abs = params_->ik_precision;
+  qp_solver_->settings.eps_rel = 0.1 * params_->ik_precision;
+  qp_solver_->settings.max_iter = params_->ik_max_iterations;
+  qp_solver_->settings.max_iter_in = params_->ik_max_iterations - 2;
+  qp_solver_->settings.verbose = params_->enable_debug_log;
+  qp_solver_->settings.compute_timings = (params_->enable_debug_log || params_->enable_introspection);
   qp_solver_->settings.initial_guess =
       proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;  // ! IMPORTANT ! Don't reset this on
                                                                                // error, it will cause way more required
@@ -245,7 +254,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_H_ =
       Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix.
   if (qp_constraints_n > 0) {  // initialize the lower-right weighted identity block matrix within H (it stays constant)
-    qp_solver_H_.diagonal().segment(robot_model_.nv, qp_constraints_n).setConstant(params_.linear_limit_frames_weight);
+    qp_solver_H_.diagonal().segment(robot_model_.nv, qp_constraints_n).setConstant(params_->linear_limit_frames_weight);
   }
   qp_solver_g_ = Eigen::VectorXd::Zero(qp_solver_->model.dim);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
@@ -256,17 +265,18 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   pose_diff_ik_result_ = Eigen::VectorXd::Zero(robot_model_.nv);
 
   // subscriptions
-  const std::string topic_prefix = (params_.topic_prefix.empty() ? get_node()->get_name() : params_.topic_prefix) + "/";
-  const std::string target_topic_prefix = topic_prefix + params_.target_frame + "/";
+  const std::string topic_prefix =
+      (params_->topic_prefix.empty() ? get_node()->get_name() : params_->topic_prefix) + "/";
+  const std::string target_topic_prefix = topic_prefix + params_->target_frame + "/";
 
   // TARGET INPUT
   target_msg_sub_ = get_node()->create_subscription<trajectory_target_msg_type>(
-      target_topic_prefix + params_.target_topic_suffix, rclcpp::QoS(1).reliable().durability_volatile(),
+      target_topic_prefix + params_->target_topic_suffix, rclcpp::QoS(1).reliable().durability_volatile(),
       std::bind(&CartesianPoseController::handle_target_msg_sub, this, std::placeholders::_1));
 
   // create RT topic publishers for the controller end effector pose and twist
-  if (params_.topic_pub_frequency > 0.0) {
-    topics_pub_period_ = 1.0 / params_.topic_pub_frequency;
+  if (params_->topic_pub_frequency > 0.0) {
+    topics_pub_period_ = 1.0 / params_->topic_pub_frequency;
     topics_pub_next_time_ = get_node()->now().seconds();  // force immediate publish on first update
 
     target_pose_pub_ = get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -289,9 +299,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   }
 
   // ros2control introspection
-  if (params_.enable_introspection) {
+  if (params_->enable_introspection) {
     RCLCPP_INFO(get_node()->get_logger(), "Configuring ROS2control Introspection for internal state monitoring.");
-    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    for (std::size_t i = 0; i < params_->joints.size(); i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i), &state_q_[joint_q_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("state_v_" + std::to_string(i), &state_v_[joint_v_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
@@ -335,11 +345,11 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 controller_interface::CallbackReturn
 CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  if (params_.enable_introspection) {
+  if (params_->enable_introspection) {
     RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
     using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
                                          // namespace natively as done in the REGISTER function
-    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+    for (std::size_t i = 0; i < params_->joints.size(); i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("state_v_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
@@ -381,7 +391,7 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
 controller_interface::CallbackReturn
 CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  if (!params_.dry_run) {
+  if (!params_->dry_run) {
     auto command_itr = command_interfaces_.begin();
     auto state_itr = state_interfaces_.begin();
     // initialize the command interfaces to the current states as far as they are available
@@ -425,7 +435,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
                                   pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
   qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) =
       qp_jacobian_.transpose() * qp_jacobian_;  // neglect angular weight
-  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_.ik_damping;
+  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_->ik_damping;
   qp_solver_g_.setZero();  // pose_diff is zero on initialization
   // TODO(patrick): maybe it's better to initialize with the current velocity
   qp_solver_->init(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
@@ -436,12 +446,14 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
                                                                           // displacement limits)
   );
   qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
-  if (!qp_solver_->results.x.isZero(params_.ik_precision)) {
+  if (!qp_solver_->results.x.isZero(params_->ik_precision)) {
     RCLCPP_ERROR(get_node()->get_logger(), "QP solver did not converge on zero-initialization. Abort Activation.");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  publish_topics();
+  if (params_->topic_pub_frequency > 0.0) {
+    publish_topics();
+  }
 
   // Everything functional and ready for RT operation
   return controller_interface::CallbackReturn::SUCCESS;
@@ -481,7 +493,7 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   scale_limit(problem_pose_diff.angular(), v_limit_ang_);
 
   // Run the Optimization
-  run_pose_diff_ik(problem_scale, problem_pose_diff, params_.enable_debug_log && do_publications);
+  run_pose_diff_ik(problem_scale, problem_pose_diff, params_->enable_debug_log && do_publications);
 
   // integrate joint positions
   assert(robot_model_.nv == state_q_.size());
@@ -503,8 +515,8 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   // backtrack to prevent overshoot
   backtracking_scale_ =
       std::fmax(-1.0, std::fmin((trajectory_target_pose_diff_.vector().transpose() * solution_pose_diff_.vector() +
-                                 params_.ik_precision) /
-                                    (solution_pose_diff_.vector().squaredNorm() + params_.ik_precision),
+                                 params_->ik_precision) /
+                                    (solution_pose_diff_.vector().squaredNorm() + params_->ik_precision),
                                 1.0));
   control_q_ += (backtracking_scale_ - 1.0) * pose_diff_ik_result_;
 
@@ -512,13 +524,13 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: do correct or do not !
 
   // Write to HW
-  if (!params_.dry_run) {
+  if (!params_->dry_run) {
     command_controls();
   }
 
   // Publish the current end effector pose and twist iff the time is right
   if (do_publications) {
-    if (params_.enable_debug_log) {
+    if (params_->enable_debug_log) {
       log_statistics();
     }
     publish_topics();
@@ -586,7 +598,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   qp_jacobian_t_ = qp_jacobian_.transpose();
   qp_jacobian_t_.block(0, 0, robot_model_.nv, 3) *= linear_error_weight_;
   qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_t_ * qp_jacobian_;
-  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_.ik_damping;
+  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_->ik_damping;
   qp_solver_g_.segment(0, robot_model_.nv) = -(qp_jacobian_t_ * scaled_target_diff.vector());
   // Fill QP box bounds with soft position displacement limits
   qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
@@ -604,7 +616,7 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
     // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
     const double frame_v_lin_length = frame_motion.linear().norm();
     qp_solver_u_box_(H_idx) = std::fmax(v_limit_lin_ * frame_v_lin_length,
-                                        params_.ik_precision);  // guarantee some minimal numerical space
+                                        params_->ik_precision);  // guarantee some minimal numerical space
     qp_solver_l_box_(H_idx) = -qp_solver_u_box_(H_idx);
     // move on to the next index
     H_idx++;
@@ -615,8 +627,8 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   if (constraints_n > 0) {  // if there are constraints available
     auto qp_solver_C = qp_solver_H_.block(robot_model_.nv, 0, constraints_n, robot_model_.nv);
     qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) +=
-        params_.linear_limit_frames_weight * qp_solver_C.transpose() * qp_solver_C;
-    qp_solver_C *= params_.linear_limit_frames_weight;
+        params_->linear_limit_frames_weight * qp_solver_C.transpose() * qp_solver_C;
+    qp_solver_C *= params_->linear_limit_frames_weight;
     qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n) = qp_solver_C.transpose();
   }
 
@@ -655,18 +667,19 @@ void CartesianPoseController::command_controls()
 {
   auto command_itr = command_interfaces_.begin();
   // make sure to have the same order as initially claimed within 'command_interface_configuration'
-  for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
+  for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
     // set position
     if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
-      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", params_.joints[i].c_str());
+      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'",
+                  params_->joints[i].c_str());
     }
   }
   if constexpr (eval_order_depth >= geometry::KinematicOrder::Twist) {
-    for (std::size_t i = 0; i < params_.joints.size(); i++, command_itr++) {
+    for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
       // set velocity
       if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
         RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'",
-                    params_.joints[i].c_str());
+                    params_->joints[i].c_str());
       }
     }
   }
@@ -698,7 +711,7 @@ void CartesianPoseController::log_statistics() const
   Eigen::VectorXd control_positions = Eigen::VectorXd::Zero(control_q_.size());
   Eigen::VectorXd control_velocities = Eigen::VectorXd::Zero(control_v_.size());
   assert(control_q_.size() == control_v_.size());
-  assert(control_q_.size() == static_cast<Eigen::Index>(params_.joints.size()));
+  assert(control_q_.size() == static_cast<Eigen::Index>(params_->joints.size()));
   for (Eigen::Index i = 0; i < control_q_.size(); ++i) {
     control_positions[i] = control_q_[joint_q_idx_[static_cast<size_t>(i)]];
     control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
@@ -725,18 +738,20 @@ void CartesianPoseController::log_statistics() const
 void CartesianPoseController::publish_topics()
 {
   // Publish Pose
+  assert(target_pose_pub_realtime_ != nullptr);
   if (target_pose_pub_realtime_->trylock()) {
     target_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
     target_pose_pub_realtime_->msg_.header.frame_id =
-        params_.base_frame;  // TODO(patrick) this frame_id is not yet taken into account in the rest of the code !
+        params_->base_frame;  // TODO(patrick) this frame_id is not yet taken into account in the rest of the code !
     const geometry::Pose3Dd current_target_pose(target_pose().translation(), target_pose().rotation());
     duatic_geometry_msgs::encode(current_target_pose, target_pose_pub_realtime_->msg_.pose);
     target_pose_pub_realtime_->unlockAndPublish();
   }
   // Publish Twist
+  assert(target_twist_pub_realtime_ != nullptr);
   if (target_twist_pub_realtime_->trylock()) {
     target_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
-    target_twist_pub_realtime_->msg_.header.frame_id = params_.base_frame;
+    target_twist_pub_realtime_->msg_.header.frame_id = params_->base_frame;
     const geometry::Twist3Dd current_target_twist(target_twist().linear(), target_twist().angular());
     duatic_geometry_msgs::encode(current_target_twist, target_twist_pub_realtime_->msg_.twist);
     target_twist_pub_realtime_->unlockAndPublish();

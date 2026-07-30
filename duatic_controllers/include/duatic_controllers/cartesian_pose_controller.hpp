@@ -69,7 +69,36 @@ namespace duatic::controllers
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
-  using trajectory_type = trajectory::ExponentialApproachPose3D<double, geometry::KinematicOrder::Pose, rclcpp::Time>;
+  struct KinematicLimitsParams : cartesian_pose_controller::Params
+  {
+    using ScalarType = double;
+
+    ScalarType velocity_limit_linear() const
+    {
+      return linear_velocity_limit;
+    }
+
+    ScalarType velocity_limit_angular() const
+    {
+      return angular_velocity_limit;
+    }
+
+    KinematicLimitsParams& operator=(cartesian_pose_controller::Params&& rhs)
+    {
+      cartesian_pose_controller::Params::operator=(std::move(rhs));
+      return *this;
+    }
+  };
+  static_assert(trajectory::is_kinematic_limits_v<KinematicLimitsParams>);
+
+  using trajectory_type = trajectory::ExponentialApproachPose3D<
+      double, geometry::KinematicOrder::Pose, rclcpp::Time,
+      trajectory::KinematicLimitsExponentialApproachDefault<double, KinematicLimitsParams>>;
+
+  // The type trajectory_type actually needs for its shared limits object -- NOT KinematicLimitsParams itself,
+  // but the KinematicLimitsExponentialApproachDefault<double, KinematicLimitsParams> wrapper that also supplies
+  // omega_min()/omega_max(). Derived from trajectory_type so it always matches, regardless of argument order.
+  using trajectory_limits_type = typename trajectory_type::KinematicLimitsType;
 
   using trajectory_target_type = typename trajectory_type::TrajectoryUpdateType;
   using trajectory_target_msg_type = duatic_geometry_msgs::msg_stamped_t<trajectory_target_type>;
@@ -86,7 +115,10 @@ public:
       geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
   static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_rt_state_order_depth);
 
-  inline CartesianPoseController() : controller_interface::ControllerInterface()
+  inline CartesianPoseController()
+    : controller_interface::ControllerInterface()
+    , params_(std::make_shared<trajectory_limits_type>())
+    , trajectory_buffer_(params_)
   {
   }
 
@@ -100,7 +132,7 @@ public:
 
 private:
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
-  cartesian_pose_controller::Params params_;
+  std::shared_ptr<trajectory_limits_type> params_;
 
   // optimization horizon and limits
   double motion_horizon_;
