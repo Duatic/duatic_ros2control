@@ -423,10 +423,10 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   // initialize current state (data availability is guaranteed by the previous loop)
   update_state(true);
 
-  // initialize state and trajectory buffers
-  update_rt_state_buffer(get_node()->now());
+  // initialize state and trajectory buffers, ensure the correct time source is present within the buffer
+  update_rt_state_buffer(rclcpp::Clock(rcl_time_source).now());
   // init to the trajectories "neutral" goal
-  trajectory_buffer_.write().update_neutral(current_state_buffer_.update_read());
+  trajectory_buffer_.write().calculate_neutral(current_state_buffer_.update_read());
   trajectory_buffer_.publish_write();
 
   // initialize IK QP
@@ -464,24 +464,27 @@ void CartesianPoseController::handle_target_msg_sub(const trajectory_target_msg_
   // Update/Calculate new trajectory outside the realtime-loop
   trajectory_target_type target_goal{};
   duatic_geometry_msgs::decode(*msg, target_goal);
-  trajectory_buffer_.write().update(current_state_buffer_.update_read(), target_goal);
+  trajectory_buffer_.write().update_from(trajectory_buffer_.read(), current_state_buffer_.update_read().time(),
+                                         target_goal);
   trajectory_buffer_.publish_write();
+  assert(current_state_buffer_.read().time().get_clock_type() == Self::rcl_time_source);
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
                                                                   [[maybe_unused]] const rclcpp::Duration& period)
 {
+  assert((time.get_clock_type() == Self::rcl_time_source) && "time provided by the wrong time source");
+
   // Publish the current end effector pose and twist iff the time is right
   const double seconds = time.seconds();
   const bool do_publications = (seconds > topics_pub_next_time_);
   const double problem_scale = motion_horizon_ / period.seconds();
 
   update_state(false);
-
   update_rt_state_buffer(time);
 
   // Get 6D-diff between current pose and target pose
-  trajectory_buffer_.update_read().evaluate(time, trajectory_target_);
+  trajectory_buffer_.update_read().evaluate<geometry::KinematicOrder::Pose>(time, trajectory_target_);
   // convert the trajectory target into the world-aligned target_frame_idx frame: position relative to the current
   // target_frame_idx origin, orientation kept in world-frame axes
   trajectory_target_.pose().linear() -= target_pose().translation();  // from now on in local-world-aligned frame
@@ -575,6 +578,7 @@ void CartesianPoseController::update_state(const bool use_hw_positions)
 void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
 {
   // update rt state buffer
+  assert(now.get_clock_type() == Self::rcl_time_source);
   current_state_buffer_.write().time() = now;
   current_state_buffer_.write().pose().linear() = target_pose().translation();
   current_state_buffer_.write().pose().angular() = target_pose().rotation();
@@ -597,22 +601,27 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
                               pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, qp_jacobian_);
   qp_jacobian_t_ = qp_jacobian_.transpose();
   qp_jacobian_t_.block(0, 0, robot_model_.nv, 3) *= linear_error_weight_;
-  qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) = qp_jacobian_t_ * qp_jacobian_;
+  static_assert(!decltype(qp_solver_H_)::IsRowMajor, "qp_solver_H_ is assumed to be column-major for accessing upper "
+                                                     "triangular columns of H");
+  qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv).triangularView<Eigen::Upper>() =
+      qp_jacobian_t_ * qp_jacobian_;
   qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_->ik_damping;
   qp_solver_g_.segment(0, robot_model_.nv) = -(qp_jacobian_t_ * scaled_target_diff.vector());
   // Fill QP box bounds with soft position displacement limits
   qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
   qp_solver_u_box_.segment(0, robot_model_.nv) = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);
 
-  // Construct Constraints Problem
+  // Construct Constraints Problem: fill the upper-right (H_idx-th column, robot_model_.nv rows)
+  // block -- i.e. transposed relative to a row-wise fill -- so only the upper triangle of H is
+  // ever written; the lower triangle is mirrored from it afterwards via selfadjointView.
   Eigen::Index H_idx = robot_model_.nv;
   for (const auto frame_idx : linear_limit_frame_indices_) {
     qp_jacobian_.setZero();  // reuse jacobian memory
     pinocchio::getFrameJacobian(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL, qp_jacobian_);
     const pinocchio::Motion frame_motion =
         pinocchio::getFrameVelocity(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL);
-    qp_solver_H_.block(H_idx, 0, 1, robot_model_.nv) =
-        frame_motion.linear().transpose() * qp_jacobian_.block(0, 0, 3, robot_model_.nv);
+    qp_solver_H_.block(0, H_idx, robot_model_.nv, 1) =
+        qp_jacobian_.block(0, 0, 3, robot_model_.nv).transpose() * frame_motion.linear();
     // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
     const double frame_v_lin_length = frame_motion.linear().norm();
     qp_solver_u_box_(H_idx) = std::fmax(v_limit_lin_ * frame_v_lin_length,
@@ -622,15 +631,16 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
     H_idx++;
   }
   assert(H_idx == qp_solver_->model.dim);  // Assert all constraints have been filled
-  // copy over C to the rest of H
+  // fold the (still unweighted) constraint block's contribution into H_00, then scale it in place
   const Eigen::Index constraints_n = qp_solver_->model.dim - robot_model_.nv;
   if (constraints_n > 0) {  // if there are constraints available
-    auto qp_solver_C = qp_solver_H_.block(robot_model_.nv, 0, constraints_n, robot_model_.nv);
-    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) +=
-        params_->linear_limit_frames_weight * qp_solver_C.transpose() * qp_solver_C;
-    qp_solver_C *= params_->linear_limit_frames_weight;
-    qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n) = qp_solver_C.transpose();
+    auto qp_solver_Ct = qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n);
+    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv).triangularView<Eigen::Upper>() +=
+        params_->linear_limit_frames_weight * qp_solver_Ct * qp_solver_Ct.transpose();
+    qp_solver_Ct *= params_->linear_limit_frames_weight;
   }
+  // the entire upper triangle of H is now assembled -- mirror it down into the strictly lower triangle.
+  qp_solver_H_.triangularView<Eigen::StrictlyLower>() = qp_solver_H_.transpose();
 
   // scale box constraints
   qp_solver_l_box_ *= problem_scale;

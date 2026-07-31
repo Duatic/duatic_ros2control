@@ -52,8 +52,8 @@
 #include "controller_interface/chainable_controller_interface.hpp"
 
 // ROS2
+#include <rclcpp/time.hpp>
 #include <realtime_tools/realtime_publisher.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
 
 // Project
 #include <duatic_concurrency/unidirectional_buffer.hpp>
@@ -61,6 +61,7 @@
 #include <duatic_controllers/interface_utils.hpp>
 #include <duatic_geometry/geometry.hpp>
 #include <duatic_geometry_msgs/duatic_geometry_msgs.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <duatic_trajectory/trajectory.hpp>
 
 namespace duatic::controllers
@@ -69,7 +70,9 @@ namespace duatic::controllers
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
-  struct KinematicLimitsParams : cartesian_pose_controller::Params
+  using Self = CartesianPoseController;
+
+  struct KinematicTrajectorySettingsParams : cartesian_pose_controller::Params
   {
     using ScalarType = double;
 
@@ -83,31 +86,30 @@ public:
       return angular_velocity_limit;
     }
 
-    KinematicLimitsParams& operator=(cartesian_pose_controller::Params&& rhs)
+    KinematicTrajectorySettingsParams& operator=(cartesian_pose_controller::Params&& rhs)
     {
       cartesian_pose_controller::Params::operator=(std::move(rhs));
       return *this;
     }
   };
-  static_assert(trajectory::is_kinematic_limits_v<KinematicLimitsParams>);
+  static_assert(trajectory::is_kinematic_trajectory_settings_v<KinematicTrajectorySettingsParams>);
 
   using trajectory_type = trajectory::ExponentialApproachPose3D<
-      double, geometry::KinematicOrder::Pose, rclcpp::Time,
-      trajectory::KinematicLimitsExponentialApproachDefault<double, KinematicLimitsParams>>;
+      double, rclcpp::Time, trajectory::KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams>>;
 
-  // The type trajectory_type actually needs for its shared limits object -- NOT KinematicLimitsParams itself,
-  // but the KinematicLimitsExponentialApproachDefault<double, KinematicLimitsParams> wrapper that also supplies
+  // The type trajectory_type actually needs for its shared limits object -- NOT KinematicTrajectorySettingsParams itself,
+  // but the KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams> wrapper that also supplies
   // omega_min()/omega_max(). Derived from trajectory_type so it always matches, regardless of argument order.
-  using trajectory_limits_type = typename trajectory_type::KinematicLimitsType;
+  using trajectory_settings_type = typename trajectory_type::KinematicTrajectorySettingsType;
 
-  using trajectory_target_type = typename trajectory_type::TrajectoryUpdateType;
+  using trajectory_target_type = typename trajectory_type::TrajectoryDescriptionType;
   using trajectory_target_msg_type = duatic_geometry_msgs::msg_stamped_t<trajectory_target_type>;
 
-  using trajectory_rt_state_type = typename trajectory_type::KinematicUpdateState;
+  using trajectory_rt_state_type = typename trajectory_type::UpdateStateType;
   static_assert(geometry::is_kinematic_state_v<trajectory_rt_state_type>);
   static constexpr auto trajectory_rt_state_order_depth = trajectory_rt_state_type::kinematic_order_depth;
 
-  using trajectory_eval_type = typename trajectory_type::KinematicEvalState;
+  using trajectory_eval_type = typename trajectory_type::template KinematicState<geometry::KinematicOrder::Pose>;
   static_assert(geometry::is_kinematic_state_v<trajectory_eval_type>);
   static constexpr auto eval_order_depth = trajectory_eval_type::kinematic_order_depth;
 
@@ -115,9 +117,13 @@ public:
       geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
   static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_rt_state_order_depth);
 
+  // ros2_control's controller_manager calls update(time, period) with 'time' on RCL_ROS_TIME (verified
+  // via the clock-type mismatch this constant guards against; see the assert in update()).
+  static constexpr rcl_clock_type_t rcl_time_source = RCL_ROS_TIME;
+
   inline CartesianPoseController()
     : controller_interface::ControllerInterface()
-    , params_(std::make_shared<trajectory_limits_type>())
+    , params_(std::make_shared<trajectory_settings_type>())
     , trajectory_buffer_(params_)
   {
   }
@@ -132,7 +138,7 @@ public:
 
 private:
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
-  std::shared_ptr<trajectory_limits_type> params_;
+  std::shared_ptr<trajectory_settings_type> params_;
 
   // optimization horizon and limits
   double motion_horizon_;
