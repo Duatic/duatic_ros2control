@@ -113,7 +113,7 @@ inline void print_drive_status(const std::string& drive_name, const rsl_drive_sd
   }
 }
 
-inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze" };
+inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze_mode" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
