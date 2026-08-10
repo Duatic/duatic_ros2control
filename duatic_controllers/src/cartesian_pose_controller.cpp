@@ -163,10 +163,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   assert(motion_horizon_ > 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Configuring optimizing with a motion horizon of %.2f seconds.",
               motion_horizon_);
-  v_limit_lin_ = params_->linear_velocity_limit * motion_horizon_;  // displacement instead of velocity
+  v_limit_lin_ = params_->limits.velocity.linear * motion_horizon_;  // displacement instead of velocity
   assert(v_limit_lin_ >= 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Linear displacement limit at %.2f m.", v_limit_lin_);
-  v_limit_ang_ = params_->angular_velocity_limit * motion_horizon_;  // displacement instead of velocity;
+  v_limit_ang_ = params_->limits.velocity.angular * motion_horizon_;  // displacement instead of velocity;
   assert(v_limit_ang_ >= 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Angular displacement limit at %.2f rad.", v_limit_ang_);
 
@@ -484,6 +484,8 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 
 void CartesianPoseController::handle_target_msg_sub(const trajectory_target_msg_type::SharedPtr msg)
 {
+  auto current_trajectory_state =
+      trajectory_buffer_.read().evaluate<geometry::KinematicOrder::Accel>(current_state_buffer_.update_read().time());
   // Update/Calculate new trajectory outside the realtime-loop
   trajectory_target_type target_goal{};
   duatic_geometry_msgs::decode(*msg, target_goal);

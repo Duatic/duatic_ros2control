@@ -78,22 +78,22 @@ public:
 
     ScalarType velocity_limit_linear() const
     {
-      return linear_velocity_limit;
+      return limits.velocity.linear;
     }
 
     ScalarType velocity_limit_angular() const
     {
-      return angular_velocity_limit;
+      return limits.velocity.angular;
     }
 
     ScalarType acceleration_limit_linear() const
     {
-      return linear_acceleration_limit;
+      return limits.acceleration.linear;
     }
 
     ScalarType acceleration_limit_angular() const
     {
-      return angular_acceleration_limit;
+      return limits.acceleration.angular;
     }
 
     KinematicTrajectorySettingsParams& operator=(cartesian_pose_controller::Params&& rhs)

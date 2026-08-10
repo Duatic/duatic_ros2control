@@ -33,30 +33,34 @@ cartesian_pose_controller:
     description: "Time horizon in seconds the IK algorithm is running in. This will create exponential boundary approximation, the bigger, the slower"
     validation:
       bounds<>: [0.001, 1.0]
-  linear_velocity_limit:
-    type: double
-    default_value: 1.0
-    description: "Maximum velocity for linear, Cartesian motions. Set zero to disable linear motion."
-    validation:
-      bounds<>: [0.0, 10.0]
-  angular_velocity_limit:
-    type: double
-    default_value: 0.6283
-    description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
-    validation:
-      bounds<>: [0.0, 6.283]
-  linear_acceleration_limit:
-    type: double
-    default_value: 1.0
-    description: "Maximum acceleration for linear, Cartesian motions."
-    validation:
-      bounds<>: [0.0, 10.0]
-  angular_acceleration_limit:
-    type: double
-    default_value: 0.6283
-    description: "Maximum acceleration for rotational motions."
-    validation:
-      bounds<>: [0.0, 6.283]
+  
+  limits:
+    velocity:
+      linear:
+        type: double
+        default_value: 1.0
+        description: "Maximum velocity for linear, Cartesian motions. Set zero to disable linear motion."
+        validation:
+          bounds<>: [0.0, 10.0]
+      angular:
+        type: double
+        default_value: 0.6283
+        description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
+        validation:
+          bounds<>: [0.0, 6.283]
+    acceleration:
+      linear:
+        type: double
+        default_value: 10.0
+        description: "Maximum acceleration for linear, Cartesian motions. Set zero to disable linear motion."
+        validation:
+          bounds<>: [0.0, 100.0]
+      angular:
+        type: double
+        default_value: 6.283
+        description: "Maximum acceleration for rotational motions. Set zero to disable rotational motion."
+        validation:
+          bounds<>: [0.0, 62.83]
 
   topic_prefix:
     type: string
