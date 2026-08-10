@@ -113,7 +113,7 @@ inline void print_drive_status(const std::string& drive_name, const rsl_drive_sd
   }
 }
 
-inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze" };
+inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze_mode" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
@@ -161,7 +161,7 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
     return rsl_drive_sdk::mode::ModeEnum::JointPositionVelocity;
   }
 
-  if (interface_types.find("velocity") != interface_types.end() &&
+  if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("effort") != interface_types.end() && interface_types.size() == 2) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionTorque");
     return rsl_drive_sdk::mode::ModeEnum::JointPositionTorque;
