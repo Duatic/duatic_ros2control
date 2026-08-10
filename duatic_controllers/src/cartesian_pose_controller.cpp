@@ -61,13 +61,13 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
     }
-    if constexpr (eval_order_depth >= geometry::KinematicOrder::Twist) {
+    if constexpr (trajectory_eval_order_depth >= geometry::KinematicOrder::Twist) {
       for (const std::string& joint : params_->joints) {
         config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
         RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
       }
     }
-    static_assert(eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
+    static_assert(trajectory_eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
                   "Control outputs of higher derivative than Twist are not yet supported");
   }
   return config;
@@ -107,12 +107,12 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
   }
 
   // log some internal configurations
-  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'trajectory_rt_state_order_depth' = %s",
-               geometry::to_string(trajectory_rt_state_order_depth).c_str());
-  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'eval_order_depth' = %s",
-               geometry::to_string(eval_order_depth).c_str());
-  RCLCPP_DEBUG(get_node()->get_logger(), "Using 'state_order_depth' = %s",
-               geometry::to_string(state_order_depth).c_str());
+  RCLCPP_INFO(get_node()->get_logger(), "Using 'trajectory_start_order_depth' = %s",
+              geometry::to_string(trajectory_start_order_depth).c_str());
+  RCLCPP_INFO(get_node()->get_logger(), "Using 'trajectory_eval_order_depth' = %s",
+              geometry::to_string(trajectory_eval_order_depth).c_str());
+  RCLCPP_INFO(get_node()->get_logger(), "Using 'state_order_depth' = %s",
+              geometry::to_string(state_order_depth).c_str());
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -307,19 +307,32 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
       REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
     }
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_x", &trajectory_target_.pose().linear()(0));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_y", &trajectory_target_.pose().linear()(1));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_z", &trajectory_target_.pose().linear()(2));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rx", &trajectory_target_.pose().angular().x());
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_ry", &trajectory_target_.pose().angular().y());
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rz", &trajectory_target_.pose().angular().z());
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rw", &trajectory_target_.pose().angular().w());
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_x", &trajectory_target_pose_diff_.vector()(0));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y", &trajectory_target_pose_diff_.vector()(1));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z", &trajectory_target_pose_diff_.vector()(2));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rx", &trajectory_target_pose_diff_.vector()(3));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_ry", &trajectory_target_pose_diff_.vector()(4));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rz", &trajectory_target_pose_diff_.vector()(5));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_x",
+                                        &trajectory_eval_target_.pose().linear()(0));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_y",
+                                        &trajectory_eval_target_.pose().linear()(1));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_z",
+                                        &trajectory_eval_target_.pose().linear()(2));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rx",
+                                        &trajectory_eval_target_.pose().angular().x());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_ry",
+                                        &trajectory_eval_target_.pose().angular().y());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rz",
+                                        &trajectory_eval_target_.pose().angular().z());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rw",
+                                        &trajectory_eval_target_.pose().angular().w());
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_x",
+                                        &trajectory_eval_target_pose_diff_.vector()(0));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_y",
+                                        &trajectory_eval_target_pose_diff_.vector()(1));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_z",
+                                        &trajectory_eval_target_pose_diff_.vector()(2));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_rx",
+                                        &trajectory_eval_target_pose_diff_.vector()(3));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_ry",
+                                        &trajectory_eval_target_pose_diff_.vector()(4));
+    REGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_rz",
+                                        &trajectory_eval_target_pose_diff_.vector()(5));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x", &solution_pose_diff_.vector()(0));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y", &solution_pose_diff_.vector()(1));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z", &solution_pose_diff_.vector()(2));
@@ -355,18 +368,18 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i));
     }
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_x");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_y");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_z");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rx");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_ry");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rz");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_state_pose_rw");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_y");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_z");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rx");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_ry");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_target_pose_diff_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_x");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rx");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_ry");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rz");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_state_pose_rw");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_y");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_z");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_rx");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_ry");
+    UNREGISTER_ROS2_CONTROL_INTROSPECTION("trajectory_eval_target_pose_diff_rz");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_x");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_y");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_z");
@@ -426,7 +439,17 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   // initialize state and trajectory buffers, ensure the correct time source is present within the buffer
   update_rt_state_buffer(rclcpp::Clock(rcl_time_source).now());
   // init to the trajectories "neutral" goal
-  trajectory_buffer_.write().calculate_neutral(current_state_buffer_.update_read());
+  trajectory_update_state_type current_state;
+  current_state.data().setNeutral();
+  current_state_buffer_.update_read();
+  current_state.time() = current_state_buffer_.read().time();
+  current_state.pose() = current_state_buffer_.read().pose();
+  if constexpr (trajectory_start_order_depth >= geometry::KinematicOrder::Twist) {
+    current_state.twist() = current_state_buffer_.read().twist();
+  }
+  static_assert(trajectory_start_order_depth <= geometry::KinematicOrder::Twist,  // line break
+                "Starting a trajectory with higher continuity order than Twist is not yet supported");
+  trajectory_buffer_.write().calculate_neutral(current_state);
   trajectory_buffer_.publish_write();
 
   // initialize IK QP
@@ -484,14 +507,15 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   update_rt_state_buffer(time);
 
   // Get 6D-diff between current pose and target pose
-  trajectory_buffer_.update_read().evaluate<geometry::KinematicOrder::Pose>(time, trajectory_target_);
+  trajectory_buffer_.update_read().evaluate<trajectory_eval_order_depth>(time, trajectory_eval_target_);
   // convert the trajectory target into the world-aligned target_frame_idx frame: position relative to the current
   // target_frame_idx origin, orientation kept in world-frame axes
-  trajectory_target_.pose().linear() -= target_pose().translation();  // from now on in local-world-aligned frame
-  trajectory_target_pose_diff_ =
-      trajectory_target_.pose() - geometry::Pose3Dd(Eigen::Vector3d::Zero(), target_pose().rotation());
+  trajectory_eval_target_.pose().linear() -= target_pose().translation();  // from now on in local-world-aligned frame
+  trajectory_eval_target_pose_diff_ =
+      trajectory_eval_target_.pose() - geometry::Pose3Dd(Eigen::Vector3d::Zero(), target_pose().rotation());
 
-  geometry::Twist3Dd problem_pose_diff = trajectory_target_pose_diff_ * problem_scale;  // local-world-aligned frame
+  geometry::Twist3Dd problem_pose_diff =
+      trajectory_eval_target_pose_diff_ * problem_scale;  // local-world-aligned frame
   scale_limit(problem_pose_diff.linear(), v_limit_lin_);
   scale_limit(problem_pose_diff.angular(), v_limit_ang_);
 
@@ -509,15 +533,15 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   pinocchio::updateFramePlacement(robot_model_, control_data_, target_frame_idx_);  // update target frame
 
   // express the candidate solution pose in the same original world-aligned local reference frame as
-  // trajectory_target_
+  // trajectory_eval_target_
   const geometry::Pose3Dd solution_pose(control_data_.oMf[target_frame_idx_].translation() -
                                             target_pose().translation(),
                                         control_data_.oMf[target_frame_idx_].rotation());
-  solution_pose_diff_ = trajectory_target_.pose() - solution_pose;
+  solution_pose_diff_ = trajectory_eval_target_.pose() - solution_pose;
 
   // backtrack to prevent overshoot
   backtracking_scale_ =
-      std::fmax(-1.0, std::fmin((trajectory_target_pose_diff_.vector().transpose() * solution_pose_diff_.vector() +
+      std::fmax(-1.0, std::fmin((trajectory_eval_target_pose_diff_.vector().transpose() * solution_pose_diff_.vector() +
                                  params_->ik_precision) /
                                     (solution_pose_diff_.vector().squaredNorm() + params_->ik_precision),
                                 1.0));
@@ -547,7 +571,9 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
 
 void CartesianPoseController::update_state(const bool use_hw_positions)
 {
-  static_assert(state_order_depth >= geometry::KinematicOrder::Twist);
+  static_assert(required_state_order_depth >= geometry::KinematicOrder::Twist,  // line break
+                "The controller requires at least Twist order state updates");
+  static_assert(state_order_depth >= required_state_order_depth);
   auto interface_iter = state_interfaces_.begin();
   for (const auto idx : joint_q_idx_) {
     state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
@@ -582,11 +608,11 @@ void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
   current_state_buffer_.write().time() = now;
   current_state_buffer_.write().pose().linear() = target_pose().translation();
   current_state_buffer_.write().pose().angular() = target_pose().rotation();
-  if constexpr (trajectory_rt_state_order_depth >= geometry::KinematicOrder::Twist) {
+  if constexpr (rt_state_type::kinematic_order_depth >= geometry::KinematicOrder::Twist) {
     current_state_buffer_.write().twist().linear() = target_twist().linear();
     current_state_buffer_.write().twist().angular() = target_twist().angular();
   }
-  static_assert(trajectory_rt_state_order_depth <= geometry::KinematicOrder::Twist,  // line break
+  static_assert(rt_state_type::kinematic_order_depth <= geometry::KinematicOrder::Twist,  // line break
                 "State Updates of higher order than Twist are currently not supported");
   current_state_buffer_.publish_write();
   // updateaccording to kinematic order (assert type at startup)
@@ -684,7 +710,7 @@ void CartesianPoseController::command_controls()
                   params_->joints[i].c_str());
     }
   }
-  if constexpr (eval_order_depth >= geometry::KinematicOrder::Twist) {
+  if constexpr (trajectory_eval_order_depth >= geometry::KinematicOrder::Twist) {
     for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
       // set velocity
       if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
@@ -693,7 +719,7 @@ void CartesianPoseController::command_controls()
       }
     }
   }
-  static_assert(eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
+  static_assert(trajectory_eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
                 "Control commands of higher derivative than Twist are not yet supported");
   assert(command_itr == command_interfaces_.end());
 }
@@ -733,7 +759,7 @@ void CartesianPoseController::log_statistics() const
                                   << std::endl
                                   << " - target - world twist: "
                                   << geometry::Twist3Dd(target_twist().linear(), target_twist().angular())
-                                  << " - trajectory target state: " << trajectory_target_);
+                                  << " - trajectory eval target state: " << trajectory_eval_target_);
   RCLCPP_INFO_STREAM(get_node()->get_logger(),
                      "IK solver: Problem Solution"
                          << std::endl  // Print the solver's solution

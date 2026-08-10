@@ -45,6 +45,18 @@ cartesian_pose_controller:
     description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
     validation:
       bounds<>: [0.0, 6.283]
+  linear_acceleration_limit:
+    type: double
+    default_value: 1.0
+    description: "Maximum acceleration for linear, Cartesian motions."
+    validation:
+      bounds<>: [0.0, 10.0]
+  angular_acceleration_limit:
+    type: double
+    default_value: 0.6283
+    description: "Maximum acceleration for rotational motions."
+    validation:
+      bounds<>: [0.0, 6.283]
 
   topic_prefix:
     type: string

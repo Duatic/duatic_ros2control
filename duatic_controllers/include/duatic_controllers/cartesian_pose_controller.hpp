@@ -86,6 +86,16 @@ public:
       return angular_velocity_limit;
     }
 
+    ScalarType acceleration_limit_linear() const
+    {
+      return linear_acceleration_limit;
+    }
+
+    ScalarType acceleration_limit_angular() const
+    {
+      return angular_acceleration_limit;
+    }
+
     KinematicTrajectorySettingsParams& operator=(cartesian_pose_controller::Params&& rhs)
     {
       cartesian_pose_controller::Params::operator=(std::move(rhs));
@@ -94,28 +104,30 @@ public:
   };
   static_assert(trajectory::is_kinematic_trajectory_settings_v<KinematicTrajectorySettingsParams>);
 
-  using trajectory_type = trajectory::ExponentialApproachPose3D<
-      double, rclcpp::Time, trajectory::KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams>>;
+  using trajectory_type = trajectory::ExponentialApproachPose3DC2<
+      double, rclcpp::Time,
+      trajectory::KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams>>;
+  static constexpr geometry::KinematicOrder trajectory_eval_order_depth = geometry::KinematicOrder::Twist;
+  static constexpr geometry::KinematicOrder trajectory_start_order_depth = geometry::KinematicOrder::Twist;
 
-  // The type trajectory_type actually needs for its shared limits object -- NOT KinematicTrajectorySettingsParams itself,
-  // but the KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams> wrapper that also supplies
-  // omega_min()/omega_max(). Derived from trajectory_type so it always matches, regardless of argument order.
+  static constexpr auto required_state_order_depth =
+      geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
+  static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_start_order_depth);
+
+  using ScalarType = typename trajectory_type::ScalarType;
+  using TimestampType = typename trajectory_type::TimestampType;
   using trajectory_settings_type = typename trajectory_type::KinematicTrajectorySettingsType;
 
   using trajectory_target_type = typename trajectory_type::TrajectoryDescriptionType;
   using trajectory_target_msg_type = duatic_geometry_msgs::msg_stamped_t<trajectory_target_type>;
 
-  using trajectory_rt_state_type = typename trajectory_type::UpdateStateType;
-  static_assert(geometry::is_kinematic_state_v<trajectory_rt_state_type>);
-  static constexpr auto trajectory_rt_state_order_depth = trajectory_rt_state_type::kinematic_order_depth;
+  using trajectory_update_state_type = typename trajectory_type::UpdateStateType;
 
-  using trajectory_eval_type = typename trajectory_type::template KinematicState<geometry::KinematicOrder::Pose>;
+  using trajectory_eval_type = typename trajectory_type::template KinematicState<trajectory_eval_order_depth>;
   static_assert(geometry::is_kinematic_state_v<trajectory_eval_type>);
-  static constexpr auto eval_order_depth = trajectory_eval_type::kinematic_order_depth;
 
-  static constexpr auto required_state_order_depth =
-      geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
-  static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_rt_state_order_depth);
+  using rt_state_type = geometry::TimedData<geometry::KinematicState<ScalarType, state_order_depth>, TimestampType>;
+  static_assert(geometry::is_kinematic_state_v<rt_state_type>);
 
   // ros2_control's controller_manager calls update(time, period) with 'time' on RCL_ROS_TIME (verified
   // via the clock-type mismatch this constant guards against; see the assert in update()).
@@ -165,11 +177,11 @@ private:
   std::shared_ptr<rclcpp::Subscription<trajectory_target_msg_type>> target_msg_sub_;
 
   // lock-free RT Non-RT data exchange buffer
-  duatic::concurrency::UnidirectionalBuffer<trajectory_rt_state_type> current_state_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<rt_state_type> current_state_buffer_;
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
-  trajectory_eval_type trajectory_target_;
-  geometry::Twist3Dd trajectory_target_pose_diff_;
+  trajectory_eval_type trajectory_eval_target_;
+  geometry::Twist3Dd trajectory_eval_target_pose_diff_;
   geometry::Twist3Dd solution_pose_diff_;
   double backtracking_scale_;
 
