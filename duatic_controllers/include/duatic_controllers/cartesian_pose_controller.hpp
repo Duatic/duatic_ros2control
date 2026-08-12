@@ -126,9 +126,6 @@ public:
   using trajectory_eval_type = typename trajectory_type::template KinematicState<trajectory_eval_order_depth>;
   static_assert(geometry::is_kinematic_state_v<trajectory_eval_type>);
 
-  using rt_state_type = geometry::TimedData<geometry::KinematicState<ScalarType, state_order_depth>, TimestampType>;
-  static_assert(geometry::is_kinematic_state_v<rt_state_type>);
-
   // ros2_control's controller_manager calls update(time, period) with 'time' on RCL_ROS_TIME (verified
   // via the clock-type mismatch this constant guards against; see the assert in update()).
   static constexpr rcl_clock_type_t rcl_time_source = RCL_ROS_TIME;
@@ -161,13 +158,18 @@ private:
   std::vector<pinocchio::JointIndex> joint_model_idx_;
   std::vector<Eigen::Index> joint_q_idx_;
   std::vector<Eigen::Index> joint_v_idx_;
+  pinocchio::FrameIndex base_frame_idx_;  // frame all published poses/twists are expressed relative to
   pinocchio::FrameIndex target_frame_idx_;
-  std::vector<pinocchio::FrameIndex> linear_limit_frame_indices_;
+  std::vector<pinocchio::FrameIndex> observed_frame_indices_;
+  std::vector<double> v_limit_observed_frames_lin_;  // displacement (not velocity) limit, aligned with
+                                                     // observed_frame_indices_
+  std::vector<double> observed_frame_v_lin_;         // current linear speed, aligned with observed_frame_indices_; only
+                                              // registered for ROS2control introspection if 'enable_introspection'
+                                              // is true
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
   Eigen::VectorXd state_v_;
-  pinocchio::Motion state_target_twist_;
 
   pinocchio::Data control_data_;
   Eigen::VectorXd control_q_;
@@ -176,8 +178,8 @@ private:
   // input topic subscriptions
   std::shared_ptr<rclcpp::Subscription<trajectory_target_msg_type>> target_msg_sub_;
 
-  // lock-free RT Non-RT data exchange buffer
-  duatic::concurrency::UnidirectionalBuffer<rt_state_type> current_state_buffer_;
+  // lock-free RT-NonRT unidirectional data exchange buffer
+  duatic::concurrency::UnidirectionalBuffer<TimestampType> current_time_buffer_;
   duatic::concurrency::UnidirectionalBuffer<trajectory_type> trajectory_buffer_;
 
   trajectory_eval_type trajectory_eval_target_;
@@ -193,7 +195,7 @@ private:
    *     [     0      | 0 ]           [    C    |  1 ]
    * g = [-J^T * pose_diff ]
    *     [      0          ]
-   * with C being the constraints-projection matrix and W_L being the linear_limit_frames_weight
+   * with C being the constraints-projection matrix and W_L being the observed_frames_weight
    * and the result x being structured as x = [theta; c] with c being the linearized constraints variables
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
@@ -212,12 +214,17 @@ private:
   realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr target_pose_pub_realtime_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr target_twist_pub_;
   realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr target_twist_pub_realtime_;
+  // one pose/twist publisher pair per observed frame, aligned with observed_frame_indices_
+  std::vector<rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr> observed_frame_pose_pub_;
+  std::vector<realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr>
+      observed_frame_pose_pub_realtime_;
+  std::vector<rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr> observed_frame_twist_pub_;
+  std::vector<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr>
+      observed_frame_twist_pub_realtime_;
 
   void handle_target_msg_sub(const trajectory_target_msg_type::SharedPtr msg);
 
   void update_state(const bool use_hw_positions);
-
-  void update_rt_state_buffer(const rclcpp::Time& now);
 
   void run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
                         const bool verbose = false);
@@ -231,10 +238,6 @@ private:
   inline const pinocchio::SE3& target_pose() const
   {  // for convenience
     return state_data_.oMf[target_frame_idx_];
-  }
-  inline const pinocchio::Motion& target_twist() const
-  {  // for convenience
-    return state_target_twist_;
   }
 
   template <typename Vector>

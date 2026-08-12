@@ -13,19 +13,6 @@ cartesian_pose_controller:
     type: string
     default_value: "flange"
     description: "Name of the end effector frame to be controlled."
-  
-  linear_limit_frames:
-    type: string_array
-    default_value: []
-    description: "Additional frames that are limited in linear motion."
-    validation:
-      unique<>: null
-  linear_limit_frames_weight:
-    type: double
-    default_value: 100.0
-    description: "Weight for satisfying motion limits of the limit_frames within the inverse kinematics optimization problem. Set to zero to ignore the linear limit frames."
-    validation:
-      bounds<>: [0.0, 1000.0]
 
   motion_horizon:
     type: double
@@ -35,6 +22,18 @@ cartesian_pose_controller:
       bounds<>: [0.001, 1.0]
   
   limits:
+    observed_frames:
+      type: string_array
+      default_value: ["elbow_camera_mount"]
+      description: "Additional frames that are limited in motion. Leave empty to not limit any additional frames."
+      validation:
+        unique<>: null
+    observed_frames_weight:
+      type: double
+      default_value: 100.0
+      description: "Weight for satisfying motion limits of the observed_frames within the inverse kinematics optimization problem. Set to zero to ignore the observed frames."
+      validation:
+        bounds<>: [0.0, 1000.0]
     velocity:
       linear:
         type: double
@@ -48,6 +47,12 @@ cartesian_pose_controller:
         description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
         validation:
           bounds<>: [0.0, 6.283]
+      observed_frames_linear:
+        type: double_array
+        default_value: [1.0]
+        description: "Maximum velocity for linear, Cartesian motions of the observed frames."
+        validation:
+          element_bounds<>: [0.0, 10.0]
     acceleration:
       linear:
         type: double

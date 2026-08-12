@@ -172,7 +172,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   linear_error_weight_ = params_->ik_meter_to_revolution_error_correlation * (2.0 * std::numbers::pi);
   RCLCPP_INFO(get_node()->get_logger(), "Linear error weight: %.2f", linear_error_weight_);
-  RCLCPP_INFO(get_node()->get_logger(), "Limit frames weight: %.2f", params_->linear_limit_frames_weight);
+  RCLCPP_INFO(get_node()->get_logger(), "Observed frames weight: %.2f", params_->limits.observed_frames_weight);
 
   // build model joint caches
   joint_model_idx_.clear();
@@ -196,6 +196,15 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   assert(joint_q_idx_.size() == params_->joints.size());
   assert(joint_v_idx_.size() == params_->joints.size());
 
+  // Store base frame index (all published poses/twists are expressed relative to this frame)
+  if (!robot_model_.existFrame(params_->base_frame)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Base frame '%s' not found in Pinocchio model. Abort configuration.",
+                 params_->base_frame.c_str());
+    return controller_interface::CallbackReturn::FAILURE;
+  } else {
+    base_frame_idx_ = robot_model_.getFrameId(params_->base_frame);
+  }
+
   // Store end effector frame index
   if (!robot_model_.existFrame(params_->target_frame)) {
     RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model. Abort configuration.",
@@ -205,19 +214,38 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     target_frame_idx_ = robot_model_.getFrameId(params_->target_frame);
   }
 
-  // Store limit frame indices
-  linear_limit_frame_indices_.clear();
-  if (params_->linear_limit_frames_weight > 0.0) {
-    linear_limit_frame_indices_.reserve(params_->linear_limit_frames.size());
-    for (const std::string& frame : params_->linear_limit_frames) {
+  // Store observed frame indices
+  observed_frame_indices_.clear();
+  v_limit_observed_frames_lin_.clear();
+  if (params_->limits.observed_frames_weight > 0.0) {
+    observed_frame_indices_.reserve(params_->limits.observed_frames.size());
+    v_limit_observed_frames_lin_.reserve(params_->limits.observed_frames.size());
+    auto observed_velocity_itr = params_->limits.velocity.observed_frames_linear.begin();
+    for (const std::string& frame : params_->limits.observed_frames) {
       if (!robot_model_.existFrame(frame)) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Limit frame '%s' not found in Pinocchio model.", frame.c_str());
+        RCLCPP_ERROR(get_node()->get_logger(), "Observed frame '%s' not found in Pinocchio model.", frame.c_str());
         return controller_interface::CallbackReturn::FAILURE;
+      }  // else
+      observed_frame_indices_.push_back(robot_model_.getFrameId(frame));
+      if (observed_velocity_itr != params_->limits.velocity.observed_frames_linear.end()) {
+        v_limit_observed_frames_lin_.push_back(*observed_velocity_itr * motion_horizon_);
+        ++observed_velocity_itr;
       } else {
-        linear_limit_frame_indices_.push_back(robot_model_.getFrameId(frame));
+        RCLCPP_WARN(get_node()->get_logger(),
+                    "'limits.velocity.observed_frames_linear' (size %zu) is smaller than 'limits.observed_frames' "
+                    "(size %zu). Extending the missing entry for the observed frame '%s' with the regular linear "
+                    "velocity limit (%.2f).",
+                    params_->limits.velocity.observed_frames_linear.size(), observed_frame_indices_.size(),
+                    frame.c_str(), params_->limits.velocity.linear);
+        v_limit_observed_frames_lin_.push_back(v_limit_lin_);  // assume that v_limit_lin_ has already been assigned
+                                                               // to the correct value above
       }
+      RCLCPP_INFO(get_node()->get_logger(), "Observed frame '%s' linear displacement limit at %.2f m.", frame.c_str(),
+                  v_limit_observed_frames_lin_.back());
     }
   }
+  assert(observed_frame_indices_.size() == v_limit_observed_frames_lin_.size());
+  observed_frame_v_lin_.assign(observed_frame_indices_.size(), 0.0);
 
   // setup and initialize QP
   assert(robot_model_.nv == params_->joints.size() && "At this stage, it is assumed that ALL joints are to be "
@@ -226,7 +254,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   // constraints
   const Eigen::Index qp_constraints_n =  // accumulate constraint variables
-      static_cast<Eigen::Index>(linear_limit_frame_indices_.size());
+      static_cast<Eigen::Index>(observed_frame_indices_.size());
 
   // create QP solver
   RCLCPP_INFO(get_node()->get_logger(), "Setting up QP solver with %d result variables and %d constraint variables",
@@ -254,7 +282,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_H_ =
       Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix.
   if (qp_constraints_n > 0) {  // initialize the lower-right weighted identity block matrix within H (it stays constant)
-    qp_solver_H_.diagonal().segment(robot_model_.nv, qp_constraints_n).setConstant(params_->linear_limit_frames_weight);
+    qp_solver_H_.diagonal()
+        .segment(robot_model_.nv, qp_constraints_n)
+        .setConstant(params_->limits.observed_frames_weight);
   }
   qp_solver_g_ = Eigen::VectorXd::Zero(qp_solver_->model.dim);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
@@ -288,6 +318,32 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
         target_topic_prefix + "twist", rclcpp::QoS(1).durability_volatile());
     target_twist_pub_realtime_ =
         std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>>(target_twist_pub_);
+
+    // create RT topic publishers for each observed frame's pose and twist
+    observed_frame_pose_pub_.clear();
+    observed_frame_pose_pub_realtime_.clear();
+    observed_frame_twist_pub_.clear();
+    observed_frame_twist_pub_realtime_.clear();
+    observed_frame_pose_pub_.reserve(observed_frame_indices_.size());
+    observed_frame_pose_pub_realtime_.reserve(observed_frame_indices_.size());
+    observed_frame_twist_pub_.reserve(observed_frame_indices_.size());
+    observed_frame_twist_pub_realtime_.reserve(observed_frame_indices_.size());
+    for (std::size_t i = 0; i < observed_frame_indices_.size(); i++) {
+      const std::string observed_frame_topic_prefix =
+          topic_prefix + "observed/" + params_->limits.observed_frames[i] + "/";
+
+      observed_frame_pose_pub_.push_back(get_node()->create_publisher<geometry_msgs::msg::PoseStamped>(
+          observed_frame_topic_prefix + "pose", rclcpp::QoS(1).durability_volatile()));
+      observed_frame_pose_pub_realtime_.push_back(
+          std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>>(
+              observed_frame_pose_pub_.back()));
+
+      observed_frame_twist_pub_.push_back(get_node()->create_publisher<geometry_msgs::msg::TwistStamped>(
+          observed_frame_topic_prefix + "twist", rclcpp::QoS(1).durability_volatile()));
+      observed_frame_twist_pub_realtime_.push_back(
+          std::make_unique<realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>>(
+              observed_frame_twist_pub_.back()));
+    }
   } else {
     RCLCPP_INFO(get_node()->get_logger(), "Topic frequency is set to 0.0, not publishing anything");
     topics_pub_period_ = 0.0;
@@ -296,6 +352,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     target_pose_pub_realtime_ = nullptr;
     target_twist_pub_ = nullptr;
     target_twist_pub_realtime_ = nullptr;
+    observed_frame_pose_pub_.clear();
+    observed_frame_pose_pub_realtime_.clear();
+    observed_frame_twist_pub_.clear();
+    observed_frame_twist_pub_realtime_.clear();
   }
 
   // ros2control introspection
@@ -340,6 +400,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry", &solution_pose_diff_.vector()(4));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz", &solution_pose_diff_.vector()(5));
     REGISTER_ROS2_CONTROL_INTROSPECTION("backtracking_scale", &backtracking_scale_);
+    for (std::size_t i = 0; i < observed_frame_v_lin_.size(); i++) {
+      REGISTER_ROS2_CONTROL_INTROSPECTION("observed_frame_v_lin_" + params_->limits.observed_frames[i],
+                                          &observed_frame_v_lin_[i]);
+    }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i), &(qp_solver_u_box_[i]));
@@ -387,6 +451,9 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("backtracking_scale");
+    for (std::size_t i = 0; i < observed_frame_v_lin_.size(); i++) {
+      UNREGISTER_ROS2_CONTROL_INTROSPECTION("observed_frame_v_lin_" + params_->limits.observed_frames[i]);
+    }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i));
@@ -437,15 +504,24 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   update_state(true);
 
   // initialize state and trajectory buffers, ensure the correct time source is present within the buffer
-  update_rt_state_buffer(rclcpp::Clock(rcl_time_source).now());
-  // init to the trajectories "neutral" goal
+  current_time_buffer_.publish_write(rclcpp::Clock(rcl_time_source).now());
+  // init to the trajectories "neutral" goal, expressed relative to 'base_frame' as expected by the trajectory
+  // (targets fed via handle_target_msg_sub() are validated to be in 'base_frame' too, see there)
   trajectory_update_state_type current_state;
   current_state.data().setNeutral();
-  current_state_buffer_.update_read();
-  current_state.time() = current_state_buffer_.read().time();
-  current_state.pose() = current_state_buffer_.read().pose();
+  current_state.time() = current_time_buffer_.update_read();
+  const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
+  const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
+  current_state.pose().linear() = base_to_target.translation();
+  current_state.pose().angular() = base_to_target.rotation();
   if constexpr (trajectory_start_order_depth >= geometry::KinematicOrder::Twist) {
-    current_state.twist() = current_state_buffer_.read().twist();
+    const pinocchio::Motion base_v_local =
+        pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+    const pinocchio::Motion target_v_local =
+        pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+    const pinocchio::Motion target_v_in_base = base_to_target.act(target_v_local) - base_v_local;
+    current_state.twist().linear() = target_v_in_base.linear();
+    current_state.twist().angular() = target_v_in_base.angular();
   }
   static_assert(trajectory_start_order_depth <= geometry::KinematicOrder::Twist,  // line break
                 "Starting a trajectory with higher continuity order than Twist is not yet supported");
@@ -455,7 +531,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   // initialize IK QP
   qp_jacobian_.setZero();
   pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
-                                  pinocchio::ReferenceFrame::WORLD, qp_jacobian_);
+                                  pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, qp_jacobian_);
   qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv) =
       qp_jacobian_.transpose() * qp_jacobian_;  // neglect angular weight
   qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_->ik_damping;
@@ -484,15 +560,19 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 
 void CartesianPoseController::handle_target_msg_sub(const trajectory_target_msg_type::SharedPtr msg)
 {
-  auto current_trajectory_state =
-      trajectory_buffer_.read().evaluate<geometry::KinematicOrder::Accel>(current_state_buffer_.update_read().time());
-  // Update/Calculate new trajectory outside the realtime-loop
-  trajectory_target_type target_goal{};
-  duatic_geometry_msgs::decode(*msg, target_goal);
-  trajectory_buffer_.write().update_from(trajectory_buffer_.read(), current_state_buffer_.update_read().time(),
-                                         target_goal);
-  trajectory_buffer_.publish_write();
-  assert(current_state_buffer_.read().time().get_clock_type() == Self::rcl_time_source);
+  // Accept targets given in 'base_frame'; an empty frame_id is treated as implicitly 'base_frame' too.
+  if (msg->header.frame_id.empty() || (msg->header.frame_id == params_->base_frame)) {
+    // Update the new trajectory outside the realtime-loop
+    trajectory_target_type target_goal{};
+    duatic_geometry_msgs::decode(*msg, target_goal);
+    trajectory_buffer_.write().update_from(trajectory_buffer_.read(), current_time_buffer_.update_read(), target_goal);
+    assert(current_time_buffer_.read().get_clock_type() == Self::rcl_time_source);
+    trajectory_buffer_.publish_write();
+  } else {
+    RCLCPP_WARN(get_node()->get_logger(),
+                "Ignoring target message with frame_id '%s'; expected '%s' or an empty frame_id.",
+                msg->header.frame_id.c_str(), params_->base_frame.c_str());
+  }
 }
 
 controller_interface::return_type CartesianPoseController::update([[maybe_unused]] const rclcpp::Time& time,
@@ -506,13 +586,20 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   const double problem_scale = motion_horizon_ / period.seconds();
 
   update_state(false);
-  update_rt_state_buffer(time);
+  current_time_buffer_.publish_write(time);  // update non-rt time
 
   // Get 6D-diff between current pose and target pose
   trajectory_buffer_.update_read().evaluate<trajectory_eval_order_depth>(time, trajectory_eval_target_);
-  // convert the trajectory target into the world-aligned target_frame_idx frame: position relative to the current
-  // target_frame_idx origin, orientation kept in world-frame axes
-  trajectory_eval_target_.pose().linear() -= target_pose().translation();  // from now on in local-world-aligned frame
+  // trajectory_eval_target_.pose() is given relative to 'base_frame' (matching how targets are interpreted in
+  // handle_target_msg_sub() and how the trajectory's neutral state was seeded in on_activate()); convert it directly
+  // into the world-aligned target_frame_idx frame expected by the rest of this function: position relative to the
+  // current target_frame_idx origin, orientation kept in world-frame axes. Translation and orientation are folded
+  // by hand (quaternion algebra) instead of composing full SE3 objects, avoiding an unneeded matrix conversion.
+  const Eigen::Quaterniond base_orientation(state_data_.oMf[base_frame_idx_].rotation());
+  trajectory_eval_target_.pose().linear() = base_orientation * trajectory_eval_target_.pose().linear() +
+                                            state_data_.oMf[base_frame_idx_].translation() -
+                                            target_pose().translation();  // from now on in local-world-aligned frame
+  trajectory_eval_target_.pose().angular() = (base_orientation * trajectory_eval_target_.pose().angular()).normalized();
   trajectory_eval_target_pose_diff_ =
       trajectory_eval_target_.pose() - geometry::Pose3Dd(Eigen::Vector3d::Zero(), target_pose().rotation());
 
@@ -599,25 +686,6 @@ void CartesianPoseController::update_state(const bool use_hw_positions)
                                                                 // or only a single limit frame, computing all might be
                                                                 // slower but this should be fine anyhow.
   pinocchio::updateFramePlacements(robot_model_, state_data_);  // update all frames
-  state_target_twist_ =
-      pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::WORLD);
-}
-
-void CartesianPoseController::update_rt_state_buffer(const rclcpp::Time& now)
-{
-  // update rt state buffer
-  assert(now.get_clock_type() == Self::rcl_time_source);
-  current_state_buffer_.write().time() = now;
-  current_state_buffer_.write().pose().linear() = target_pose().translation();
-  current_state_buffer_.write().pose().angular() = target_pose().rotation();
-  if constexpr (rt_state_type::kinematic_order_depth >= geometry::KinematicOrder::Twist) {
-    current_state_buffer_.write().twist().linear() = target_twist().linear();
-    current_state_buffer_.write().twist().angular() = target_twist().angular();
-  }
-  static_assert(rt_state_type::kinematic_order_depth <= geometry::KinematicOrder::Twist,  // line break
-                "State Updates of higher order than Twist are currently not supported");
-  current_state_buffer_.publish_write();
-  // updateaccording to kinematic order (assert type at startup)
 }
 
 void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
@@ -643,7 +711,8 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   // block -- i.e. transposed relative to a row-wise fill -- so only the upper triangle of H is
   // ever written; the lower triangle is mirrored from it afterwards via selfadjointView.
   Eigen::Index H_idx = robot_model_.nv;
-  for (const auto frame_idx : linear_limit_frame_indices_) {
+  for (std::size_t i = 0; i < observed_frame_indices_.size(); i++) {
+    const auto frame_idx = observed_frame_indices_[i];
     qp_jacobian_.setZero();  // reuse jacobian memory
     pinocchio::getFrameJacobian(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL, qp_jacobian_);
     const pinocchio::Motion frame_motion =
@@ -651,8 +720,8 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
     qp_solver_H_.block(0, H_idx, robot_model_.nv, 1) =
         qp_jacobian_.block(0, 0, 3, robot_model_.nv).transpose() * frame_motion.linear();
     // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
-    const double frame_v_lin_length = frame_motion.linear().norm();
-    qp_solver_u_box_(H_idx) = std::fmax(v_limit_lin_ * frame_v_lin_length,
+    observed_frame_v_lin_[i] = frame_motion.linear().norm();
+    qp_solver_u_box_(H_idx) = std::fmax(v_limit_observed_frames_lin_[i] * observed_frame_v_lin_[i],
                                         params_->ik_precision);  // guarantee some minimal numerical space
     qp_solver_l_box_(H_idx) = -qp_solver_u_box_(H_idx);
     // move on to the next index
@@ -664,8 +733,8 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   if (constraints_n > 0) {  // if there are constraints available
     auto qp_solver_Ct = qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n);
     qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv).triangularView<Eigen::Upper>() +=
-        params_->linear_limit_frames_weight * qp_solver_Ct * qp_solver_Ct.transpose();
-    qp_solver_Ct *= params_->linear_limit_frames_weight;
+        params_->limits.observed_frames_weight * qp_solver_Ct * qp_solver_Ct.transpose();
+    qp_solver_Ct *= params_->limits.observed_frames_weight;
   }
   // the entire upper triangle of H is now assembled -- mirror it down into the strictly lower triangle.
   qp_solver_H_.triangularView<Eigen::StrictlyLower>() = qp_solver_H_.transpose();
@@ -754,14 +823,29 @@ void CartesianPoseController::log_statistics() const
     control_positions[i] = control_q_[joint_q_idx_[static_cast<size_t>(i)]];
     control_velocities[i] = control_v_[joint_v_idx_[static_cast<size_t>(i)]];
   }
-  RCLCPP_INFO_STREAM(get_node()->get_logger(),
-                     "IK Target:" << std::endl  // Print the solver's solution
-                                  << " - target - world pose : "
-                                  << geometry::Pose3Dd(target_pose().translation(), target_pose().rotation())
-                                  << std::endl
-                                  << " - target - world twist: "
-                                  << geometry::Twist3Dd(target_twist().linear(), target_twist().angular())
-                                  << " - trajectory eval target state: " << trajectory_eval_target_);
+  // target pose/twist relative to 'base_frame' (matching what is actually published), plus 'base_frame' itself in
+  // world coordinates for reference -- see publish_topics() for the same relative-pose/-twist formulas.
+  const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
+  const pinocchio::Motion base_v_local =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+  const pinocchio::Motion base_v_world_aligned =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED);
+  const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
+  const pinocchio::Motion target_v_local =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+  const pinocchio::Motion target_v_in_base = base_to_target.act(target_v_local) - base_v_local;
+  RCLCPP_INFO_STREAM(
+      get_node()->get_logger(),
+      "IK Target:" << std::endl  // Print the solver's solution
+                   << " - target - base_frame pose : "
+                   << geometry::Pose3Dd(base_to_target.translation(), base_to_target.rotation()) << std::endl
+                   << " - target - base_frame twist: "
+                   << geometry::Twist3Dd(target_v_in_base.linear(), target_v_in_base.angular()) << std::endl
+                   << " - base_frame - world pose : " << geometry::Pose3Dd(oMbase.translation(), oMbase.rotation())
+                   << std::endl
+                   << " - base_frame - world twist: "
+                   << geometry::Twist3Dd(base_v_world_aligned.linear(), base_v_world_aligned.angular())
+                   << " - trajectory eval target state: " << trajectory_eval_target_);
   RCLCPP_INFO_STREAM(get_node()->get_logger(),
                      "IK solver: Problem Solution"
                          << std::endl  // Print the solver's solution
@@ -775,24 +859,59 @@ void CartesianPoseController::log_statistics() const
 
 void CartesianPoseController::publish_topics()
 {
+  // All published poses/twists are expressed relative to 'base_frame', matching the message header. 'oMbase' is the
+  // base frame's placement in the Pinocchio root frame, and 'base_v_local' its own body twist (zero for a frame
+  // rigidly/fixed-attached to the root, generally nonzero otherwise, e.g. for a moving base).
+  const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
+  const pinocchio::Motion base_v_local =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+
   // Publish Pose
+  const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
   assert(target_pose_pub_realtime_ != nullptr);
   if (target_pose_pub_realtime_->trylock()) {
     target_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
-    target_pose_pub_realtime_->msg_.header.frame_id =
-        params_->base_frame;  // TODO(patrick) this frame_id is not yet taken into account in the rest of the code !
-    const geometry::Pose3Dd current_target_pose(target_pose().translation(), target_pose().rotation());
+    target_pose_pub_realtime_->msg_.header.frame_id = params_->base_frame;
+    const geometry::Pose3Dd current_target_pose(base_to_target.translation(), base_to_target.rotation());
     duatic_geometry_msgs::encode(current_target_pose, target_pose_pub_realtime_->msg_.pose);
     target_pose_pub_realtime_->unlockAndPublish();
   }
   // Publish Twist
   assert(target_twist_pub_realtime_ != nullptr);
   if (target_twist_pub_realtime_->trylock()) {
+    const pinocchio::Motion target_v_local =
+        pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+    const pinocchio::Motion target_v_in_base = base_to_target.act(target_v_local) - base_v_local;
     target_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
     target_twist_pub_realtime_->msg_.header.frame_id = params_->base_frame;
-    const geometry::Twist3Dd current_target_twist(target_twist().linear(), target_twist().angular());
+    const geometry::Twist3Dd current_target_twist(target_v_in_base.linear(), target_v_in_base.angular());
     duatic_geometry_msgs::encode(current_target_twist, target_twist_pub_realtime_->msg_.twist);
     target_twist_pub_realtime_->unlockAndPublish();
+  }
+
+  // Publish each observed frame's pose and twist
+  assert(observed_frame_pose_pub_realtime_.size() == observed_frame_indices_.size());
+  assert(observed_frame_twist_pub_realtime_.size() == observed_frame_indices_.size());
+  for (std::size_t i = 0; i < observed_frame_indices_.size(); i++) {
+    const pinocchio::FrameIndex frame_idx = observed_frame_indices_[i];
+    const pinocchio::SE3 base_to_frame = oMbase.actInv(state_data_.oMf[frame_idx]);
+    if (observed_frame_pose_pub_realtime_[i]->trylock()) {
+      observed_frame_pose_pub_realtime_[i]->msg_.header.stamp = get_node()->now();
+      observed_frame_pose_pub_realtime_[i]->msg_.header.frame_id = params_->base_frame;
+      const geometry::Pose3Dd current_observed_pose(base_to_frame.translation(), base_to_frame.rotation());
+      duatic_geometry_msgs::encode(current_observed_pose, observed_frame_pose_pub_realtime_[i]->msg_.pose);
+      observed_frame_pose_pub_realtime_[i]->unlockAndPublish();
+    }
+    if (observed_frame_twist_pub_realtime_[i]->trylock()) {
+      const pinocchio::Motion observed_v_local =
+          pinocchio::getFrameVelocity(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL);
+      const pinocchio::Motion observed_v_in_base = base_to_frame.act(observed_v_local) - base_v_local;
+      observed_frame_twist_pub_realtime_[i]->msg_.header.stamp = get_node()->now();
+      observed_frame_twist_pub_realtime_[i]->msg_.header.frame_id = params_->base_frame;
+      const geometry::Twist3Dd current_observed_twist(observed_v_in_base.linear(), observed_v_in_base.angular());
+      duatic_geometry_msgs::encode(current_observed_twist, observed_frame_twist_pub_realtime_[i]->msg_.twist);
+      observed_frame_twist_pub_realtime_[i]->unlockAndPublish();
+    }
   }
 }
 
