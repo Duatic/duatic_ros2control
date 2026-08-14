@@ -12,6 +12,7 @@ set(PACKAGE_DEPENDENCIES
   hardware_interface
   urdf
   rsl_drive_sdk
+  duatic_duadrive_sdk
 )
 
 foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
@@ -24,6 +25,7 @@ add_library(duatic_duadrive_interface
   src/duadrive_interface_base.cpp
   src/duadrive_interface_mock.cpp
   src/coupled_kinematics_hardware_interface.cpp
+  src/ethercat_bus_singleton.cpp
 )
 add_library(duatic_duadrive_interface::duatic_duadrive_interface ALIAS duatic_duadrive_interface)
 target_compile_features(duatic_duadrive_interface PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
@@ -41,7 +43,8 @@ else()
     pluginlib::pluginlib
     hardware_interface::hardware_interface
     urdf::urdf
-    rsl_drive_sdk::rsl_drive_sdk)
+    rsl_drive_sdk::rsl_drive_sdk
+    duatic_duadrive_sdk::duatic_duadrive_sdk)
 endif()
 
 target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES})

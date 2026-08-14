@@ -38,9 +38,9 @@
 #include "hardware_interface/system_interface.hpp"
 
 // sdk
-#include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
-#include <rsl_drive_sdk/Drive.hpp>
+#include <duatic_duadrive_sdk/v1/duadrive.hpp>
 
+#include "duatic_duadrive_interface/ethercat_bus_singleton.hpp"
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
 #include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 
@@ -89,11 +89,11 @@ public:
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
 
 private:
-  ecat_master::EthercatMasterSingleton::Handle ecat_master_handle_;
-  rsl_drive_sdk::DriveEthercatDevice::SharedPtr drive_;
+  EthercatBusSingleton::Handle ecat_bus_handle_;
+  std::shared_ptr<duadrive_sdk::v1::DuaDrive> drive_;
 
-  rsl_drive_sdk::Statusword last_status_word_;
-  rsl_drive_sdk::BrakeState current_brake_state_{ rsl_drive_sdk::BrakeState::Engaged };
+  std::optional<duadrive_sdk::v1::Statusword> last_status_word_;
+  duadrive_sdk::v1::BrakeState current_brake_state_{ duadrive_sdk::v1::BrakeState::Engaged };
 
   double configured_max_torque_{ 0.0 };
   double configured_max_velocity_{ 0.0 };

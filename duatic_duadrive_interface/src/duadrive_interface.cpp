@@ -26,9 +26,6 @@
 /*stl*/
 #include <filesystem>
 
-/*drive sdk*/
-#include "ethercat_sdk_master/EthercatMasterSingleton.hpp"
-
 /*project*/
 #include "duatic_duadrive_interface/duadrive_interface.hpp"
 #include "duatic_duadrive_interface/interface_utils.hpp"
@@ -42,10 +39,10 @@ DuaDriveInterface::DuaDriveInterface(rclcpp::Logger logger) : DuaDriveInterfaceB
 DuaDriveInterface::~DuaDriveInterface()
 {
   RCLCPP_INFO_STREAM(logger_, "Destructor of DuaDriveHardwareInterface Hardware Interface called");
-  if (ecat_master_handle_.ecat_master) {
-    RCLCPP_INFO_STREAM(logger_, "Releasing ethercat master");
-    ecat_master::EthercatMasterSingleton::instance().releaseMaster(ecat_master_handle_);
-    ecat_master_handle_.ecat_master.reset();
+  if (ecat_bus_handle_.ecat_bus) {
+    RCLCPP_INFO_STREAM(logger_, "Releasing ethercat bus");
+    EthercatBusSingleton::instance().release_bus(ecat_bus_handle_);
+    ecat_bus_handle_.ecat_bus.reset();
   }
 }
 
@@ -56,16 +53,13 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   generate_command_interface_desriptions();
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
-  const ecat_master::EthercatMasterConfiguration ecat_master_config = {
-    .name = "DuaDriveHardwareInterface",
-    .networkInterface = ethercat_bus,
-    .timeStep = 0.001,
-    .doBusDiagnosis = false,
-    .logErrorCounters = false
+  const ethercat_interface::EthercatBus::Parameters ecat_master_config = {
+    .interface = ethercat_bus,
+    .dc_cycle_time =  std::chrono::nanoseconds(1000000)
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
 
   // Obtain an instance of the bus from the singleton - if there is no instance it will be created
-  ecat_master_handle_ = ecat_master::EthercatMasterSingleton::instance().aquireMaster(
+  ecat_bus_handle_ = EthercatBusSingleton::instance().aquire_bus(
       ecat_master_config, std::bind(&DuaDriveInterface::on_bus_startup_finished, this));
 
   const auto joint_name = params.joint_name;
@@ -79,14 +73,11 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
     RCLCPP_FATAL_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path);
     return hardware_interface::CallbackReturn::FAILURE;
   }
-  drive_ = rsl_drive_sdk::DriveEthercatDevice::deviceFromFile(
-      device_file_path, joint_name, static_cast<uint32_t>(address), rsl_drive_sdk::PdoTypeEnum::E);
+  drive_ = std::make_shared<duadrive_sdk::v1::DuaDrive>(duadrive_sdk::v1::RxPdoType::A, duadrive_sdk::v1::TxPdoType::E);
 
   // And attach it to the ethercat master
-  if (!ecat_master_handle_.ecat_master->attachDevice(drive_)) {
-    RCLCPP_FATAL_STREAM(logger_, "Could not attach the slave drive to the master for joint: " << joint_name);
-    return hardware_interface::CallbackReturn::FAILURE;
-  }
+  ecat_bus_handle_.ecat_bus->attach_device(address, drive_->get_ethercat_device());
+
 
   RCLCPP_INFO_STREAM(logger_, "Registered drive: " << joint_name << " at bus address: " << address);
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -94,12 +85,14 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
 
 hardware_interface::CallbackReturn DuaDriveInterface::configure()
 {
-  ecat_master::EthercatMasterSingleton::instance().markAsReady(ecat_master_handle_);
+  EthercatBusSingleton::instance().mark_as_ready(ecat_bus_handle_);
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
 void DuaDriveInterface::on_bus_startup_finished()
 {
+
+  /*
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
   rsl_drive_sdk::common::BuildInfo info;
   if (!drive_->getBuildInfo(info)) {
@@ -161,9 +154,11 @@ void DuaDriveInterface::on_bus_startup_finished()
     RCLCPP_ERROR_STREAM(logger_, "Failed to obtain current brake state");
   }
   RCLCPP_INFO_STREAM(logger_, "Current brake state: " << current_brake_state_);
+  */
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
+  /*
   RCLCPP_INFO_STREAM(logger_, "Activate drive: " << drive_->getName());
   // We are now in the realtime loop
   // In case we are in error state clear the error and try again
@@ -245,10 +240,13 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   }
 
   last_reading_update_ = std::chrono::system_clock::now();
+  */
   return hardware_interface::CallbackReturn::SUCCESS;
+  
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 {
+  /*
   if (drive_) {
     if (params_.has_brake) {
       // in case we have a brake -> disable drive and engage the brake
@@ -264,6 +262,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
       drive_->setCommand(cmd);
     }
   }
+    */
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -271,60 +270,66 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
                                                         [[maybe_unused]] const rclcpp::Duration& period)
 {
   // Obtain the latest reading from the drive (note: we assume asynchronous spinning)
-  rsl_drive_sdk::ReadingExtended reading;
-  drive_->getReading(reading);
+  duadrive_sdk::v1::Reading reading =   drive_->get_latest_reading();
+  
+  
 
-  const auto& state = reading.getState();
 
   // Print any status word changes (e.g. motor temperature warning has appeared)
   // TODO(firesurfer) this might be bad to have in the real time loop
-  const auto current_status_word = state.getStatusword();
-  print_drive_status_changes(get_name(), current_status_word, last_status_word_, logger_);
+  const auto current_status_word = reading.status_word;
+  if(last_status_word_){
+
+    duadrive_sdk::v1::StatusEvent event(last_status_word_.value(), current_status_word);
+    RCLCPP_INFO_STREAM(logger_, event);
+
+  }
   last_status_word_ = current_status_word;
-  last_reading_update_ = state.getStamp();
+  //last_reading_update_ = reading.time_stamp;
 
   // Now update the state vector
-  state_.joint_position = state.getJointPosition();
-  state_.joint_velocity = state.getJointVelocity();
-  state_.joint_acceleration = state.getJointAcceleration();
-  state_.joint_torque = state.getJointTorque();
+  state_.joint_position = reading.joint_position;
+  state_.joint_velocity = reading.joint_velocity;
+  state_.joint_acceleration = reading.joint_acceleration;
+  state_.joint_torque = reading.joint_torque;
 
-  state_.current_q = state.getMeasuredCurrentQ();
-  state_.current_d = state.getMeasuredCurrentD();
-  state_.current_coil_A = state.getMeasuredCurrentPhaseU();
-  state_.current_coil_B = state.getMeasuredCurrentPhaseV();
-  state_.current_coil_C = state.getMeasuredCurrentPhaseW();
+  state_.current_q =  reading.current_q;
+  state_.current_d =reading.current_d.value();
+  state_.current_coil_A = reading.phase_currents->at(0);
+  state_.current_coil_B = reading.phase_currents->at(1);
+  state_.current_coil_C = reading.phase_currents->at(2);
 
-  state_.bus_voltage = state.getVoltage();
-  state_.voltage_coil_A = state.getMeasuredVoltagePhaseU();
-  state_.voltage_coil_B = state.getMeasuredVoltagePhaseV();
-  state_.voltage_coil_C = state.getMeasuredVoltagePhaseW();
+  state_.bus_voltage = reading.dc_bus_voltage;
+  state_.voltage_coil_A =  reading.phase_voltages->at(0);
+  state_.voltage_coil_B = reading.phase_voltages->at(1);
+  state_.voltage_coil_C =reading.phase_voltages->at(2);
 
-  state_.temperature_system = state.getTemperature();
-  state_.temperature_coil_A = state.getCoilTemp1();
-  state_.temperature_coil_B = state.getCoilTemp2();
-  state_.temperature_coil_C = state.getCoilTemp3();
+  state_.temperature_system = reading.system_temperature;
+  state_.temperature_coil_A = reading.coil_temperatures->at(0);
+  state_.temperature_coil_B = reading.coil_temperatures->at(1);
+  state_.temperature_coil_C = reading.coil_temperatures->at(2);
 
   // These fields are reused
-  state_.power_active = state.getGearPosition();
-  state_.power_reactive = state.getGearVelocity();
+  state_.power_active = reading.active_motor_power;
+  state_.power_reactive = reading.reactive_motor_power;
 
-  state_.joint_position_commanded = reading.getCommanded().getJointPosition();
-  state_.joint_velocity_commanded = reading.getCommanded().getJointVelocity();
+  state_.joint_position_commanded = reading.joint_position_commanded.value();
+  state_.joint_velocity_commanded = reading.joint_velocity_commanded.value();
   // This is just as a feedback for certain controllers - we cannot command acceleration to the drive
   state_.joint_acceleration_commanded = command_.joint_acceleration;
-  state_.joint_torque_commanded = reading.getCommanded().getJointTorque();
-  state_.current_q_commanded = reading.getCommanded().getCurrent();
+  state_.joint_torque_commanded = reading.joint_torque_commanded.value();
+  state_.current_q_commanded = reading.current_q_commanded.value();
   // Some control mode information
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
-  state_.current_drive_state = state.getStatusword().getStateEnum();
+ // state_.current_drive_state = state.getStatusword().getStateEnum();
 
   return hardware_interface::return_type::OK;
 }
 hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const rclcpp::Time& time,
                                                          [[maybe_unused]] const rclcpp::Duration& period)
 {
+  /*
   // Only write the command if we are already in the correct state
   if (drive_->goalStateHasBeenReached()) {
     // Convert command vector into an rsl_drive_sdk::Command
@@ -372,18 +377,6 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
     // In case the changed enough -> perform an sdo write of the new maximum values
 
-    /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
-      current_max_torque_ = new_max_torque;
-      RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
-      drive_->setMaxJointTorque(current_max_torque_);
-    }
-    if (std::abs(new_max_velocity - current_max_velocity_) > 1.0) {
-      RCLCPP_INFO_STREAM(logger_, "New maximum joint velocity: " << new_max_velocity << "rad/s (motor:"
-                                                                 << new_max_velocity * configured_gear_ratio_ << ")");
-      current_max_velocity_ = new_max_velocity;
-      // Convert to motor velocity
-      drive_->setMaxMotorVelocity(current_max_velocity_ * configured_gear_ratio_);
-    }*/
 
     if (params_.has_brake && command_.target_brake_state != current_target_brake_state) {
       current_target_brake_state = command_.target_brake_state;
@@ -406,7 +399,7 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
                             << " Raw status word: " << drive_->getStatusword().getData()
                             << " raw status word from reading: " << reading.getState().getStatusword().getData());
   }
-
+  */
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
   return hardware_interface::return_type::OK;
 }
