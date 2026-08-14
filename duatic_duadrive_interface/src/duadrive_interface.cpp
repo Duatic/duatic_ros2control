@@ -172,7 +172,15 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   // Print the current drive state (e.g. warnings, errors, fatals)
   print_drive_status(drive_->getName(), status_word, logger_);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error) {
+  if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Fatal) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " is in Fatal state - aborting startup!");
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
+
+  // Check if the drive is in error state
+  // If so we try to clear the errors
+  const bool is_in_error_state = status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error;
+  if (is_in_error_state) {
     RCLCPP_WARN_STREAM(logger_, "Drive: " << get_name() << " is in Error state - trying to reset");
     drive_->setControlword(RSL_DRIVE_CW_ID_CLEAR_ERRORS_TO_STANDBY);
     drive_->updateWrite();
@@ -183,6 +191,18 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, true, 1.5, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into configure");
     // return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  // In case the drive was in error state we check again if we managed to clear the errors (aka state machine is now in
+  // any mode != Error or Fatal)
+  if (is_in_error_state) {
+    drive_->getStatuswordSdo(status_word);
+    if (status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Error ||
+        status_word.getStateEnum() == rsl_drive_sdk::fsm::StateEnum::Fatal) {
+      RCLCPP_FATAL_STREAM(logger_,
+                          "Drive: " << get_name() << " could not reset/clear errors at startup - aborting startup!");
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
   }
 
   // We need to give the drive a bit of time otherwise we do not get valid readings
@@ -223,6 +243,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     // return hardware_interface::CallbackReturn::ERROR;
   }
+
+  last_reading_update_ = std::chrono::system_clock::now();
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
@@ -259,6 +281,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   const auto current_status_word = state.getStatusword();
   print_drive_status_changes(get_name(), current_status_word, last_status_word_, logger_);
   last_status_word_ = current_status_word;
+  last_reading_update_ = state.getStamp();
 
   // Now update the state vector
   state_.joint_position = state.getJointPosition();
