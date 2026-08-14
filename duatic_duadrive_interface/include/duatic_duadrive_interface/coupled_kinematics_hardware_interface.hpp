@@ -66,9 +66,8 @@ namespace duatic::duadrive_interface
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false,
           dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>>
-requires(!is_dua_drive_interface_mock_v<DriveTypeT>) ||
-    dynamic_model::MockDynamicModel<DynamicModelT> class CoupledKinematicsHardwareInterfaceBase
-  : public hardware_interface::SystemInterface
+  requires(!is_dua_drive_interface_mock_v<DriveTypeT>) || dynamic_model::MockDynamicModel<DynamicModelT>
+class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
 {
 public:
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
@@ -199,6 +198,7 @@ public:
       const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
       const auto urdf_joint = urdf_model->getJoint(joint_name);
       const bool has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
+      const std::chrono::milliseconds communication_timeout{ std::stoi(joint.parameters.at("communication_timeout")) };
 
       if (!urdf_joint) {
         RCLCPP_FATAL_STREAM(logger_, "Failed to obtain joint from urdf: " << joint_name);
@@ -248,7 +248,8 @@ public:
                                                         .joint_name = joint_name,
                                                         .drive_parameter_file_path = drive_parameter_file_path,
                                                         .device_address = ethercat_address,
-                                                        .has_brake = has_brake });
+                                                        .has_brake = has_brake,
+                                                        .communication_timeout = communication_timeout });
       current_active_drive_modes_.insert({ drives_.back()->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
     }
 
@@ -405,10 +406,16 @@ public:
       state.acceleration_commanded = latest_reading.joint_acceleration_commanded;
       state.torque_commanded = latest_reading.joint_torque_commanded;
 
+      // Error handling section
       if (latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Error ||
           latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Fatal) {
         RCLCPP_ERROR_STREAM_ONCE(logger_,
                                  "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
+        error_active_ = true;
+      }
+      if (drive->communication_has_timeout()) {
+        RCLCPP_ERROR_STREAM_ONCE(logger_, "Drive: " << drive->get_name()
+                                                    << " reports a communication timeout. Freezing the system");
         error_active_ = true;
       }
     }
