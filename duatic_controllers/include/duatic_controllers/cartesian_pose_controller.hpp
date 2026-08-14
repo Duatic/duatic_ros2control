@@ -160,12 +160,7 @@ private:
   std::vector<Eigen::Index> joint_v_idx_;
   pinocchio::FrameIndex base_frame_idx_;  // frame all published poses/twists are expressed relative to
   pinocchio::FrameIndex target_frame_idx_;
-  std::vector<pinocchio::FrameIndex> observed_frame_indices_;
-  std::vector<double> v_limit_observed_frames_lin_;  // displacement (not velocity) limit, aligned with
-                                                     // observed_frame_indices_
-  std::vector<double> observed_frame_v_lin_;         // current linear speed, aligned with observed_frame_indices_; only
-                                              // registered for ROS2control introspection if 'enable_introspection'
-                                              // is true
+  std::vector<pinocchio::FrameIndex> observed_frame_indices_;  // aligned with params_->limits.velocity.observed_frames_linear
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
@@ -185,18 +180,14 @@ private:
   trajectory_eval_type trajectory_eval_target_;
   geometry::Twist3Dd trajectory_eval_target_pose_diff_;
   geometry::Twist3Dd solution_pose_diff_;
-  double backtracking_scale_;
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g
        s.t.  l_box <= x <= u_box
    *
-   * H = [1 + J^T * J | 0 ]  +  W_L * [ C^T * C | C^T]
-   *     [     0      | 0 ]           [    C    |  1 ]
-   * g = [-J^T * pose_diff ]
-   *     [      0          ]
-   * with C being the constraints-projection matrix and W_L being the observed_frames_weight
-   * and the result x being structured as x = [theta; c] with c being the linearized constraints variables
+   * H = 1 + J^T * J  (dense, recomputed every cycle; the '1' from ik_damping)
+   * g = -J^T * pose_diff
+   * with x = theta, the (problem_scale-scaled) joint displacement solution
    */
   std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
   Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
@@ -228,6 +219,8 @@ private:
 
   void run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
                         const bool verbose = false);
+
+  double apply_frame_velocity_limits(const double period_seconds);
 
   void command_controls();
 

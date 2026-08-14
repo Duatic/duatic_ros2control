@@ -172,7 +172,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   linear_error_weight_ = params_->ik_meter_to_revolution_error_correlation * (2.0 * std::numbers::pi);
   RCLCPP_INFO(get_node()->get_logger(), "Linear error weight: %.2f", linear_error_weight_);
-  RCLCPP_INFO(get_node()->get_logger(), "Observed frames weight: %.2f", params_->limits.observed_frames_weight);
 
   // build model joint caches
   joint_model_idx_.clear();
@@ -216,54 +215,38 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   // Store observed frame indices
   observed_frame_indices_.clear();
-  v_limit_observed_frames_lin_.clear();
-  if (params_->limits.observed_frames_weight > 0.0) {
+  if (!params_->limits.observed_frames.empty()) {
     observed_frame_indices_.reserve(params_->limits.observed_frames.size());
-    v_limit_observed_frames_lin_.reserve(params_->limits.observed_frames.size());
-    auto observed_velocity_itr = params_->limits.velocity.observed_frames_linear.begin();
     for (const std::string& frame : params_->limits.observed_frames) {
       if (!robot_model_.existFrame(frame)) {
         RCLCPP_ERROR(get_node()->get_logger(), "Observed frame '%s' not found in Pinocchio model.", frame.c_str());
         return controller_interface::CallbackReturn::FAILURE;
       }  // else
       observed_frame_indices_.push_back(robot_model_.getFrameId(frame));
-      if (observed_velocity_itr != params_->limits.velocity.observed_frames_linear.end()) {
-        v_limit_observed_frames_lin_.push_back(*observed_velocity_itr * motion_horizon_);
-        ++observed_velocity_itr;
-      } else {
-        RCLCPP_WARN(get_node()->get_logger(),
-                    "'limits.velocity.observed_frames_linear' (size %zu) is smaller than 'limits.observed_frames' "
-                    "(size %zu). Extending the missing entry for the observed frame '%s' with the regular linear "
-                    "velocity limit (%.2f).",
-                    params_->limits.velocity.observed_frames_linear.size(), observed_frame_indices_.size(),
-                    frame.c_str(), params_->limits.velocity.linear);
-        v_limit_observed_frames_lin_.push_back(v_limit_lin_);  // assume that v_limit_lin_ has already been assigned
-                                                               // to the correct value above
-      }
-      RCLCPP_INFO(get_node()->get_logger(), "Observed frame '%s' linear displacement limit at %.2f m.", frame.c_str(),
-                  v_limit_observed_frames_lin_.back());
+    }
+    if (params_->limits.velocity.observed_frames_linear.size() < observed_frame_indices_.size()) {
+      RCLCPP_WARN(get_node()->get_logger(),
+                  "'limits.velocity.observed_frames_linear' (size %zu) is smaller than 'limits.observed_frames' "
+                  "(size %zu). Extending the missing entries with the regular linear velocity limit (%.2f).",
+                  params_->limits.velocity.observed_frames_linear.size(), observed_frame_indices_.size(),
+                  params_->limits.velocity.linear);
+      params_->limits.velocity.observed_frames_linear.resize(observed_frame_indices_.size(),
+                                                             params_->limits.velocity.linear);
     }
   }
-  assert(observed_frame_indices_.size() == v_limit_observed_frames_lin_.size());
-  observed_frame_v_lin_.assign(observed_frame_indices_.size(), 0.0);
 
   // setup and initialize QP
   assert(robot_model_.nv == params_->joints.size() && "At this stage, it is assumed that ALL joints are to be "
                                                       "controlled! -> This is an open TODO");
   // TODO(patrick): always make a full model and use the joints parameters to define actively controlled joints
 
-  // constraints
-  const Eigen::Index qp_constraints_n =  // accumulate constraint variables
-      static_cast<Eigen::Index>(observed_frame_indices_.size());
-
   // create QP solver
-  RCLCPP_INFO(get_node()->get_logger(), "Setting up QP solver with %d result variables and %d constraint variables",
-              robot_model_.nv, static_cast<int>(qp_constraints_n));
+  RCLCPP_INFO(get_node()->get_logger(), "Setting up QP solver with %d result variables", robot_model_.nv);
   qp_solver_ = std::make_unique<proxsuite::proxqp::dense::QP<double>>(
-      robot_model_.nv + qp_constraints_n, 0, 0,  // variables, eq-constraints != 0, in-eq-constraints != 0
-      true,                                      // box_constrained
+      robot_model_.nv, 0, 0,  // variables, eq-constraints != 0, in-eq-constraints != 0
+      true,                   // box_constrained
       proxsuite::proxqp::HessianType::Dense);
-  assert(qp_solver_->model.dim == robot_model_.nv + static_cast<Eigen::Index>(qp_constraints_n));
+  assert(qp_solver_->model.dim == robot_model_.nv);
   assert(params_->ik_max_iterations >= 3 && "'ik_max_iterations' must be at least 3. Please update the parameter "
                                             "bounds accordingly.");
 
@@ -281,11 +264,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // variables setup
   qp_solver_H_ =
       Eigen::MatrixXd::Identity(qp_solver_->model.dim, qp_solver_->model.dim);  // init save as identity matrix.
-  if (qp_constraints_n > 0) {  // initialize the lower-right weighted identity block matrix within H (it stays constant)
-    qp_solver_H_.diagonal()
-        .segment(robot_model_.nv, qp_constraints_n)
-        .setConstant(params_->limits.observed_frames_weight);
-  }
   qp_solver_g_ = Eigen::VectorXd::Zero(qp_solver_->model.dim);
   qp_jacobian_ = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, robot_model_.nv);
   qp_jacobian_t_ = Eigen::Matrix<double, Eigen::Dynamic, 6>::Zero(robot_model_.nv, 6);
@@ -399,11 +377,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rx", &solution_pose_diff_.vector()(3));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry", &solution_pose_diff_.vector()(4));
     REGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz", &solution_pose_diff_.vector()(5));
-    REGISTER_ROS2_CONTROL_INTROSPECTION("backtracking_scale", &backtracking_scale_);
-    for (std::size_t i = 0; i < observed_frame_v_lin_.size(); i++) {
-      REGISTER_ROS2_CONTROL_INTROSPECTION("observed_frame_v_lin_" + params_->limits.observed_frames[i],
-                                          &observed_frame_v_lin_[i]);
-    }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i), &(qp_solver_u_box_[i]));
@@ -450,10 +423,6 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rx");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_ry");
     UNREGISTER_ROS2_CONTROL_INTROSPECTION("solution_pose_diff_rz");
-    UNREGISTER_ROS2_CONTROL_INTROSPECTION("backtracking_scale");
-    for (std::size_t i = 0; i < observed_frame_v_lin_.size(); i++) {
-      UNREGISTER_ROS2_CONTROL_INTROSPECTION("observed_frame_v_lin_" + params_->limits.observed_frames[i]);
-    }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("QP_bound_u_box_" + std::to_string(i));
@@ -629,12 +598,21 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   solution_pose_diff_ = trajectory_eval_target_.pose() - solution_pose;
 
   // backtrack to prevent overshoot
-  backtracking_scale_ =
+  const double backtracking_scale =
       std::fmax(-1.0, std::fmin((trajectory_eval_target_pose_diff_.vector().transpose() * solution_pose_diff_.vector() +
                                  params_->ik_precision) /
                                     (solution_pose_diff_.vector().squaredNorm() + params_->ik_precision),
                                 1.0));
-  control_q_ += (backtracking_scale_ - 1.0) * pose_diff_ik_result_;
+  control_q_ += (backtracking_scale - 1.0) * pose_diff_ik_result_;
+
+  // scale down further if the target or any observed frame's actual resulting speed would exceed its configured limit
+  const double frame_velocity_scale = apply_frame_velocity_limits(period.seconds());
+  if (params_->enable_debug_log && (frame_velocity_scale < 1.0)) {
+    RCLCPP_INFO(get_node()->get_logger(), "Scaling joint motion by %.3f to respect frame speed limits.",
+                frame_velocity_scale);
+  }  // TODO(patrick): this is only for debugging, remove this message again
+  // TODO(patrick): this scsale should be forwarded into the (not yet existing velocity calculation)
+  // TODO(patrick): decide what to do with the time if the motion is downscaled... (delay/catch-up) ?
 
   // update control_v_
   control_v_ = 0.95 * (control_q_ - state_q_) / period.seconds();  // TODO: do correct or do not !
@@ -699,49 +677,15 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
   qp_jacobian_t_.block(0, 0, robot_model_.nv, 3) *= linear_error_weight_;
   static_assert(!decltype(qp_solver_H_)::IsRowMajor, "qp_solver_H_ is assumed to be column-major for accessing upper "
                                                      "triangular columns of H");
-  qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv).triangularView<Eigen::Upper>() =
-      qp_jacobian_t_ * qp_jacobian_;
-  qp_solver_H_.diagonal().segment(0, robot_model_.nv).array() += params_->ik_damping;
-  qp_solver_g_.segment(0, robot_model_.nv) = -(qp_jacobian_t_ * scaled_target_diff.vector());
-  // Fill QP box bounds with soft position displacement limits
-  qp_solver_l_box_.segment(0, robot_model_.nv) = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0);
-  qp_solver_u_box_.segment(0, robot_model_.nv) = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0);
-
-  // Construct Constraints Problem: fill the upper-right (H_idx-th column, robot_model_.nv rows)
-  // block -- i.e. transposed relative to a row-wise fill -- so only the upper triangle of H is
-  // ever written; the lower triangle is mirrored from it afterwards via selfadjointView.
-  Eigen::Index H_idx = robot_model_.nv;
-  for (std::size_t i = 0; i < observed_frame_indices_.size(); i++) {
-    const auto frame_idx = observed_frame_indices_[i];
-    qp_jacobian_.setZero();  // reuse jacobian memory
-    pinocchio::getFrameJacobian(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL, qp_jacobian_);
-    const pinocchio::Motion frame_motion =
-        pinocchio::getFrameVelocity(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL);
-    qp_solver_H_.block(0, H_idx, robot_model_.nv, 1) =
-        qp_jacobian_.block(0, 0, 3, robot_model_.nv).transpose() * frame_motion.linear();
-    // avoid potential division by zero in the case of no frame movement by scaling the box-constraints instead
-    observed_frame_v_lin_[i] = frame_motion.linear().norm();
-    qp_solver_u_box_(H_idx) = std::fmax(v_limit_observed_frames_lin_[i] * observed_frame_v_lin_[i],
-                                        params_->ik_precision);  // guarantee some minimal numerical space
-    qp_solver_l_box_(H_idx) = -qp_solver_u_box_(H_idx);
-    // move on to the next index
-    H_idx++;
-  }
-  assert(H_idx == qp_solver_->model.dim);  // Assert all constraints have been filled
-  // fold the (still unweighted) constraint block's contribution into H_00, then scale it in place
-  const Eigen::Index constraints_n = qp_solver_->model.dim - robot_model_.nv;
-  if (constraints_n > 0) {  // if there are constraints available
-    auto qp_solver_Ct = qp_solver_H_.block(0, robot_model_.nv, robot_model_.nv, constraints_n);
-    qp_solver_H_.block(0, 0, robot_model_.nv, robot_model_.nv).triangularView<Eigen::Upper>() +=
-        params_->limits.observed_frames_weight * qp_solver_Ct * qp_solver_Ct.transpose();
-    qp_solver_Ct *= params_->limits.observed_frames_weight;
-  }
+  qp_solver_H_.triangularView<Eigen::Upper>() = qp_jacobian_t_ * qp_jacobian_;
+  qp_solver_H_.diagonal().array() += params_->ik_damping;
+  qp_solver_g_ = -(qp_jacobian_t_ * scaled_target_diff.vector());
   // the entire upper triangle of H is now assembled -- mirror it down into the strictly lower triangle.
   qp_solver_H_.triangularView<Eigen::StrictlyLower>() = qp_solver_H_.transpose();
 
-  // scale box constraints
-  qp_solver_l_box_ *= problem_scale;
-  qp_solver_u_box_ *= problem_scale;
+  // Fill QP box bounds with soft position displacement limits, scaled to match theta's own 'problem_scale' scaling
+  qp_solver_l_box_ = (robot_model_.lowerPositionLimit - state_q_).cwiseMin(0.0) * problem_scale;
+  qp_solver_u_box_ = (robot_model_.upperPositionLimit - state_q_).cwiseMax(0.0) * problem_scale;
 
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
@@ -768,6 +712,40 @@ void CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
 
   // rescale result
   pose_diff_ik_result_ = qp_solver_->results.x.segment(0, robot_model_.nv) / problem_scale;
+}
+
+double CartesianPoseController::apply_frame_velocity_limits(const double period_seconds)
+{
+  const Eigen::VectorXd delta_q = control_q_ - state_q_;
+  const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
+
+  qp_jacobian_.setZero();
+  pinocchio::getFrameJacobian(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL,
+                              qp_jacobian_);
+  const Eigen::Vector3d base_displacement_lin = qp_jacobian_.block(0, 0, 3, robot_model_.nv) * delta_q;
+
+  double scale = 1.0;
+  const auto limit_frame_speed = [&](const pinocchio::FrameIndex frame_idx, const double v_limit) {
+    qp_jacobian_.setZero();  // reuse jacobian memory
+    pinocchio::getFrameJacobian(robot_model_, state_data_, frame_idx, pinocchio::ReferenceFrame::LOCAL, qp_jacobian_);
+    const Eigen::Vector3d frame_displacement_lin = qp_jacobian_.block(0, 0, 3, robot_model_.nv) * delta_q;
+    const Eigen::Matrix3d base_to_frame_rotation = oMbase.actInv(state_data_.oMf[frame_idx]).rotation();
+    const double displacement_lin_in_base =
+        ((base_to_frame_rotation * frame_displacement_lin) - base_displacement_lin).norm();
+    const double displacement_limit = v_limit * period_seconds;
+    if (displacement_lin_in_base > displacement_limit) {
+      scale = std::fmin(scale, displacement_limit / displacement_lin_in_base);
+    }
+  };
+
+  // the target frame's own actual resulting speed, using the general linear velocity limit
+  limit_frame_speed(target_frame_idx_, params_->limits.velocity.linear);
+  for (std::size_t i = 0; i < observed_frame_indices_.size(); i++) {
+    limit_frame_speed(observed_frame_indices_[i], params_->limits.velocity.observed_frames_linear[i]);
+  }
+
+  control_q_ = state_q_ + scale * delta_q;
+  return scale;
 }
 
 void CartesianPoseController::command_controls()
@@ -828,8 +806,8 @@ void CartesianPoseController::log_statistics() const
   const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
   const pinocchio::Motion base_v_local =
       pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
-  const pinocchio::Motion base_v_world_aligned =
-      pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED);
+  const pinocchio::Motion base_v_world_aligned = pinocchio::getFrameVelocity(
+      robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED);
   const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
   const pinocchio::Motion target_v_local =
       pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);

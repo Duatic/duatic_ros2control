@@ -28,13 +28,13 @@ cartesian_pose_controller:
       description: "Additional frames that are limited in motion. Leave empty to not limit any additional frames."
       validation:
         unique<>: null
-    observed_frames_weight:
-      type: double
-      default_value: 100.0
-      description: "Weight for satisfying motion limits of the observed_frames within the inverse kinematics optimization problem. Set to zero to ignore the observed frames."
-      validation:
-        bounds<>: [0.0, 1000.0]
     velocity:
+      observed_frames_linear:
+        type: double_array
+        default_value: [1.0]
+        description: "Maximum velocity for linear, Cartesian motions of the observed frames."
+        validation:
+          element_bounds<>: [0.0, 10.0]
       linear:
         type: double
         default_value: 1.0
@@ -47,12 +47,6 @@ cartesian_pose_controller:
         description: "Maximum velocity for rotational motions. Set zero to disable rotational motion."
         validation:
           bounds<>: [0.0, 6.283]
-      observed_frames_linear:
-        type: double_array
-        default_value: [1.0]
-        description: "Maximum velocity for linear, Cartesian motions of the observed frames."
-        validation:
-          element_bounds<>: [0.0, 10.0]
     acceleration:
       linear:
         type: double
