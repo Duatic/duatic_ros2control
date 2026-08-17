@@ -117,7 +117,7 @@ public:
                    &handles_.at(config.interface).running };
   }
   /**
-   * @brief mark a specific handle as ready. If all handles aquired via aquireMaster are ready the bus gets activated
+   * @brief mark a specific handle as ready. If all handles acquired via aquireMaster are ready the bus gets activated
    * and is spun in a separate thread
    * @return true if the ethercat is now activated
    */
@@ -152,7 +152,7 @@ public:
     }
 
     if (!all_ready) {
-      logging::info() << "Not all handles ready - defering start";
+      logging::info() << "Not all handles ready - deferring start";
       return false;
     }
 
@@ -201,8 +201,7 @@ public:
     const auto& network_interface = handle.ecat_bus->get_parameters().interface;
     // First check if we even handle this ethercat bus
     if (!has_bus(network_interface)) {
-      throw std::logic_error("EthercatBus for interface: " + network_interface +
-                             " is not handled by this singleton");
+      throw std::logic_error("EthercatBus for interface: " + network_interface + " is not handled by this singleton");
     }
 
     // Decrement the reference counter and check if it is zero

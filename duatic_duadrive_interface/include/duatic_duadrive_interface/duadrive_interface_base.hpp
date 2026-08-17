@@ -41,6 +41,7 @@
 // sdk
 
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
+#include <duatic_duadrive_sdk/v1/duadrive.hpp>
 
 namespace duatic::duadrive_interface
 {
@@ -89,8 +90,8 @@ struct DuaDriveInterfaceState
 
   // These 2 fields are not exported to the outside but are just intended to be used within the coupled kinematics
   // hardware interface
-  rsl_drive_sdk::fsm::StateEnum current_drive_state{};
-  rsl_drive_sdk::mode::ModeEnum current_drive_mode{};
+  duadrive_sdk::v1::FSMState current_drive_state{};
+  duadrive_sdk::v1::ControlMode current_drive_mode{};
 
   // This is what the drive tells us (as feedback) what we commanded
   double joint_position_commanded{};
@@ -173,7 +174,7 @@ public:
     return state_;
   }
 
-  void configure_drive_mode(rsl_drive_sdk::mode::ModeEnum mode)
+  void configure_drive_mode(duadrive_sdk::v1::ControlMode mode)
   {
     previous_mode_ = active_mode_;
     active_mode_ = mode;
@@ -181,7 +182,7 @@ public:
     // Configure the current position as target position to avoid sudden jumps
     command_.joint_position = state_.joint_position;
   }
-  rsl_drive_sdk::mode::ModeEnum get_active_drive_mode() const
+  duadrive_sdk::v1::ControlMode get_active_drive_mode() const
   {
     return active_mode_;
   }
@@ -223,8 +224,8 @@ protected:
 
   std::chrono::system_clock::time_point last_reading_update_;
 
-  rsl_drive_sdk::mode::ModeEnum active_mode_{ rsl_drive_sdk::mode::ModeEnum::Freeze };
-  rsl_drive_sdk::mode::ModeEnum previous_mode_{ rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains };
+  duadrive_sdk::v1::ControlMode active_mode_{ duadrive_sdk::v1::ControlMode::Freeze };
+  duadrive_sdk::v1::ControlMode previous_mode_{ duadrive_sdk::v1::ControlMode::JointPositionVelocityTorquePidGains };
 
   std::vector<hardware_interface::InterfaceDescription> state_interface_descriptions_;
   std::vector<hardware_interface::InterfaceDescription> command_interface_descriptions_;

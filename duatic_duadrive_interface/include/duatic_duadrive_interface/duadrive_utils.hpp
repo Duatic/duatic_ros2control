@@ -33,8 +33,7 @@
 #include <string>
 
 /*drive sdk*/
-#include <rsl_drive_sdk/Statusword.hpp>
-#include <rsl_drive_sdk/mode/ModeEnum.hpp>
+#include <duatic_duadrive_sdk/v1/duadrive.hpp>
 
 /*project*/
 #include "duatic_duadrive_interface/interface_utils.hpp"
@@ -56,68 +55,11 @@ constexpr bool sanitize_command_input(double& cmd)
   return true;
 }
 
-/**
- * @brief helper function which print the output of the sdk function via ROS2 logging
- */
-inline void print_drive_status_changes(
-    const std::string& drive_name, const rsl_drive_sdk::Statusword& current_status_word,
-    rsl_drive_sdk::Statusword previous_status_word /*create copy because getmessagesDiff is not const declared*/,
-    rclcpp::Logger& logger)
-{
-  std::vector<std::string> infos;
-  std::vector<std::string> warnings;
-  std::vector<std::string> errors;
-  std::vector<std::string> fatals;
-
-  current_status_word.getMessagesDiff(previous_status_word, infos, warnings, errors, fatals);
-
-  for (const auto& msg : infos) {
-    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : warnings) {
-    RCLCPP_WARN_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : errors) {
-    RCLCPP_ERROR_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : fatals) {
-    RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-}
-
-inline void print_drive_status(const std::string& drive_name, const rsl_drive_sdk::Statusword& current_status_word,
-                               rclcpp::Logger& logger)
-{
-  std::vector<std::string> infos;
-  std::vector<std::string> warnings;
-  std::vector<std::string> errors;
-  std::vector<std::string> fatals;
-
-  current_status_word.getMessages(infos, warnings, errors, fatals);
-
-  for (const auto& msg : infos) {
-    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : warnings) {
-    RCLCPP_WARN_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : errors) {
-    RCLCPP_ERROR_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  for (const auto& msg : fatals) {
-    RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:" << msg);
-  }
-  if (infos.empty() && warnings.empty() && errors.empty() && fatals.empty()) {
-    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:"
-                                   << "Drive status: OK");
-  }
-}
-
 inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze_mode" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces
  */
-inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_)
+inline duadrive_sdk::v1::ControlMode select_mode(const std::set<std::string>& interfaces, rclcpp::Logger& logger_)
 {
   // 1. extract the types of all selected new interfaces
   std::set<std::string> interface_types;
@@ -134,44 +76,44 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   // This means: WHEN the freeze_mode interface is claimend we go into freeze mode !
   if (interface_types.find("freeze_mode") != interface_types.end()) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: Freeze");
-    return rsl_drive_sdk::mode::ModeEnum::Freeze;
+    return duadrive_sdk::v1::ControlMode::Freeze;
   }
 
   // 2. start to select mode depending on selection
   // Option 1: only one interface selected - choose between position, velocity, effort
   if (interface_types.find("position") != interface_types.end() && interface_types.size() == 1) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPosition");
-    return rsl_drive_sdk::mode::ModeEnum::JointPosition;
+    return duadrive_sdk::v1::ControlMode::JointPosition;
   }
 
   if (interface_types.find("velocity") != interface_types.end() && interface_types.size() == 1) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointVelocity");
-    return rsl_drive_sdk::mode::ModeEnum::JointVelocity;
+    return duadrive_sdk::v1::ControlMode::JointVelocity;
   }
 
   if (interface_types.find("effort") != interface_types.end() && interface_types.size() == 1) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointTorque");
-    return rsl_drive_sdk::mode::ModeEnum::JointTorque;
+    return duadrive_sdk::v1::ControlMode::JointTorque;
   }
 
   // Option 2:  2-tuple Combinations of the modes above
   if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("velocity") != interface_types.end() && interface_types.size() == 2) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionVelocity");
-    return rsl_drive_sdk::mode::ModeEnum::JointPositionVelocity;
+    return duadrive_sdk::v1::ControlMode::JointPositionVelocity;
   }
 
   if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("effort") != interface_types.end() && interface_types.size() == 2) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionTorque");
-    return rsl_drive_sdk::mode::ModeEnum::JointPositionTorque;
+    return duadrive_sdk::v1::ControlMode::JointPositionTorque;
   }
   // Option 3: 3-tuple combinations of the modes above
   if (interface_types.find("position") != interface_types.end() &&
       interface_types.find("velocity") != interface_types.end() &&
       interface_types.find("effort") != interface_types.end() && interface_types.size() == 3) {
     RCLCPP_DEBUG_STREAM(logger_, "Select drive mode: JointPositionVelocityTorquePID");
-    return rsl_drive_sdk::mode::ModeEnum::JointPositionVelocityTorquePidGains;
+    return duadrive_sdk::v1::ControlMode::JointPositionVelocityTorquePidGains;
   }
 
   // This is our fallback mode (Freeze for safety reasons)
@@ -180,16 +122,42 @@ inline rsl_drive_sdk::mode::ModeEnum select_mode(const std::set<std::string>& in
   for (const auto& itype : interface_types) {
     RCLCPP_WARN_STREAM(logger_, itype);
   }
-  return rsl_drive_sdk::mode::ModeEnum::Freeze;
+  return duadrive_sdk::v1::ControlMode::Freeze;
 }
 /**
  * @brief A list with all modes that do not use the commanded position (e.g. velocity control)
  * TODO(firesurfer) this is not constepxr friendly at the moment
  */
-inline std::set<rsl_drive_sdk::mode::ModeEnum> modes_without_position_control()
+inline std::set<duadrive_sdk::v1::ControlMode> modes_without_position_control()
 {
-  using Modes = rsl_drive_sdk::mode::ModeEnum;
+  using Modes = duadrive_sdk::v1::ControlMode;
   return std::set{ Modes::Freeze, Modes::Current, Modes::JointTorque, Modes::JointVelocity, Modes::MotorVelocity };
 };
+
+inline duadrive_sdk::v1::Command build_command(const duadrive_sdk::v1::ControlMode mode, const double joint_position,
+                                               const double joint_velocity, const double joint_torque,
+                                               const duadrive_sdk::v1::PidGains& gains)
+{
+  using CM = duadrive_sdk::v1::ControlMode;
+  using namespace duadrive_sdk::v1;
+  switch (mode) {
+    case CM::JointPosition:
+      return JointPositionCommand(joint_position);
+    case CM::JointPositionTorque:
+      return JointPositionTorqueCommand(joint_position, joint_torque);
+    case CM::JointPositionVelocityTorque:
+      return JointPositionVelocityTorqueCommand(joint_position, joint_velocity, joint_torque);
+    case CM::JointPositionVelocityTorquePidGains:
+      return JointPositionVelocityTorquePidGainsCommand(joint_position, joint_velocity, joint_torque, gains);
+    case CM::Freeze:
+      return FreezeCommand();
+    case CM::Disable:
+      return DisableCommand();
+    case CM::JointTorque:
+      return JointTorqueCommand(joint_torque);
+    default:
+      return DisableCommand();
+  }
+}
 
 }  // namespace duatic::duadrive_interface
