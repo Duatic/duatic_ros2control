@@ -17,7 +17,6 @@
   <depend>pluginlib</depend>
 
   <depend>hardware_interface</depend>
-  <depend>rsl_drive_sdk</depend>
   <depend>duatic_duadrive_sdk</depend>
 
   <export>

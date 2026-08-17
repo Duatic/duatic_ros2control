@@ -4,14 +4,12 @@ project(duatic_duadrive_interface)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_ros REQUIRED)
-find_package(yaml-cpp REQUIRED) # We need to use yaml-cpp from the system otherwise the rsl_drive_sdk will be unhappy
-
+find_package(yaml-cpp REQUIRED)
 set(PACKAGE_DEPENDENCIES
   rclcpp
   pluginlib
   hardware_interface
   urdf
-  rsl_drive_sdk
   duatic_duadrive_sdk
 )
 
@@ -43,7 +41,6 @@ else()
     pluginlib::pluginlib
     hardware_interface::hardware_interface
     urdf::urdf
-    rsl_drive_sdk::rsl_drive_sdk
     duatic_duadrive_sdk::duatic_duadrive_sdk)
 endif()
 
