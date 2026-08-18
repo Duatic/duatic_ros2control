@@ -17,10 +17,6 @@ find_package(eigen3_cmake_module REQUIRED)
 find_package(pinocchio REQUIRED)
 # Generate code from parameter description yaml files
 generate_parameter_library(
-    safety_scaling_controller_parameters
-    src/safety_scaling_controller_parameters.yaml
-)
-generate_parameter_library(
     duadrive_status_broadcaster_parameters
     src/duadrive_status_broadcaster_parameters.yaml
 )
@@ -56,7 +52,6 @@ generate_parameter_library(
 
 # The actual controller library
 add_library(${PROJECT_NAME} SHARED
-    src/safety_scaling_controller.cpp
     src/duadrive_status_broadcaster.cpp
     src/force_torque_broadcaster.cpp
     src/freedrive_controller.cpp
@@ -89,7 +84,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 # Link against the controller parameter targets
 target_link_libraries(${PROJECT_NAME}
-    safety_scaling_controller_parameters
     duadrive_status_broadcaster_parameters
     force_torque_broadcaster_parameters
     freedrive_controller_parameters
@@ -135,7 +129,6 @@ pluginlib_export_plugin_description_file(controller_interface controller_interfa
 install(
   TARGETS
     ${PROJECT_NAME}
-    safety_scaling_controller_parameters
     duadrive_status_broadcaster_parameters
     force_torque_broadcaster_parameters
     freedrive_controller_parameters
