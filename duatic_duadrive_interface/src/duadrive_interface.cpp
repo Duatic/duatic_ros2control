@@ -142,8 +142,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   RCLCPP_INFO_STREAM(logger_, "Activate drive: " << drive_->get_ethercat_device_info().name);
   // We are now in the realtime loop
   // In case we are in error state clear the error and try again
-
   auto status_word = drive_->read_status_word();
+  drive_->sync_read();
 
   // Print the current drive state (e.g. warnings, errors, fatals)
   // TODO re-add more specific printing functions
@@ -162,9 +162,13 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     drive_->set_fsm_goal_state(FSMState::Standby);  // Requesting standby clears the errors if possible
     drive_->sync_write();
     drive_->sync_read();
+
+    drive_->wait_until_goal_state_reached(std::chrono::milliseconds{ 100 });
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
   // Put into Configure
+  RCLCPP_WARN_STREAM(logger_, "Setting to configure state, current state: "
+                                  << drive_->get_latest_reading().status_word.get_fsm_state());
   drive_->set_fsm_goal_state(FSMState::Configure);
 
   if (!drive_->wait_until_goal_state_reached(std::chrono::milliseconds{ 500 })) {
@@ -254,7 +258,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   const auto current_status_word = reading.status_word;
   if (last_status_word_) {
     duadrive_sdk::v1::StatusEvent event(last_status_word_.value(), current_status_word);
-    RCLCPP_INFO_STREAM(logger_, event);
+    if (event.has_changes()) {
+      RCLCPP_INFO_STREAM(logger_, event);
+    }
   }
   last_status_word_ = current_status_word;
   // last_reading_update_ = reading.time_stamp;

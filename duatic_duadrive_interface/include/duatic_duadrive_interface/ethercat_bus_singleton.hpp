@@ -173,6 +173,7 @@ public:
     // Start executor
     internal_handle.ecat_bus->activate();
     internal_handle.executor = std::make_unique<SingleBusExecutor>(internal_handle.ecat_bus);
+    internal_handle.executor->spin();
     return true;
   }
   /**
