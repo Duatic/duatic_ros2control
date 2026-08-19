@@ -108,7 +108,7 @@ void DuaDriveInterface::on_bus_startup_finished()
                                                        << info.git_tag << "\n   Git hash: " << info.git_hash
                                                        << "\n   Firmware version: " << fw_version);
   const auto gains =
-      drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorquePidGains);
+      drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorque);
 
   command_.p_gain = gains.p;
   command_.i_gain = gains.i;
@@ -243,6 +243,9 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 
       drive_->stage_command(duadrive_sdk::v1::FreezeCommand());
     }
+    //Otherwise we have a pdo timeout
+    drive_->set_fsm_goal_state(duadrive_sdk::v1::FSMState::Standby);
+    drive_->sync_write();
   }
 
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -251,6 +254,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const rclcpp::Time& time,
                                                         [[maybe_unused]] const rclcpp::Duration& period)
 {
+  drive_->sync_read();
   // Obtain the latest reading from the drive (note: we assume asynchronous spinning)
   duadrive_sdk::v1::Reading reading = drive_->get_latest_reading();
 
@@ -309,6 +313,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
 hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const rclcpp::Time& time,
                                                          [[maybe_unused]] const rclcpp::Duration& period)
 {
+  drive_->sync_write();
   // Only write the command if we are already in the correct state
   if (drive_->fsm_goal_state_reached()) {
     // Convert command vector into an rsl_drive_sdk::Command

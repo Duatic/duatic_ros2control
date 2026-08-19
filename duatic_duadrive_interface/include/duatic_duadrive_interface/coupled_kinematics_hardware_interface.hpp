@@ -376,7 +376,7 @@ public:
       if (drive->communication_has_timeout()) {
         RCLCPP_ERROR_STREAM_ONCE(logger_, "Drive: " << drive->get_name()
                                                     << " reports a communication timeout. Freezing the system");
-        error_active_ = true;
+       // error_active_ = true;
       }
     }
 

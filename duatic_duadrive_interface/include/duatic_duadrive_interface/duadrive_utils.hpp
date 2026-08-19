@@ -145,6 +145,8 @@ inline duadrive_sdk::v1::Command build_command(const duadrive_sdk::v1::ControlMo
       return JointPositionCommand(joint_position);
     case CM::JointPositionTorque:
       return JointPositionTorqueCommand(joint_position, static_cast<float>(joint_torque));
+    case CM::JointVelocity:
+      return JointVelocityCommand(static_cast<float>(joint_velocity));
     case CM::JointPositionVelocityTorque:
       return JointPositionVelocityTorqueCommand(joint_position, static_cast<float>(joint_velocity),
                                                 static_cast<float>(joint_torque));
@@ -158,6 +160,7 @@ inline duadrive_sdk::v1::Command build_command(const duadrive_sdk::v1::ControlMo
     case CM::JointTorque:
       return JointTorqueCommand(static_cast<float>(joint_torque));
     default:
+      logging::error() << "Unhandled command control mode" << mode << std::endl;
       return DisableCommand();
   }
 }
