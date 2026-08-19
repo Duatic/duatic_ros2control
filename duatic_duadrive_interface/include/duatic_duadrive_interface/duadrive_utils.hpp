@@ -139,22 +139,24 @@ inline duadrive_sdk::v1::Command build_command(const duadrive_sdk::v1::ControlMo
                                                const duadrive_sdk::v1::PidGains& gains)
 {
   using CM = duadrive_sdk::v1::ControlMode;
-  using namespace duadrive_sdk::v1;
+  using namespace duadrive_sdk::v1;  // NOLINT(build/namespaces)
   switch (mode) {
     case CM::JointPosition:
       return JointPositionCommand(joint_position);
     case CM::JointPositionTorque:
-      return JointPositionTorqueCommand(joint_position, joint_torque);
+      return JointPositionTorqueCommand(joint_position, static_cast<float>(joint_torque));
     case CM::JointPositionVelocityTorque:
-      return JointPositionVelocityTorqueCommand(joint_position, joint_velocity, joint_torque);
+      return JointPositionVelocityTorqueCommand(joint_position, static_cast<float>(joint_velocity),
+                                                static_cast<float>(joint_torque));
     case CM::JointPositionVelocityTorquePidGains:
-      return JointPositionVelocityTorquePidGainsCommand(joint_position, joint_velocity, joint_torque, gains);
+      return JointPositionVelocityTorquePidGainsCommand(joint_position, static_cast<float>(joint_velocity),
+                                                        static_cast<float>(joint_torque), gains);
     case CM::Freeze:
       return FreezeCommand();
     case CM::Disable:
       return DisableCommand();
     case CM::JointTorque:
-      return JointTorqueCommand(joint_torque);
+      return JointTorqueCommand(static_cast<float>(joint_torque));
     default:
       return DisableCommand();
   }

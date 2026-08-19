@@ -26,6 +26,9 @@
 #pragma once
 
 #include <map>
+#include <vector>
+#include <memory>
+#include <string>
 
 #include <duatic_duadrive_sdk/v1/duadrive.hpp>
 #include <duatic_ethercat_interface/executor.hpp>

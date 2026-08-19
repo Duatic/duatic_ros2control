@@ -64,7 +64,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   const auto joint_name = params.joint_name;
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterface_" + joint_name);
 
-  const auto address = params.device_address;
+  const ethercat_interface::DeviceId address = static_cast<ethercat_interface::DeviceId>(params.device_address);
   // Obtain the parameter file for the currently processed drive
   std::string device_file_path = params.drive_parameter_file_path;
   // If there is no configuration available for the current joint in the passed parameter folder we abort
@@ -89,7 +89,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::configure()
 
 void DuaDriveInterface::on_bus_startup_finished()
 {
-  using namespace duadrive_sdk::v1;
+  using namespace duadrive_sdk::v1;  // NOLINT(build/namespaces)
 
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
 
@@ -119,7 +119,7 @@ void DuaDriveInterface::on_bus_startup_finished()
   // Maximum torque/velocity values
   // We use this to provide the possibility to scale down the safety values
   configured_max_torque_ = drive_->configuration_interface().read_maximum_joint_torque();
-  configured_gear_ratio_ = drive_->configuration_interface().read_gearbox_ratio();
+  configured_gear_ratio_ = static_cast<float>(drive_->configuration_interface().read_gearbox_ratio());
 
   double max_motor_velocity = drive_->configuration_interface().read_maximum_motor_velocity();
   // Actually store the velocity in joint coordinates
@@ -137,16 +137,17 @@ void DuaDriveInterface::on_bus_startup_finished()
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
 {
-  using namespace duadrive_sdk::v1;
+  using namespace duadrive_sdk::v1;  // NOLINT(build/namespaces)
 
   RCLCPP_INFO_STREAM(logger_, "Activate drive: " << drive_->get_ethercat_device_info().name);
   // We are now in the realtime loop
   // In case we are in error state clear the error and try again
   auto status_word = drive_->read_status_word();
+  // sync data into the drive object
   drive_->sync_read();
 
   // Print the current drive state (e.g. warnings, errors, fatals)
-  // TODO re-add more specific printing functions
+  // TODO(firesurfer) re-add more specific printing functions
   RCLCPP_INFO_STREAM(logger_, status_word);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
   if (status_word.get_fsm_state() == FSMState::Fatal) {
