@@ -29,7 +29,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <algorithm>
 
 // Pinocchio
 #include <Eigen/Dense>  // NOLINT(build/include_order)
@@ -107,12 +106,8 @@ public:
   using trajectory_type = trajectory::ExponentialApproachPose3DC2<
       double, rclcpp::Time,
       trajectory::KinematicTrajectorySettingsExponentialApproachDefault<double, KinematicTrajectorySettingsParams>>;
-  static constexpr geometry::KinematicOrder trajectory_eval_order_depth = geometry::KinematicOrder::Twist;
-  static constexpr geometry::KinematicOrder trajectory_start_order_depth = geometry::KinematicOrder::Twist;
-
-  static constexpr auto required_state_order_depth =
-      geometry::KinematicOrder::Twist;  // state order depth required by the internal functionality and pinocchio model
-  static constexpr auto state_order_depth = std::max(required_state_order_depth, trajectory_start_order_depth);
+  static constexpr geometry::KinematicOrder command_depth = geometry::KinematicOrder::Twist;
+  static constexpr geometry::KinematicOrder feedback_depth = geometry::KinematicOrder::Twist;
 
   using ScalarType = typename trajectory_type::ScalarType;
   using TimestampType = typename trajectory_type::TimestampType;
@@ -123,7 +118,7 @@ public:
 
   using trajectory_update_state_type = typename trajectory_type::UpdateStateType;
 
-  using trajectory_eval_type = typename trajectory_type::template KinematicState<trajectory_eval_order_depth>;
+  using trajectory_eval_type = typename trajectory_type::template KinematicState<command_depth>;
   static_assert(geometry::is_kinematic_state_v<trajectory_eval_type>);
 
   // ros2_control's controller_manager calls update(time, period) with 'time' on RCL_ROS_TIME (verified
@@ -160,7 +155,8 @@ private:
   std::vector<Eigen::Index> joint_v_idx_;
   pinocchio::FrameIndex base_frame_idx_;  // frame all published poses/twists are expressed relative to
   pinocchio::FrameIndex target_frame_idx_;
-  std::vector<pinocchio::FrameIndex> observed_frame_indices_;  // aligned with params_->limits.velocity.observed_frames_linear
+  std::vector<pinocchio::FrameIndex> observed_frame_indices_;  // aligned with
+                                                               // params_->limits.velocity.observed_frames_linear
 
   pinocchio::Data state_data_;
   Eigen::VectorXd state_q_;
@@ -215,7 +211,9 @@ private:
 
   void handle_target_msg_sub(const trajectory_target_msg_type::SharedPtr msg);
 
-  void update_state(const bool use_hw_positions);
+  void read_states();
+
+  void update_state(const double control_blend_in_factor = 0.0);
 
   void run_pose_diff_ik(const double problem_scale, const geometry::Twist3Dd& scaled_target_diff,
                         const bool verbose = false);

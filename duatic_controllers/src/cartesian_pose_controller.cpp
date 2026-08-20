@@ -61,13 +61,13 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
     }
-    if constexpr (trajectory_eval_order_depth >= geometry::KinematicOrder::Twist) {
+    if constexpr (command_depth >= geometry::KinematicOrder::Twist) {
       for (const std::string& joint : params_->joints) {
         config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
         RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
       }
     }
-    static_assert(trajectory_eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
+    static_assert(command_depth <= geometry::KinematicOrder::Twist,  // line break
                   "Control outputs of higher derivative than Twist are not yet supported");
   }
   return config;
@@ -83,13 +83,13 @@ controller_interface::InterfaceConfiguration CartesianPoseController::state_inte
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
     RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
   }
-  if constexpr (state_order_depth >= geometry::KinematicOrder::Twist) {
+  if constexpr (feedback_depth >= geometry::KinematicOrder::Twist) {
     for (const std::string& joint : params_->joints) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
     }
   }
-  static_assert(state_order_depth <= geometry::KinematicOrder::Twist,  // line break
+  static_assert(feedback_depth <= geometry::KinematicOrder::Twist,  // line break
                 "State inputs of higher derivative than Twist are not yet supported");
   return config;
 }
@@ -107,12 +107,8 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
   }
 
   // log some internal configurations
-  RCLCPP_INFO(get_node()->get_logger(), "Using 'trajectory_start_order_depth' = %s",
-              geometry::to_string(trajectory_start_order_depth).c_str());
-  RCLCPP_INFO(get_node()->get_logger(), "Using 'trajectory_eval_order_depth' = %s",
-              geometry::to_string(trajectory_eval_order_depth).c_str());
-  RCLCPP_INFO(get_node()->get_logger(), "Using 'state_order_depth' = %s",
-              geometry::to_string(state_order_depth).c_str());
+  RCLCPP_INFO(get_node()->get_logger(), "Using 'feedback_depth' = %s", geometry::to_string(feedback_depth).c_str());
+  RCLCPP_INFO(get_node()->get_logger(), "Using 'command_depth' = %s", geometry::to_string(command_depth).c_str());
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -470,7 +466,12 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     }
   }
   // initialize current state (data availability is guaranteed by the previous loop)
-  update_state(true);
+  read_states();
+  // initialize the control state to the current state, and update the internal state representation accordingly
+  update_state(0.0);  // ensure no controls are blend in !
+  control_q_ = state_q_;
+  control_v_ = state_v_;
+  control_data_ = state_data_;
 
   // initialize state and trajectory buffers, ensure the correct time source is present within the buffer
   current_time_buffer_.publish_write(rclcpp::Clock(rcl_time_source).now());
@@ -483,7 +484,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
   current_state.pose().linear() = base_to_target.translation();
   current_state.pose().angular() = base_to_target.rotation();
-  if constexpr (trajectory_start_order_depth >= geometry::KinematicOrder::Twist) {
+  if constexpr (feedback_depth >= geometry::KinematicOrder::Twist) {
     const pinocchio::Motion base_v_local =
         pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
     const pinocchio::Motion target_v_local =
@@ -492,7 +493,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
     current_state.twist().linear() = target_v_in_base.linear();
     current_state.twist().angular() = target_v_in_base.angular();
   }
-  static_assert(trajectory_start_order_depth <= geometry::KinematicOrder::Twist,  // line break
+  static_assert(feedback_depth <= geometry::KinematicOrder::Twist,  // line break
                 "Starting a trajectory with higher continuity order than Twist is not yet supported");
   trajectory_buffer_.write().calculate_neutral(current_state);
   trajectory_buffer_.publish_write();
@@ -554,11 +555,12 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   const bool do_publications = (seconds > topics_pub_next_time_);
   const double problem_scale = motion_horizon_ / period.seconds();
 
-  update_state(false);
+  read_states();
+  update_state(1.0);
   current_time_buffer_.publish_write(time);  // update non-rt time
 
   // Get 6D-diff between current pose and target pose
-  trajectory_buffer_.update_read().evaluate<trajectory_eval_order_depth>(time, trajectory_eval_target_);
+  trajectory_buffer_.update_read().evaluate<command_depth>(time, trajectory_eval_target_);
   // trajectory_eval_target_.pose() is given relative to 'base_frame' (matching how targets are interpreted in
   // handle_target_msg_sub() and how the trajectory's neutral state was seeded in on_activate()); convert it directly
   // into the world-aligned target_frame_idx frame expected by the rest of this function: position relative to the
@@ -636,27 +638,32 @@ controller_interface::return_type CartesianPoseController::update([[maybe_unused
   return controller_interface::return_type::OK;
 }
 
-void CartesianPoseController::update_state(const bool use_hw_positions)
+void CartesianPoseController::read_states()
 {
-  static_assert(required_state_order_depth >= geometry::KinematicOrder::Twist,  // line break
-                "The controller requires at least Twist order state updates");
-  static_assert(state_order_depth >= required_state_order_depth);
   auto interface_iter = state_interfaces_.begin();
   for (const auto idx : joint_q_idx_) {
     state_q_[idx] = interface_iter->get_optional().value_or(state_q_[idx]);
     interface_iter++;
   }
-  for (const auto idx : joint_v_idx_) {
-    state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
-    interface_iter++;
-  }
-
-  if (use_hw_positions) {
-    control_q_ = state_q_;
+  if constexpr (feedback_depth >= geometry::KinematicOrder::Twist) {
+    for (const auto idx : joint_v_idx_) {
+      state_v_[idx] = interface_iter->get_optional().value_or(state_v_[idx]);
+      interface_iter++;
+    }
   } else {
-    state_q_ = control_q_;  // TODO(patrick): Bad workaround: the robot is not fast enough to follow the control, so the
-                            // control would follow the robot if real state updates would be used here!
+    state_v_ = control_v_;  // no twist feedback, so the ideal control velocity is used as the state velocity
   }
+  static_assert(feedback_depth <= geometry::KinematicOrder::Twist,  // line break
+                "The controller does not support higher than Twist order state updates");
+  assert(interface_iter == state_interfaces_.end() && "Not all state interfaces were read");
+}
+
+void CartesianPoseController::update_state(const double control_blend_in_factor)
+{
+  assert((control_blend_in_factor >= 0.0) && (control_blend_in_factor <= 1.0) &&
+         "control_blend_in_factor must be in [0,1]");
+  state_q_ += control_blend_in_factor * (control_q_ - state_q_);
+  state_v_ += control_blend_in_factor * (control_v_ - state_v_);
 
   // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
@@ -759,7 +766,7 @@ void CartesianPoseController::command_controls()
                   params_->joints[i].c_str());
     }
   }
-  if constexpr (trajectory_eval_order_depth >= geometry::KinematicOrder::Twist) {
+  if constexpr (command_depth >= geometry::KinematicOrder::Twist) {
     for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
       // set velocity
       if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
@@ -768,7 +775,7 @@ void CartesianPoseController::command_controls()
       }
     }
   }
-  static_assert(trajectory_eval_order_depth <= geometry::KinematicOrder::Twist,  // line break
+  static_assert(command_depth <= geometry::KinematicOrder::Twist,  // line break
                 "Control commands of higher derivative than Twist are not yet supported");
   assert(command_itr == command_interfaces_.end());
 }
