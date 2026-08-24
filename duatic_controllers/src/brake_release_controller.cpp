@@ -31,6 +31,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <unordered_set>
 
 #include <pinocchio/collision/collision.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
