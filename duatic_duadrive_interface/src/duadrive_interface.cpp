@@ -72,10 +72,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
     RCLCPP_FATAL_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path);
     return hardware_interface::CallbackReturn::FAILURE;
   }
-  drive_ = std::make_shared<duadrive_sdk::v1::DuaDrive>(duadrive_sdk::v1::RxPdoType::A, duadrive_sdk::v1::TxPdoType::E);
-
-  // And attach it to the ethercat master
-  ecat_bus_handle_.ecat_bus->attach_device(address, drive_->get_ethercat_device());
+  drive_ = std::make_shared<duadrive_sdk::v1::DuaDrive>(ecat_bus_handle_.ecat_bus->aquire_device(address),
+                                                        duadrive_sdk::v1::RxPdoType::A, duadrive_sdk::v1::TxPdoType::E);
 
   RCLCPP_INFO_STREAM(logger_, "Registered drive: " << joint_name << " at bus address: " << address);
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -107,8 +105,7 @@ void DuaDriveInterface::on_bus_startup_finished()
                                                        << "\n   Build date: " << info.build_date << "\n   Git tag: "
                                                        << info.git_tag << "\n   Git hash: " << info.git_hash
                                                        << "\n   Firmware version: " << fw_version);
-  const auto gains =
-      drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorque);
+  const auto gains = drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorque);
 
   command_.p_gain = gains.p;
   command_.i_gain = gains.i;
@@ -243,7 +240,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 
       drive_->stage_command(duadrive_sdk::v1::FreezeCommand());
     }
-    //Otherwise we have a pdo timeout
+    // Otherwise we have a pdo timeout
     drive_->set_fsm_goal_state(duadrive_sdk::v1::FSMState::Standby);
     drive_->sync_write();
   }
