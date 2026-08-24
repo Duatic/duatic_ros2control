@@ -72,7 +72,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
     RCLCPP_FATAL_STREAM(logger_, "No configuration found for joint: " << joint_name << " in: " << device_file_path);
     return hardware_interface::CallbackReturn::FAILURE;
   }
-  drive_ = std::make_shared<duadrive_sdk::v1::DuaDrive>(ecat_bus_handle_.ecat_bus->aquire_device(address),
+  drive_ = std::make_shared<duadrive_sdk::v1::DuaDrive>(ecat_bus_handle_.ecat_bus->acquire_device(address),
                                                         duadrive_sdk::v1::RxPdoType::A, duadrive_sdk::v1::TxPdoType::E);
 
   RCLCPP_INFO_STREAM(logger_, "Registered drive: " << joint_name << " at bus address: " << address);
