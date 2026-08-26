@@ -27,7 +27,11 @@
 
 namespace duatic::duadrive_interface
 {
-DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger) : DuaDriveInterfaceBase(logger)
+DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
+  : DuaDriveInterfaceBase(logger)
+  , min_velocity_(-default_abs_velocity_limit)
+  , max_velocity_(default_abs_velocity_limit)
+  , mock_acceleration_callback_([]() { return 0.0; })  // default: NO ACCELERATION
 {
 }
 
@@ -76,27 +80,53 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.joint_velocity_commanded = command_.joint_velocity;
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = command_.joint_torque;
+  state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
 
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
-    return hardware_interface::return_type::OK;
-  }
-
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::JointVelocity) {
-    // Especially support the joint velocity mode where we calculate the position from the last position and the
-    // velocity
-    state_.joint_velocity = command_.joint_velocity;
-    state_.joint_position += command_.joint_velocity * period.to_chrono<std::chrono::duration<float>>().count();
+  if (command_.joint_freeze_mode) {  // enforce freeze if commanded
+    state_.joint_velocity = 0.0;
+    state_.joint_acceleration = 0.0;
   } else {
-    state_.joint_torque = command_.joint_torque;
-    state_.joint_acceleration = command_.joint_acceleration;
-    state_.joint_velocity = command_.joint_velocity;
-    state_.joint_position = command_.joint_position;
+    const double dt = period.seconds();
+    switch (active_mode_) {
+      case rsl_drive_sdk::mode::ModeEnum::Freeze:
+        state_.joint_velocity = 0.0;
+        state_.joint_acceleration = 0.0;
+        break;
+      case rsl_drive_sdk::mode::ModeEnum::JointVelocity:
+        // Especially support the joint velocity mode where we calculate the position from the last position and the
+        // velocity
+        state_.joint_velocity = command_.joint_velocity;
+        state_.joint_position += command_.joint_velocity * dt;
+        break;
+      case rsl_drive_sdk::mode::ModeEnum::JointTorque:
+      {
+        state_.joint_velocity *=
+            0.999;  // just always remove a tiny little bit of energy from the system before integrating
+        // when there is no position/velocity commands given: integrate torque-induced acceleration
+        const double mock_acceleration = mock_acceleration_callback_();
+        state_.joint_position += ((0.5 * mock_acceleration * dt) + state_.joint_velocity) *
+                                 dt;  // 0.5 a t^2 + v t  <- using PREVIOUS velocity
+        state_.joint_velocity += mock_acceleration * dt;
+        state_.joint_acceleration = mock_acceleration;
+        state_.joint_torque = command_.joint_torque;
+      } break;
+      default:
+        state_.joint_torque = command_.joint_torque;
+        state_.joint_acceleration = command_.joint_acceleration;
+        state_.joint_velocity = command_.joint_velocity;
+        state_.joint_position = command_.joint_position;
+    }
+    // LIMIT MOCK SIMULATION
+    state_.joint_velocity = std::max(
+        min_velocity_, std::min(max_velocity_, state_.joint_velocity));  // limit velocity to some reasonable value to
+                                                                         // avoid numeric instabilities
   }
 
   return hardware_interface::return_type::OK;
 }
+
 void DuaDriveInterfaceMock::enforce_position(const double position)
 {
   state_.joint_position = position;
@@ -107,4 +137,11 @@ void DuaDriveInterfaceMock::enforce_position(const double position)
   state_.joint_velocity_commanded = 0;
   command_.joint_velocity = 0;
 }
+
+void DuaDriveInterfaceMock::limit_velocity(const double max_velocity, const double min_velocity)
+{
+  min_velocity_ = min_velocity;
+  max_velocity_ = max_velocity;
+}
+
 }  // namespace duatic::duadrive_interface
