@@ -91,7 +91,7 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
 
-  BuildInfo info = drive_->configuration_interface().read_firmware_build_info();
+  FirmwareInfo info = drive_->configuration_interface().read_firmware_build_info();
 
   std::string drive_model = drive_->configuration_interface().read_drive_model();
 
