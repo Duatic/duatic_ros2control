@@ -98,5 +98,10 @@ private:
   std::vector<double> joint_effort_;
 
   StatusMsg state_msg_;
+
+  // In case we allow runtime mass timing of the links
+  // Update the masses from the link parameters
+  bool applyLinkMassParameters();
+  bool loadPerLinkInertias();
 };
 }  // namespace duatic::controllers

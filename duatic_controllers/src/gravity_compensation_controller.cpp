@@ -24,6 +24,8 @@
 
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 
+#include <urdf_parser/urdf_parser.h>
+
 #include <duatic_controllers/gravity_compensation_controller.hpp>
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
@@ -34,6 +36,19 @@
 
 namespace duatic::controllers
 {
+
+static pinocchio::Inertia toPinocchioInertia(const ::urdf::Inertial& Y)
+{
+  const Eigen::Vector3d com(Y.origin.position.x, Y.origin.position.y, Y.origin.position.z);
+  const Eigen::Matrix3d R =
+      Eigen::Quaterniond(Y.origin.rotation.w, Y.origin.rotation.x, Y.origin.rotation.y, Y.origin.rotation.z).matrix();
+
+  Eigen::Matrix3d I;  // URDF gives the tensor in the inertial frame, Pinocchio wants it in the link frame
+  I << Y.ixx, Y.ixy, Y.ixz, Y.ixy, Y.iyy, Y.iyz, Y.ixz, Y.iyz, Y.izz;
+  const Eigen::Matrix3d I_link = R * I * R.transpose();
+
+  return pinocchio::Inertia(Y.mass, com, pinocchio::Symmetric3(I_link));
+}
 
 GravityCompensationController::GravityCompensationController() : controller_interface::ControllerInterface()
 {
@@ -110,6 +125,42 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
     return controller_interface::CallbackReturn::ERROR;
   }
 
+  // Optionally allow to tune link masses at runtime.
+  if (params_.enable_runtime_mass_tuning) {
+    // Pinocchio's URDF parser lumps the link inertias into the supporting joints and leaves Frame::inertia
+    // zero, so the per-link values have to be recovered from the URDF before anything can be tuned.
+    if (!loadPerLinkInertias()) {
+      return controller_interface::CallbackReturn::ERROR;
+    }
+
+    std::size_t tunable_count = 0;
+    for (const pinocchio::Frame& frame : pinocchio_model_.frames) {
+      // Only expose links that are actually moved by a joint. Everything rigidly attached to the world
+      // (parentJoint == 0) is lumped into inertias[0] and never affects the gravity torque.
+      if (frame.type != pinocchio::BODY || frame.parentJoint == 0) {
+        continue;
+      }
+      tunable_count++;
+
+      const std::string param_name = frame.name + ".mass";
+      if (!get_node()->has_parameter(param_name)) {
+        rcl_interfaces::msg::ParameterDescriptor desc;
+        desc.description = "Mass [kg] of link '" + frame.name +
+                           "'. Applied on controller activation: deactivate, set, activate. The rotational "
+                           "inertia is scaled by m_new/m_urdf, the CoM offset is kept.";
+        rcl_interfaces::msg::FloatingPointRange range;
+        range.from_value = 0.0;
+        range.to_value = 1.0e4;
+        desc.floating_point_range.push_back(range);
+        get_node()->declare_parameter(param_name, frame.inertia.mass(), desc);
+      }
+    }
+
+    RCLCPP_INFO(get_node()->get_logger(),
+                "Runtime mass tuning enabled for %zu links, %.4f kg of moving mass (%.4f kg is world-fixed and "
+                "not exposed). Values are applied on activation.",
+                tunable_count, pinocchio::computeTotalMass(pinocchio_model_), pinocchio_model_.inertias[0].mass());
+  }
   // (Re)Build full-size vectors for all robot joints (Pinocchio expects this)
   q_ = Eigen::VectorXd::Zero(pinocchio_model_.nq);
   v_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
@@ -168,6 +219,9 @@ GravityCompensationController::on_cleanup([[maybe_unused]] const rclcpp_lifecycl
 controller_interface::CallbackReturn
 GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
+  if (params_.enable_runtime_mass_tuning && !applyLinkMassParameters()) {
+    return controller_interface::CallbackReturn::ERROR;
+  }
   // clear out vectors in case of restart
   joint_effort_command_interfaces_.clear();
   joint_position_state_interfaces_.clear();
@@ -306,6 +360,93 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   }
 
   return controller_interface::return_type::OK;
+}
+
+bool GravityCompensationController::applyLinkMassParameters()
+{
+  // Pass 1: pull the parameters into the per-link (frame) inertias.
+  for (pinocchio::Frame& frame : pinocchio_model_.frames) {
+    if (frame.type != pinocchio::BODY || frame.parentJoint == 0) {
+      continue;
+    }
+    const double m_new = get_node()->get_parameter(frame.name + ".mass").as_double();
+    if (!std::isfinite(m_new) || m_new < 0.0) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Invalid mass %f for link '%s'.", m_new, frame.name.c_str());
+      return false;
+    }
+
+    const pinocchio::Inertia Y = frame.inertia;  // copy: we assign to frame.inertia below
+    if (m_new == Y.mass()) {
+      continue;
+    }
+    if (Y.mass() > 0.0) {
+      // Same geometry, scaled density: keep the lever arm, scale the rotational part linearly.
+      const Eigen::Matrix3d inertia_scaled = Y.inertia().matrix() * (m_new / Y.mass());
+      frame.inertia = pinocchio::Inertia(m_new, Y.lever(), pinocchio::Symmetric3(inertia_scaled));
+    } else {
+      // Massless in the URDF -> no geometry to scale, treat as a point mass at the frame origin.
+      frame.inertia = pinocchio::Inertia(m_new, Eigen::Vector3d::Zero(), pinocchio::Symmetric3::Zero());
+    }
+  }
+
+  // Pass 2: re-accumulate the lumped joint inertias (Pinocchio merges all fixed-joint-connected
+  // bodies into their supporting joint, so this cannot be done in pass 1).
+  for (auto& Y : pinocchio_model_.inertias) {
+    Y.setZero();
+  }
+  for (const pinocchio::Frame& frame : pinocchio_model_.frames) {
+    if (frame.type == pinocchio::BODY) {
+      pinocchio_model_.inertias[frame.parentJoint] += frame.placement.act(frame.inertia);
+    }
+  }
+
+  pinocchio_data_ = pinocchio::Data(pinocchio_model_);
+  RCLCPP_INFO(get_node()->get_logger(), "Applied link masses, total mass: %.4f kg",
+              pinocchio::computeTotalMass(pinocchio_model_));
+  return true;
+}
+
+bool GravityCompensationController::loadPerLinkInertias()
+{
+  // Pinocchio's URDF parser lumps each link inertia into its supporting joint (model.inertias) and leaves
+  // Frame::inertia zero, so the per-link values have to be read from the URDF a second time.
+  const ::urdf::ModelInterfaceSharedPtr urdf = ::urdf::parseURDF(get_robot_description());
+  if (!urdf) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to parse the robot description with urdfdom.");
+    return false;
+  }
+
+  for (pinocchio::Frame& frame : pinocchio_model_.frames) {
+    if (frame.type != pinocchio::BODY) {
+      continue;
+    }
+    const ::urdf::LinkConstSharedPtr link = urdf->getLink(frame.name);
+    if (!link) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Body frame '%s' has no matching URDF link.", frame.name.c_str());
+      return false;
+    }
+    frame.inertia = link->inertial ? toPinocchioInertia(*link->inertial) : pinocchio::Inertia::Zero();
+  }
+
+  // Verify the reconstruction: re-accumulating the frames must reproduce what the parser built.
+  // This is the same operation applyLinkMassParameters() performs, so if it holds here it holds there.
+  std::vector<pinocchio::Inertia, Eigen::aligned_allocator<pinocchio::Inertia>> accumulated(pinocchio_model_.njoints,
+                                                                                            pinocchio::Inertia::Zero());
+  for (const pinocchio::Frame& frame : pinocchio_model_.frames) {
+    if (frame.type == pinocchio::BODY) {
+      accumulated[frame.parentJoint] += frame.placement.act(frame.inertia);
+    }
+  }
+  for (pinocchio::JointIndex j = 0; j < static_cast<pinocchio::JointIndex>(pinocchio_model_.njoints); j++) {
+    if (!accumulated[j].isApprox(pinocchio_model_.inertias[j], 1e-9)) {
+      RCLCPP_ERROR(get_node()->get_logger(),
+                   "Per-link inertia reconstruction mismatch at joint '%s' (%.6f kg vs %.6f kg). Runtime mass "
+                   "tuning would corrupt the model.",
+                   pinocchio_model_.names[j].c_str(), accumulated[j].mass(), pinocchio_model_.inertias[j].mass());
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace duatic::controllers
