@@ -63,6 +63,8 @@ struct DuaDriveInterfaceInfo
 struct DuaDriveInterfaceState
 {
   // This is the current state read from the drive
+  double internal_timestamp{};
+  double internal_update_rate{};
   double joint_position{};
   double joint_velocity{};
   double joint_acceleration{};

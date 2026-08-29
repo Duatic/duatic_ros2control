@@ -90,5 +90,6 @@ public:
   void enforce_position(const double position);
 
 private:
+  std::chrono::system_clock::time_point last_update_time_;
 };
 }  // namespace duatic::duadrive_interface

@@ -95,6 +95,8 @@ private:
   StateInterfaceReferences joint_temperature_phase_b_interfaces_;
   StateInterfaceReferences joint_temperature_phase_c_interfaces_;
   StateInterfaceReferences joint_bus_voltage_interfaces_;
+  StateInterfaceReferences actuator_internal_timestamp_interfaces_;
+  StateInterfaceReferences actuator_internal_update_rate_interfaces_;
 
   StateInterfaceReferences joint_current_d_interfaces_;
   StateInterfaceReferences joint_current_q_interfaces_;

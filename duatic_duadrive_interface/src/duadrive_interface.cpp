@@ -284,6 +284,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   last_reading_update_ = state.getStamp();
 
   // Now update the state vector
+  state_.internal_update_rate = (state.getTimestamp() * 40.0 - state_.internal_timestamp);
+  state_.internal_timestamp = state.getTimestamp() * 40.0;
   state_.joint_position = state.getJointPosition();
   state_.joint_velocity = state.getJointVelocity();
   state_.joint_acceleration = state.getJointAcceleration();
