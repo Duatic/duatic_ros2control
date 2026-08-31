@@ -534,7 +534,7 @@ void CartesianPoseController::handle_target_msg_sub(const trajectory_target_msg_
   if (msg->header.frame_id.empty() || (msg->header.frame_id == params_->base_frame)) {
     // Update the new trajectory outside the realtime-loop
     trajectory_target_type target_goal{};
-    duatic_geometry_msgs::decode(*msg, target_goal);
+    duatic::data_encoding::decode(*msg, target_goal);
     trajectory_buffer_.write().update_from(trajectory_buffer_.read(), current_time_buffer_.update_read(), target_goal);
     assert(current_time_buffer_.read().get_clock_type() == Self::rcl_time_source);
     trajectory_buffer_.publish_write();
@@ -858,7 +858,7 @@ void CartesianPoseController::publish_topics()
     target_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
     target_pose_pub_realtime_->msg_.header.frame_id = params_->base_frame;
     const geometry::Pose3Dd current_target_pose(base_to_target.translation(), base_to_target.rotation());
-    duatic_geometry_msgs::encode(current_target_pose, target_pose_pub_realtime_->msg_.pose);
+    duatic::data_encoding::encode(current_target_pose, target_pose_pub_realtime_->msg_.pose);
     target_pose_pub_realtime_->unlockAndPublish();
   }
   // Publish Twist
@@ -870,7 +870,7 @@ void CartesianPoseController::publish_topics()
     target_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
     target_twist_pub_realtime_->msg_.header.frame_id = params_->base_frame;
     const geometry::Twist3Dd current_target_twist(target_v_in_base.linear(), target_v_in_base.angular());
-    duatic_geometry_msgs::encode(current_target_twist, target_twist_pub_realtime_->msg_.twist);
+    duatic::data_encoding::encode(current_target_twist, target_twist_pub_realtime_->msg_.twist);
     target_twist_pub_realtime_->unlockAndPublish();
   }
 
@@ -884,7 +884,7 @@ void CartesianPoseController::publish_topics()
       observed_frame_pose_pub_realtime_[i]->msg_.header.stamp = get_node()->now();
       observed_frame_pose_pub_realtime_[i]->msg_.header.frame_id = params_->base_frame;
       const geometry::Pose3Dd current_observed_pose(base_to_frame.translation(), base_to_frame.rotation());
-      duatic_geometry_msgs::encode(current_observed_pose, observed_frame_pose_pub_realtime_[i]->msg_.pose);
+      duatic::data_encoding::encode(current_observed_pose, observed_frame_pose_pub_realtime_[i]->msg_.pose);
       observed_frame_pose_pub_realtime_[i]->unlockAndPublish();
     }
     if (observed_frame_twist_pub_realtime_[i]->trylock()) {
@@ -894,7 +894,7 @@ void CartesianPoseController::publish_topics()
       observed_frame_twist_pub_realtime_[i]->msg_.header.stamp = get_node()->now();
       observed_frame_twist_pub_realtime_[i]->msg_.header.frame_id = params_->base_frame;
       const geometry::Twist3Dd current_observed_twist(observed_v_in_base.linear(), observed_v_in_base.angular());
-      duatic_geometry_msgs::encode(current_observed_twist, observed_frame_twist_pub_realtime_[i]->msg_.twist);
+      duatic::data_encoding::encode(current_observed_twist, observed_frame_twist_pub_realtime_[i]->msg_.twist);
       observed_frame_twist_pub_realtime_[i]->unlockAndPublish();
     }
   }

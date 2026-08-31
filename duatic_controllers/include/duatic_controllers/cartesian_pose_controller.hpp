@@ -59,7 +59,7 @@
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 #include <duatic_controllers/interface_utils.hpp>
 #include <duatic_geometry/geometry.hpp>
-#include <duatic_geometry_msgs/duatic_geometry_msgs.hpp>
+#include <duatic_geometry_encoder/duatic_geometry_encoder.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <duatic_trajectory/trajectory.hpp>
 
@@ -114,7 +114,7 @@ public:
   using trajectory_settings_type = typename trajectory_type::KinematicTrajectorySettingsType;
 
   using trajectory_target_type = typename trajectory_type::TrajectoryDescriptionType;
-  using trajectory_target_msg_type = duatic_geometry_msgs::msg_stamped_t<trajectory_target_type>;
+  using trajectory_target_msg_type = duatic::data_encoding::msg_stamped_t<trajectory_target_type>;
 
   using trajectory_update_state_type = typename trajectory_type::UpdateStateType;
 
