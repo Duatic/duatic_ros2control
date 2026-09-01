@@ -34,18 +34,33 @@
 namespace duatic::duadrive_interface::kinematics
 {
 template <typename T>
-concept CoupledSerialMapping = requires(const Eigen::VectorXd& v) {
+concept CoupledSerialMapping = requires(const Eigen::VectorXd& v)
+{
   // Static functions returning the specified vector type
-  { T::map_from_coupled_to_serial_coordinates(v) } -> std::same_as<Eigen::VectorXd>;
-  { T::map_from_coupled_to_serial_torques(v) } -> std::same_as<Eigen::VectorXd>;
-  { T::map_from_serial_to_coupled_coordinates(v) } -> std::same_as<Eigen::VectorXd>;
-  { T::map_from_serial_to_coupled_torques(v) } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_coupled_to_serial_coordinates(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_coupled_to_serial_torques(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_serial_to_coupled_coordinates(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_serial_to_coupled_torques(v)
+    } -> std::same_as<Eigen::VectorXd>;
 
   // Limit magnitudes use the element-wise absolute value of the mappings above
-  { T::map_from_serial_to_coupled_coordinate_limits(v) } -> std::same_as<Eigen::VectorXd>;
-  { T::map_from_serial_to_coupled_torque_limits(v) } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_serial_to_coupled_coordinate_limits(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_serial_to_coupled_torque_limits(v)
+    } -> std::same_as<Eigen::VectorXd>;
   // Static constexpr size function
-  { T::input_size() } -> std::convertible_to<std::size_t>;
+  {
+    T::input_size()
+    } -> std::convertible_to<std::size_t>;
   typename std::integral_constant<std::size_t, T::input_size()>;
 };
 
