@@ -83,6 +83,11 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
     return hardware_interface::return_type::OK;
   }
 
+  // Try to achieve similar error handling behavior as on the real time (aka freeze + error) (in our case -> abort)
+  if (std::abs(command_.joint_velocity) > params_.maximum_joint_velocity * velocity_range_extension_factor) {
+    throw std::runtime_error("Maximum velocity exceeded on joint: " + get_name());
+  }
+
   if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::JointVelocity) {
     // Especially support the joint velocity mode where we calculate the position from the last position and the
     // velocity

@@ -60,10 +60,24 @@ struct InvariantKinematicsMapping
     return in;
   }
 
+  static VectorType map_from_serial_to_coupled_coordinate_limits(const VectorType& in)
+  {
+    return in;
+  }
+
+  static VectorType map_from_serial_to_coupled_torque_limits(const VectorType& in)
+  {
+    return in;
+  }
+
   static constexpr std::size_t input_size()
   {
     return expected_input_size;
   }
 };
+
+// c-time evaluation of interface
+static_assert(duatic::duadrive_interface::kinematics::CoupledSerialMapping<InvariantKinematicsMapping<1>>);  // drive
+static_assert(duatic::duadrive_interface::kinematics::CoupledSerialMapping<InvariantKinematicsMapping<4>>);  // rover
 
 }  // namespace duatic::duadrive_interface::kinematics
