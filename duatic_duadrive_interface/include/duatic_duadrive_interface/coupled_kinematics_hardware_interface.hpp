@@ -321,10 +321,9 @@ public:
       drive_parameters[i].maximum_joint_velocity = coupled_limits[i].velocity;
       drive_parameters[i].maximum_joint_effort = coupled_limits[i].torque;
 
-      RCLCPP_INFO_STREAM(logger_, "Coupled limits for "
-                                      << drive_parameters[i].joint_name << ": max joint velocity: "
-                                      << drive_parameters[i].maximum_joint_velocity << "rad/s"
-                                      << " max joint effort: " << drive_parameters[i].maximum_joint_effort << "Nm");
+      RCLCPP_INFO_STREAM(logger_, "Coupled limits for " << drive_parameters[i].joint_name << ":");
+      RCLCPP_INFO_STREAM(logger_, " - max joint velocity: " << drive_parameters[i].maximum_joint_velocity << " rad/s");
+      RCLCPP_INFO_STREAM(logger_, " - max joint effort  : " << drive_parameters[i].maximum_joint_effort << " Nm");
 
       drives_[i]->init(drive_parameters[i]);
       current_active_drive_modes_.insert({ drives_[i]->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });

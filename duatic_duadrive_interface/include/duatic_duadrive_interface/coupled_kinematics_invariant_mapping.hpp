@@ -76,4 +76,8 @@ struct InvariantKinematicsMapping
   }
 };
 
+// c-time evaluation of interface
+static_assert(duatic::duadrive_interface::kinematics::CoupledSerialMapping<InvariantKinematicsMapping<1>>);  // drive
+static_assert(duatic::duadrive_interface::kinematics::CoupledSerialMapping<InvariantKinematicsMapping<4>>);  // rover
+
 }  // namespace duatic::duadrive_interface::kinematics
