@@ -10,11 +10,14 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(duatic_controller_msgs REQUIRED)
+find_package(duatic_concurrency REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(pinocchio REQUIRED)
+find_package(proxsuite REQUIRED)
 # Generate code from parameter description yaml files
 generate_parameter_library(
     duadrive_status_broadcaster_parameters
@@ -92,6 +95,7 @@ target_link_libraries(${PROJECT_NAME}
     freeze_controller_parameters
     brake_release_controller_parameters
     pinocchio::pinocchio
+    proxsuite::proxsuite
 )
 
 # Support ros distros older than lyrical
@@ -103,9 +107,12 @@ if(COMMAND ament_target_dependencies)
       rclcpp_lifecycle
       realtime_tools
       duatic_controller_msgs
+      duatic_concurrency
+      geometry_msgs
       std_srvs
       Eigen3
       pinocchio
+      proxsuite
     )
 else()
     target_link_libraries(${PROJECT_NAME}
@@ -115,9 +122,12 @@ else()
       rclcpp_lifecycle::rclcpp_lifecycle
       realtime_tools::realtime_tools
       duatic_controller_msgs::duatic_controller_msgs
+      duatic_concurrency::duatic_concurrency
+      geometry_msgs::geometry_msgs
       std_srvs::std_srvs
       Eigen3::Eigen
       pinocchio::pinocchio
+      proxsuite::proxsuite
     )
 endif()
 

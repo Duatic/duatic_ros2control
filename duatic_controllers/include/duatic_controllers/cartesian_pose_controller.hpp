@@ -26,132 +26,139 @@
 
 // C++ system headers
 #include <string>
-#include <unordered_map>
 #include <vector>
-#include <memory>
-#include <algorithm>
 
 // Pinocchio
 #include <Eigen/Dense>  // NOLINT(build/include_order)
-#include <pinocchio/algorithm/compute-all-terms.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/parsers/srdf.hpp>
-#include "pinocchio/algorithm/joint-configuration.hpp"
-#include "pinocchio/algorithm/geometry.hpp"
+
+// Optimization
+#include <proxsuite/proxqp/dense/dense.hpp>
 
 // Other headers
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
-#include <trajectory_msgs/msg/joint_trajectory.hpp>
-#include "controller_interface/chainable_controller_interface.hpp"
 
 // ROS2
+#include <rclcpp/time.hpp>
 #include <realtime_tools/realtime_publisher.hpp>
-#include <realtime_tools/realtime_buffer.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
+#include <duatic_concurrency/unidirectional_buffer.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
-#include <duatic_controllers/interface_utils.hpp>
 
 namespace duatic::controllers
 {
+
 class CartesianPoseController : public controller_interface::ControllerInterface
 {
 public:
-  struct PinocchioState
-  {
-    Eigen::VectorXd q;
-    Eigen::VectorXd v;
-    Eigen::VectorXd a;
-  };
-  struct IKResult
-  {
-    Eigen::VectorXd q_out;
-  };
+  using Self = CartesianPoseController;
 
-  struct StagingState
-  {
-    rclcpp::Time time_of_staging;
-    PinocchioState system_state_of_staging;
-    IKResult target;
-  };
+  // ros2_control's controller_manager calls update(time, period) with 'time' on RCL_ROS_TIME (verified
+  // via the clock-type mismatch this constant guards against; see the assert in update()).
+  static constexpr rcl_clock_type_t rcl_time_source = RCL_ROS_TIME;
 
-  CartesianPoseController();
+  // lower bound for dt and a general numeric tolerance for the QP box constraints, see update()/run_pose_diff_ik()
+  static constexpr double numeric_epsilon = 1.0e-6;
+  static_assert(numeric_epsilon > 0.0, "numeric_epsilon must be real positive");
+
+  inline CartesianPoseController()
+    : controller_interface::ControllerInterface(), params_(std::make_shared<cartesian_pose_controller::Params>())
+  {
+  }
+
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_error(const rclcpp_lifecycle::State& previous_state) override;
-  controller_interface::CallbackReturn on_shutdown(const rclcpp_lifecycle::State& previous_state) override;
+  controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
 
-protected:
 private:
-  // Access to controller parameters via generate_parameter_library
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
-  cartesian_pose_controller::Params params_;
+  std::shared_ptr<cartesian_pose_controller::Params> params_;
 
-  pinocchio::Model pinocchio_model_;
-  pinocchio::Data pinocchio_data_;
-  pinocchio::GeometryModel pinocchio_geom_;
+  double linear_error_weight_;  // derived from params_ at on_configure, see there
 
-  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
+  pinocchio::Model robot_model_;
+  std::vector<Eigen::Index> joint_q_idx_;
+  std::vector<Eigen::Index> joint_v_idx_;
+  pinocchio::FrameIndex base_frame_idx_;  // frame all published poses/twists are expressed relative to
+  pinocchio::FrameIndex target_frame_idx_;
 
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
-  std::atomic_bool active_{ false };
+  pinocchio::Data state_data_;
+  Eigen::VectorXd state_q_;
+  Eigen::VectorXd state_v_;
 
-  std::shared_ptr<rclcpp::Subscription<geometry_msgs::msg::PoseStamped>> pose_cmd_sub_;
-  realtime_tools::RealtimeBuffer<PinocchioState> buffer_target_cmd_;
-  // Mapping between -> ros2control index and pinnochio index
-  std::vector<pinocchio::JointIndex> joint_indices_;
-  pinocchio::FrameIndex endeffector_frame_id_;
-  pinocchio::FrameIndex base_frame_id_;
+  Eigen::VectorXd control_q_;
+  Eigen::VectorXd control_v_;
 
-  std::optional<PinocchioState> last_system_state_;
-  std::optional<StagingState> staged_target_;
+  // input topic subscription
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_msg_sub_;
 
-  std::optional<PinocchioState> build_current_state();
-  std::optional<IKResult> run_ik(const geometry_msgs::msg::PoseStamped& msg);
-  std::optional<pinocchio::SE3> get_current_ee_pose();
-  std::optional<IKResult> compute_ik(const pinocchio::Model& model, pinocchio::Data& data,
-                                     const pinocchio::SE3& target_pose,
-                                     const pinocchio::FrameIndex target_pose_frame_id, const Eigen::VectorXd& q_in,
-                                     rclcpp::Logger logger);
+  // lock-free RT-NonRT unidirectional data exchange buffer holding the latest received target pose
+  duatic::concurrency::UnidirectionalBuffer<geometry_msgs::msg::PoseStamped> target_buffer_;
 
-  /**
-   * @brief stage a new target which is eventually commanded and store its time of staging for
+  /* Quadratic programming solver
+   *   min_x 1/2 x^T H x + x^T g
+       s.t.  l_box <= x <= u_box
+   *
+   * H = 1 + J^T * J  (dense, recomputed every cycle; the '1' from ik_damping)
+   * g = -J^T * pose_diff
+   * with x = theta, the (problem_scale-scaled) joint displacement solution
    */
-  void stage_new_target(const IKResult& new_target)
-  {
-    if (!last_system_state_) {
-      RCLCPP_FATAL_STREAM(get_node()->get_logger(), "Cannot stage new target as there is currently no system state "
-                                                    "available");
-      return;
-    }
+  std::unique_ptr<proxsuite::proxqp::dense::QP<double>> qp_solver_;  // initialized with dimensions in the contrustor
+  Eigen::MatrixXd qp_solver_H_;                                      // I + w * J^T * J (dense, recomputed every cycle)
+  Eigen::VectorXd qp_solver_g_;                                      // -w * J^T * pose_diff (linear cost term)
+  Eigen::VectorXd qp_solver_l_box_;                                  // lower box bounds
+  Eigen::VectorXd qp_solver_u_box_;                                  // upper box bounds
+  Eigen::VectorXd joint_velocity_box_;                               // theta bound from joint velocity limits
+  Eigen::VectorXd pose_diff_ik_result_;                              // solution vector
+  Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // Jacobian memory space
 
-    staged_target_ = StagingState{ .time_of_staging = get_node()->now(),
-                                   .system_state_of_staging = last_system_state_.value(),
-                                   .target = new_target };
+  // state publication topics
+  double topics_pub_period_;
+  double topics_pub_next_time_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr target_pose_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::PoseStamped>::UniquePtr target_pose_pub_realtime_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr target_twist_pub_;
+  realtime_tools::RealtimePublisher<geometry_msgs::msg::TwistStamped>::UniquePtr target_twist_pub_realtime_;
+
+  void handle_target_msg_sub(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+
+  void read_states(const double velocity_feedback_weight);
+
+  void update_state();
+
+  bool run_pose_diff_ik(const double problem_scale, const Eigen::Vector3d& target_diff_linear,
+                        const Eigen::Vector3d& target_diff_angular, const bool verbose = false);
+
+  void command_controls();
+
+  void log_statistics(const pinocchio::Motion& target_v) const;
+
+  void publish_topics();
+
+  inline const pinocchio::SE3& target_pose() const
+  {  // for convenience
+    return state_data_.oMf[target_frame_idx_];
+  }
+
+  template <typename Vector>
+  inline static void scale_limit(Vector&& v, const double limit)
+  {
+    assert(limit > 0.0);
+    const double limit_sq = limit * limit;
+    const double scale = std::sqrt(limit_sq / std::fmax(limit_sq, v.squaredNorm()));
+    assert((0.0 <= scale) && (scale <= 1.0));
+    v *= scale;
   }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const CartesianPoseController::PinocchioState& s)
-{
-  os << "{\n";
-  os << "  q: " << s.q.transpose() << "\n";
-  os << "  v: " << s.v.transpose() << "\n";
-  os << "  a: " << s.a.transpose() << "\n";
-  os << "}";
-  return os;
-}
 }  // namespace duatic::controllers

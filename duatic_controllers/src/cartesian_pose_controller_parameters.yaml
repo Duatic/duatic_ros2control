@@ -5,33 +5,109 @@ cartesian_pose_controller:
     description: Names of joints used by the controller
     validation:
       unique<>: null
-  command_interfaces:
-    {
-      type: string_array,
-      description: "Specifies which command interfaces the controller will claim.",
-      read_only: true
-    }
-  enable_state_topic:
-    type: bool
-    default_value: true
-    description: "Publish a status message on the ~/state topic"
-
-  srdf:
-    type: string
-    default_value: ""
-    description: "The full srdf"
-
-  end_effector_frame:
-    type: string
-    default_value: "flange"
-    description: "Name of the end_effector_frame"
   base_frame:
     type: string
-    default_value: "base"
+    default_value: "base_link"
     description: "Name of the base frame"
-  interpolation_time:
+  target_frame:
+    type: string
+    default_value: "flange"
+    description: "Name of the end effector frame to be controlled."
+  
+  topic_prefix:
+    type: string
+    default_value: ""
+    description: "Prefix to all topics. If empty, the controller name is used."
+  target_topic_suffix:
+    type: string
+    default_value: "target"
+    description: "Suffix added to the target frame topic for receiving control inputs."
+  topic_pub_frequency:
+    type: double
+    default_value: 10.0
+    description: "Frequency of the published end_effector_pose and end_effector_twist topics. Zero disables publishing."
+    validation:
+      bounds<>: [0.0,1000.0]
+
+  velocity_feedback:
+    type: double
+    default_value: 1.0
+    description: "Filter weight for the robot velocity feedback. Assign 0 to entirely disable joint velocity feedback."
+    validation:
+      bounds<>: [0.0, 1.0]
+  command_velocities:
+    type: bool
+    default_value: true
+    description: "If true, also claims and commands the joints' velocity interface, in addition to position."
+
+  limits:
+    velocity:
+      linear:
+        type: double
+        default_value: 1.0
+        description: "Maximum velocity [m/s] for linear, Cartesian motions. Set zero to disable linear motion."
+        validation:
+          bounds<>: [0.0, 10.0]
+      angular:
+        type: double
+        default_value: 6.283
+        description: "Maximum velocity [rad/s] for rotational motions. Set zero to disable rotational motion."
+        validation:
+          bounds<>: [0.0, 62.83]
+    acceleration:
+      linear:
+        type: double
+        default_value: 1.0
+        description: "Maximum acceleration [m/s^2] for linear, Cartesian motions. Set zero to disable linear motion."
+        validation:
+          bounds<>: [0.0, 100.0]
+      angular:
+        type: double
+        default_value: 6.283
+        description: "Maximum acceleration [rad/s^2] for rotational motions. Set zero to disable rotational motion."
+        validation:
+          bounds<>: [0.0, 628.3]
+
+  motion_horizon:
     type: double
     default_value: 0.1
-    description: "Interpolation time between joint target commands"
+    description: "Time horizon in seconds used to scale the IK QP's joint displacement variable for numerical conditioning. Does not affect the commanded motion."
     validation:
-      bounds<>: [0.0,2.0]
+      bounds<>: [0.001, 1.0]
+  ik_damping:
+    type: double
+    default_value: 0.01
+    description: "Weight to dampen all joint motions and stabilize the IK solution."
+    validation:
+      bounds<>: [0.000001, 1.0]
+  ik_meter_to_revolution_error_correlation:
+    type: double
+    default_value: 25.0
+    description: "Correlation between linear (one meter) and angular (one revolution) errors in the IK solver."
+    validation:
+      bounds<>: [1.0, 100.0]
+  ik_precision:
+    type: double
+    default_value: 0.0001
+    description: "Precision of the inverse kinematics solver."
+    validation:
+      bounds<>: [0.000001, 0.1]
+  ik_max_iterations:
+    type: int
+    default_value: 10
+    description: "Maximum number of iterations for the inverse kinematics solver."
+    validation:
+      bounds<>: [3, 30]
+  
+  enable_introspection:
+    type: bool
+    default_value: false
+    description: "If true, enables ros2control introspection for internal state monitoring."
+  enable_debug_log:
+    type: bool
+    default_value: false
+    description: "If true, enables debug logging for the entire controller. This will flood your console!"
+  dry_run:
+    type: bool
+    default_value: false
+    description: "If true, the controller will not send commands to the robot."
