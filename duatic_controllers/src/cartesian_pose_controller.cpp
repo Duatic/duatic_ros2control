@@ -244,13 +244,16 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_u_box_ = Eigen::VectorXd::Constant(qp_solver_->model.dim, 1e10);
   pose_diff_ik_result_ = Eigen::VectorXd::Zero(robot_model_.nv);
   // velocity as displacement limit: limit * dt * (scale := motion_horizon / dt) = limit * motion_horizon = const
-  joint_velocity_box_ = robot_model_.velocityLimit * params_->motion_horizon;
+  joint_velocity_box_ = Eigen::VectorXd::Zero(robot_model_.nv);
   for (std::size_t i = 0; i < params_->joints.size(); i++) {
-    if (robot_model_.velocityLimit[joint_v_idx_[i]] <= 0.0) {
-      joint_velocity_box_[joint_v_idx_[i]] = 1.0 / numeric_epsilon;
-      RCLCPP_WARN(get_node()->get_logger(),
-                  "Joint '%s' has no velocity limit in the URDF (parsed as 0); setting its displacement bound to "
-                  "%.2e instead of locking it.",
+    const double velocity_limit = robot_model_.velocityLimit[joint_v_idx_[i]];
+    if (velocity_limit > 0.0) {
+      joint_velocity_box_[joint_v_idx_[i]] = velocity_limit * params_->motion_horizon;
+      RCLCPP_INFO(get_node()->get_logger(), "Setting joint velocity limit for '%s' to %.2f rad/s.",
+                  params_->joints[i].c_str(), velocity_limit);
+    } else {
+      joint_velocity_box_[joint_v_idx_[i]] = params_->motion_horizon / numeric_epsilon;
+      RCLCPP_WARN(get_node()->get_logger(), "No valid velocity limit found for Joint '%s': defaulting to %.2f rad/s.",
                   params_->joints[i].c_str(), joint_velocity_box_[joint_v_idx_[i]]);
     }
   }
