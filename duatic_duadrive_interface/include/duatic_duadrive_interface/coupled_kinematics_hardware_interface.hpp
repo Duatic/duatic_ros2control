@@ -344,6 +344,9 @@ public:
 
   hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override
   {
+    // Capture previous error state to avoid spamming logs inside loop below
+    const bool prev_error_active = error_active_;
+
     // TODO(firesurfer) - replace with std::views::zip (or own implementation) when available
     for (std::size_t i = 0; i < drives_.size(); i++) {
       auto& drive = drives_[i];
@@ -369,13 +372,15 @@ public:
       // Error handling section
       if (latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Error ||
           latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Fatal) {
-        RCLCPP_ERROR_STREAM_ONCE(logger_,
-                                 "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
+        RCLCPP_ERROR_STREAM_EXPRESSION(logger_, !prev_error_active,
+                                       "Drive: " << drive->get_name()
+                                                 << " is in error/fatal state. Freezing the system");
         error_active_ = true;
       }
       if (drive->communication_has_timeout()) {
-        RCLCPP_ERROR_STREAM_ONCE(logger_, "Drive: " << drive->get_name()
-                                                    << " reports a communication timeout. Freezing the system");
+        RCLCPP_ERROR_STREAM_EXPRESSION(logger_, !prev_error_active,
+                                       "Drive: " << drive->get_name()
+                                                 << " reports a communication timeout. Freezing the system");
         error_active_ = true;
       }
     }
