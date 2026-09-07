@@ -29,6 +29,12 @@ cartesian_pose_controller:
     validation:
       bounds<>: [0.0,1000.0]
 
+  target_filter:
+    type: double
+    default_value: 0.1
+    description: "Exponential Target Filter: Time constant [s]"
+    validation:
+      bounds<>: [0.0, 10.0]
   velocity_feedback:
     type: double
     default_value: 0.001

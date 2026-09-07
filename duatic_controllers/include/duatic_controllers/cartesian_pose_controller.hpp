@@ -26,6 +26,7 @@
 
 // C++ system headers
 #include <string>
+#include <tuple>
 #include <vector>
 
 // Pinocchio
@@ -83,10 +84,14 @@ public:
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
 
 private:
+  // parsed target pose: linear position and angular orientation, decoupled from the wire message format
+  using target_type = std::tuple<Eigen::Vector3d, Eigen::Quaterniond>;
+
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
   std::shared_ptr<cartesian_pose_controller::Params> params_;
 
   double linear_error_weight_;  // derived from params_ at on_configure, see there
+  double target_filter_rate_;   // -1.0 / target_filter; floored
 
   pinocchio::Model robot_model_;
   std::vector<Eigen::Index> joint_q_idx_;
@@ -107,7 +112,8 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_msg_sub_;
 
   // lock-free RT-NonRT unidirectional data exchange buffer holding the latest received target pose
-  duatic::concurrency::UnidirectionalBuffer<geometry_msgs::msg::PoseStamped> target_buffer_;
+  duatic::concurrency::UnidirectionalBuffer<target_type> target_buffer_;
+  target_type control_target_;  // filtered target
 
   /* Quadratic programming solver
    *   min_x 1/2 x^T H x + x^T g

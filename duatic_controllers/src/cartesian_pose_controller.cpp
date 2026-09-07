@@ -168,6 +168,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   linear_error_weight_ = params_->ik_meter_to_revolution_error_correlation * (2.0 * std::numbers::pi);
   RCLCPP_INFO(get_node()->get_logger(), "Linear error weight: %.2f", linear_error_weight_);
 
+  target_filter_rate_ = -1.0 / std::fmax(params_->target_filter, numeric_epsilon);
+  RCLCPP_INFO(get_node()->get_logger(), "Target filter rate: %.6f", target_filter_rate_);
+
   // build model joint caches
   joint_q_idx_.clear();
   joint_q_idx_.reserve(params_->joints.size());
@@ -400,11 +403,12 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
 
   // Seed the target buffer with the current pose, so a cycle running before the first target message arrives
   // does not command a jump towards frame-origin/identity.
-  geometry_msgs::msg::PoseStamped initial_target;
-  initial_target.header.frame_id = params_->base_frame;
   const pinocchio::SE3 base_to_target = state_data_.oMf[base_frame_idx_].actInv(target_pose());
-  assign(base_to_target.translation(), Eigen::Quaterniond(base_to_target.rotation()), initial_target.pose);
-  target_buffer_.publish_write(initial_target);  // one-time init: having this illegal second producer is safe herein
+  auto& [position, orientation] = target_buffer_.write();
+  position = base_to_target.translation();
+  orientation = Eigen::Quaterniond(base_to_target.rotation());
+  control_target_ = target_type(position, orientation);
+  target_buffer_.publish_write();  // one-time init: having this illegal second producer is safe herein
 
   // initialize IK QP
   qp_jacobian_.setZero();
@@ -440,14 +444,21 @@ void CartesianPoseController::handle_target_msg_sub(const geometry_msgs::msg::Po
 {
   // Accept targets given in 'base_frame'; an empty frame_id is treated as implicitly 'base_frame' too.
   if (msg->header.frame_id.empty() || (msg->header.frame_id == params_->base_frame)) {
-    const auto& q = msg->pose.orientation;
-    const double q_norm_sq = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
-    if (std::abs(q_norm_sq - 1.0) <= 1e-2) {  // allow some tolerance to real unit quaternions
-      target_buffer_.publish_write(*msg);
+    auto& [position, orientation] = target_buffer_.write();
+    position.x() = msg->pose.position.x;
+    position.y() = msg->pose.position.y;
+    position.z() = msg->pose.position.z;
+    orientation.x() = msg->pose.orientation.x;
+    orientation.y() = msg->pose.orientation.y;
+    orientation.z() = msg->pose.orientation.z;
+    orientation.w() = msg->pose.orientation.w;
+    if (std::abs(orientation.squaredNorm() - 1.0) <= 1e-2) {  // allow some tolerance to real unit quaternions
+      orientation.normalize();
+      target_buffer_.publish_write();
     } else {
       RCLCPP_WARN(get_node()->get_logger(),
-                  "Ignoring target message with non-unit quaternion (x:%.4f, y:%.4f, z:%.4f, w:%.4f).", q.x, q.y, q.z,
-                  q.w);
+                  "Ignoring target message with non-unit quaternion (x:%.4f, y:%.4f, z:%.4f, w:%.4f).",
+                  msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z, msg->pose.orientation.w);
     }
   } else {
     RCLCPP_WARN(get_node()->get_logger(),
@@ -469,16 +480,19 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   blend_states(params_->velocity_feedback);
   update_state();
 
-  // Cartesian distance to the last received target, expressed local-world-aligned at the target frame origin
-  const geometry_msgs::msg::PoseStamped& target_msg = target_buffer_.update_read();
-  const Eigen::Vector3d target_position(target_msg.pose.position.x, target_msg.pose.position.y,
-                                        target_msg.pose.position.z);
-  const Eigen::Quaterniond target_orientation(target_msg.pose.orientation.w, target_msg.pose.orientation.x,
-                                              target_msg.pose.orientation.y, target_msg.pose.orientation.z);
+  // filter target
+  const auto& [target_position, target_orientation] = target_buffer_.update_read();
+  const double target_filter_alpha = -std::expm1(dt * target_filter_rate_);
+  auto& [control_target_position, control_target_orientation] = control_target_;
+  control_target_position += target_filter_alpha * (target_position - control_target_position);
+  control_target_orientation = control_target_orientation.slerp(target_filter_alpha, target_orientation);
+
+  // Cartesian distance to the filtered target, expressed local-world-aligned at the target frame origin
   const pinocchio::SE3& oMbase = state_data_.oMf[base_frame_idx_];
   const pinocchio::SE3& oMtarget = target_pose();
-  const Eigen::Vector3d target_position_world = oMbase.translation() + oMbase.rotation() * target_position;
-  const Eigen::Matrix3d target_rotation_world = oMbase.rotation() * target_orientation.normalized().toRotationMatrix();
+  const Eigen::Vector3d target_position_world = oMbase.translation() + oMbase.rotation() * control_target_position;
+  const Eigen::Matrix3d target_rotation_world =
+      oMbase.rotation() * control_target_orientation.normalized().toRotationMatrix();
 
   Eigen::Vector3d diff_linear = target_position_world - oMtarget.translation();
   const double diff_lin_norm = diff_linear.norm();
