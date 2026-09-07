@@ -65,7 +65,9 @@ public:
 
   // lower bound for dt and a general numeric tolerance for the QP box constraints, see update()/run_pose_diff_ik()
   static constexpr double numeric_epsilon = 1.0e-6;
+  static constexpr double numeric_epsilon_inv = 1.0 / numeric_epsilon;
   static_assert(numeric_epsilon > 0.0, "numeric_epsilon must be real positive");
+  static_assert(numeric_epsilon_inv > numeric_epsilon, "numeric_epsilon_inv must be real greater than numeric_epsilon");
 
   inline CartesianPoseController()
     : controller_interface::ControllerInterface(), params_(std::make_shared<cartesian_pose_controller::Params>())
@@ -96,6 +98,8 @@ private:
   Eigen::VectorXd state_q_;
   Eigen::VectorXd state_v_;
 
+  Eigen::VectorXd blend_delta_q_;
+
   Eigen::VectorXd control_q_;
   Eigen::VectorXd control_v_;
 
@@ -119,6 +123,7 @@ private:
   Eigen::VectorXd qp_solver_l_box_;                                  // lower box bounds
   Eigen::VectorXd qp_solver_u_box_;                                  // upper box bounds
   Eigen::VectorXd joint_velocity_box_;                               // theta bound from joint velocity limits
+  Eigen::VectorXd joint_velocity_limit_;                             // floored per-joint velocity limit (rad/s)
   Eigen::VectorXd pose_diff_ik_result_;                              // solution vector
   Eigen::Matrix<double, 6, Eigen::Dynamic> qp_jacobian_;             // Jacobian memory space
 
@@ -132,7 +137,9 @@ private:
 
   void handle_target_msg_sub(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
-  void read_states(const double velocity_feedback_weight);
+  void read_states();
+
+  void blend_states(const double velocity_feedback_weight);
 
   void update_state();
 

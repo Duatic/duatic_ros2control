@@ -31,7 +31,7 @@ cartesian_pose_controller:
 
   velocity_feedback:
     type: double
-    default_value: 1.0
+    default_value: 0.001
     description: "Filter weight for the robot velocity feedback. Assign 0 to entirely disable joint velocity feedback."
     validation:
       bounds<>: [0.0, 1.0]
@@ -57,13 +57,13 @@ cartesian_pose_controller:
     acceleration:
       linear:
         type: double
-        default_value: 1.0
+        default_value: 2.0
         description: "Maximum acceleration [m/s^2] for linear, Cartesian motions. Set zero to disable linear motion."
         validation:
           bounds<>: [0.0, 100.0]
       angular:
         type: double
-        default_value: 6.283
+        default_value: 12.466
         description: "Maximum acceleration [rad/s^2] for rotational motions. Set zero to disable rotational motion."
         validation:
           bounds<>: [0.0, 628.3]

@@ -151,6 +151,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   state_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
   control_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   control_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
+  blend_delta_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
 
   // evaluate joits given
   if (params_->joints.empty()) {
@@ -245,18 +246,21 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   pose_diff_ik_result_ = Eigen::VectorXd::Zero(robot_model_.nv);
   // velocity as displacement limit: limit * dt * (scale := motion_horizon / dt) = limit * motion_horizon = const
   joint_velocity_box_ = Eigen::VectorXd::Zero(robot_model_.nv);
+  joint_velocity_limit_ = Eigen::VectorXd::Zero(robot_model_.nv);
   for (std::size_t i = 0; i < params_->joints.size(); i++) {
     const double velocity_limit = robot_model_.velocityLimit[joint_v_idx_[i]];
-    if (velocity_limit > 0.0) {
-      joint_velocity_box_[joint_v_idx_[i]] = velocity_limit * params_->motion_horizon;
+    if (velocity_limit >= 0.0) {
+      joint_velocity_limit_[joint_v_idx_[i]] = std::fmax(velocity_limit, numeric_epsilon);
       RCLCPP_INFO(get_node()->get_logger(), "Setting joint velocity limit for '%s' to %.2f rad/s.",
-                  params_->joints[i].c_str(), velocity_limit);
+                  params_->joints[i].c_str(), joint_velocity_limit_[joint_v_idx_[i]]);
     } else {
-      joint_velocity_box_[joint_v_idx_[i]] = params_->motion_horizon / numeric_epsilon;
-      RCLCPP_WARN(get_node()->get_logger(), "No valid velocity limit found for Joint '%s': defaulting to %.2f rad/s.",
-                  params_->joints[i].c_str(), joint_velocity_box_[joint_v_idx_[i]]);
+      joint_velocity_limit_[joint_v_idx_[i]] = numeric_epsilon_inv;
+      RCLCPP_WARN(get_node()->get_logger(),
+                  "No valid velocity limit found for Joint '%s': using default velocity limit %.2f rad/s.",
+                  params_->joints[i].c_str(), joint_velocity_limit_[joint_v_idx_[i]]);
     }
   }
+  joint_velocity_box_ = joint_velocity_limit_ * params_->motion_horizon;
 
   // subscriptions
   const std::string topic_prefix =
@@ -388,10 +392,11 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   control_q_.setZero();
   control_v_.setZero();
   // initialize current state purely from HW (if available)
-  read_states(1.0);
-  update_state();
-  control_q_ = state_q_;
+  read_states();
+  control_q_ = state_q_;  // reinit control states to current states
   control_v_ = state_v_;
+  blend_states(1.0);
+  update_state();
 
   // Seed the target buffer with the current pose, so a cycle running before the first target message arrives
   // does not command a jump towards frame-origin/identity.
@@ -410,13 +415,11 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   qp_solver_H_.diagonal().array() += params_->ik_damping;
   qp_solver_g_.setZero();  // pose_diff is zero on initialization
   qp_solver_H_.triangularView<Eigen::StrictlyLower>() = qp_solver_H_.transpose();
-  // TODO(patrick): maybe it's better to initialize with the current velocity
   qp_solver_->init(qp_solver_H_, qp_solver_g_,                                  // optimization criteria
                    proxsuite::nullopt, proxsuite::nullopt,                      // no equality constraints
                    proxsuite::nullopt, proxsuite::nullopt, proxsuite::nullopt,  // inequality constraints
-                   Eigen::VectorXd::Constant(qp_solver_->model.dim, -0.1),
-                   Eigen::VectorXd::Constant(qp_solver_->model.dim, 0.1)  // box constraints (joint position and frame
-                                                                          // displacement limits)
+                   -joint_velocity_box_,
+                   joint_velocity_box_  // box constraints (joint velocity displacement limits)
   );
   qp_solver_->solve(Eigen::VectorXd::Zero(qp_solver_->model.dim), proxsuite::nullopt, proxsuite::nullopt);
   if (!qp_solver_->results.x.isZero(params_->ik_precision)) {
@@ -462,7 +465,8 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   const double dt = std::fmax(period.seconds(), numeric_epsilon);  // never zero/negative, so problem_scale stays finite
   const double problem_scale = params_->motion_horizon / dt;
 
-  read_states(params_->velocity_feedback);
+  read_states();
+  blend_states(params_->velocity_feedback);
   update_state();
 
   // Cartesian distance to the last received target, expressed local-world-aligned at the target frame origin
@@ -477,17 +481,26 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   const Eigen::Matrix3d target_rotation_world = oMbase.rotation() * target_orientation.normalized().toRotationMatrix();
 
   Eigen::Vector3d diff_linear = target_position_world - oMtarget.translation();
+  const double diff_lin_norm = diff_linear.norm();
   Eigen::Vector3d diff_angular =
       pinocchio::log3(Eigen::Matrix3d(target_rotation_world * oMtarget.rotation().transpose()));
+  const double diff_ang_norm = diff_angular.norm();
 
   // Ramp this cycle's velocity ceiling from the target frame's actual current speed, bounded by the acceleration
   // limits, then shrink the raw distance so it cannot imply exceeding that ceiling.
   const pinocchio::Motion target_v = pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_,
                                                                  pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED);
+  const double target_v_lin_norm = target_v.linear().norm();
+  const double target_v_ang_norm = target_v.angular().norm();
+
   const double v_limit_lin_eff =
-      std::fmin(params_->limits.velocity.linear, target_v.linear().norm() + params_->limits.acceleration.linear * dt);
-  const double v_limit_ang_eff = std::fmin(params_->limits.velocity.angular,
-                                           target_v.angular().norm() + params_->limits.acceleration.angular * dt);
+      std::fmin(params_->limits.velocity.linear,
+                std::fmin(target_v_lin_norm + params_->limits.acceleration.linear * dt,            // acceleration limit
+                          std::sqrt(2.0 * params_->limits.acceleration.linear * diff_lin_norm)));  // deceleration limit
+  const double v_limit_ang_eff = std::fmin(
+      params_->limits.velocity.angular,
+      std::fmin(target_v_ang_norm + params_->limits.acceleration.angular * dt,            // acceleration limit
+                std::sqrt(2.0 * params_->limits.acceleration.angular * diff_ang_norm)));  // deceleration limit
   if (v_limit_lin_eff > 0.0) {
     scale_limit(diff_linear, v_limit_lin_eff * dt);
   } else {
@@ -503,12 +516,24 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   const bool ik_unsolved =
       !run_pose_diff_ik(problem_scale, diff_linear, diff_angular, params_->enable_debug_log && do_publications);
 
-  // integrate joint positions and derive the commanded velocity from the applied step
+  // integrate joint positions and limit to the joint position limits (soft limits)
   assert(robot_model_.nv == state_q_.size());
   control_q_ = (state_q_ + pose_diff_ik_result_)
                    .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
-                   .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));  // soft limits !
-  control_v_ = (control_q_ - state_q_) / dt;
+                   .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));
+
+  // estimate the piece-wise linear velocity (displacement) at the end of this control cycle
+  control_v_ = control_q_ - state_q_;  // yet representing the average displacement over this cycle
+  const double step_end_lin = std::fmax((2.0 * diff_lin_norm) - (target_v_lin_norm * dt), 0.0);
+  const double step_end_ang = std::fmax((2.0 * diff_ang_norm) - (target_v_ang_norm * dt), 0.0);
+  const double scale_lin = (step_end_lin + numeric_epsilon) / (diff_lin_norm + numeric_epsilon);
+  const double scale_ang = (step_end_ang + numeric_epsilon) / (diff_ang_norm + numeric_epsilon);
+  const double scale_joint =
+      (joint_velocity_limit_.array() * dt / (control_v_.cwiseAbs().array() + numeric_epsilon * dt))
+          .minCoeff();  // epsilon margin keeps the result strictly below the limit
+  control_v_ *= std::fmin(scale_lin, std::fmin(scale_ang, scale_joint)) / dt;  // most conservative sccale
+  assert((control_v_.cwiseAbs().array() <= joint_velocity_limit_.array() + numeric_epsilon).all()  // new line
+         && "control_v_ exceeds a joint's velocity limit");
 
   // Never command or carry forward a non-finite result (e.g. from a degenerate period or solver failure); hold
   // the current state instead so a bad cycle cannot poison the next one via control_v_'s feedback blend.
@@ -537,7 +562,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   return controller_interface::return_type::OK;
 }
 
-void CartesianPoseController::read_states(const double velocity_feedback_weight)
+void CartesianPoseController::read_states()
 {
   auto interface_iter = state_interfaces_.begin();
   for (const auto idx : joint_q_idx_) {
@@ -546,14 +571,26 @@ void CartesianPoseController::read_states(const double velocity_feedback_weight)
   }
   if (params_->velocity_feedback > 0.0) {
     for (const auto idx : joint_v_idx_) {
-      const double hw_v = duatic::controllers::compat::require_value(*interface_iter);
-      state_v_[idx] = control_v_[idx] + velocity_feedback_weight * (hw_v - control_v_[idx]);
+      state_v_[idx] = duatic::controllers::compat::require_value(*interface_iter);
       interface_iter++;
     }
   } else {
     state_v_ = control_v_;
   }
   assert(interface_iter == state_interfaces_.end() && "Not all state interfaces were read");
+}
+
+void CartesianPoseController::blend_states(const double velocity_feedback_weight)
+{
+  // blend position state_q_ with feedforward control_q_:
+  // use capped feedforward so no feedforward joint moves further from its state than velocity_limit * motion_horizon
+  blend_delta_q_ = control_q_ - state_q_;
+  const double ratio_q = blend_delta_q_.cwiseAbs().cwiseQuotient(joint_velocity_box_).maxCoeff();
+  const double weight_q = (ratio_q > 1.0) ? (1.0 / ratio_q) : 1.0;
+  state_q_ += weight_q * blend_delta_q_;
+
+  // blend velocity state_v_ with feedforward control-based velocities
+  state_v_ = control_v_ + velocity_feedback_weight * (state_v_ - control_v_);
 }
 
 void CartesianPoseController::update_state()
@@ -591,11 +628,12 @@ bool CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
 
   // Fill QP box bounds with soft position and joint velocity displacement limits, scaled to theta units
   qp_solver_l_box_ = ((robot_model_.lowerPositionLimit - state_q_) * problem_scale)
-                         .cwiseMin(+numeric_epsilon)
-                         .cwiseMax(-joint_velocity_box_);
+                         .cwiseMax(-joint_velocity_box_)  // lower bound
+                         .cwiseMin(+numeric_epsilon);     // upper bound
   qp_solver_u_box_ = ((robot_model_.upperPositionLimit - state_q_) * problem_scale)
-                         .cwiseMax(-numeric_epsilon)
-                         .cwiseMin(joint_velocity_box_);
+                         .cwiseMin(joint_velocity_box_)  // upper bound
+                         .cwiseMax(-numeric_epsilon);    // lower bound
+  assert((qp_solver_l_box_.array() <= qp_solver_u_box_.array()).all() && "QP box bounds are inconsistent");
 
   // Update and solve QP
   qp_solver_->settings.verbose = verbose;
