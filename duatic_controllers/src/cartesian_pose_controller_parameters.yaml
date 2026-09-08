@@ -7,7 +7,7 @@ cartesian_pose_controller:
     type: string
     default_value: "flange"
     description: "Name of the end effector frame to be controlled."
-  
+
   topic_prefix:
     type: string
     default_value: ""
@@ -98,16 +98,12 @@ cartesian_pose_controller:
     description: "Maximum number of iterations for the inverse kinematics solver."
     validation:
       bounds<>: [3, 30]
-  
+
   enable_introspection:
     type: bool
     default_value: false
     description: "If true, enables ros2control introspection for internal state monitoring."
-  enable_debug_log:
-    type: bool
-    default_value: false
-    description: "If true, enables debug logging for the entire controller. This will flood your console!"
   dry_run:
     type: bool
     default_value: false
-    description: "If true, the controller will not send commands to the robot."
+    description: "If true, the controller will not claim command interfaces."

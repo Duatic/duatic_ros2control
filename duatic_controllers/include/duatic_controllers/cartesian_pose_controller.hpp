@@ -25,6 +25,7 @@
 #pragma once
 
 // C++ system headers
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -43,6 +44,7 @@
 #include <hardware_interface/loaned_state_interface.hpp>
 
 // ROS2
+#include <rclcpp/logger.hpp>
 #include <rclcpp/time.hpp>
 #include <realtime_tools/realtime_publisher.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -70,6 +72,9 @@ public:
   static_assert(numeric_epsilon > 0.0, "numeric_epsilon must be real positive");
   static_assert(numeric_epsilon_inv > numeric_epsilon, "numeric_epsilon_inv must be real greater than numeric_epsilon");
 
+  // this implementation relies on fast, small update steps; see the check in on_configure()
+  static constexpr unsigned int min_update_rate_hz = 500;
+
   inline CartesianPoseController()
     : controller_interface::ControllerInterface(), params_(std::make_shared<cartesian_pose_controller::Params>())
   {
@@ -89,6 +94,8 @@ private:
 
   std::unique_ptr<cartesian_pose_controller::ParamListener> param_listener_;
   std::shared_ptr<cartesian_pose_controller::Params> params_;
+
+  rclcpp::Logger::Level logger_level_;
 
   double linear_error_weight_;  // derived from params_ at on_configure, see there
   double target_filter_rate_;   // -1.0 / target_filter; floored

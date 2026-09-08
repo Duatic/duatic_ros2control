@@ -26,7 +26,7 @@
 // C++ system headers
 #include <functional>
 #include <iterator>
-#include <numbers>
+#include <numbers>  // NOLINT(build/include_order)
 
 #include <pinocchio/algorithm/check-data.hpp>
 #include <pinocchio/algorithm/frames.hpp>
@@ -132,6 +132,14 @@ controller_interface::CallbackReturn CartesianPoseController::on_init()
 controller_interface::CallbackReturn
 CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
+  if (get_update_rate() < min_update_rate_hz) {
+    RCLCPP_ERROR(get_node()->get_logger(),
+                 "%s (CartesianPoseController) requires a control frequency of at least %u Hz but only got %u Hz. "
+                 "Abort configuration",
+                 get_node()->get_name(), min_update_rate_hz, get_update_rate());
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
   // update parameters
   try {
     param_listener_->refresh_dynamic_parameters();
@@ -140,6 +148,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller configuration: " << e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
+
+  // update log level setting
+  logger_level_ = get_node()->get_logger().get_effective_level();
 
   // build the full pinocchio model from the urdf, used only to find the joint chain between base_frame and
   // target_frame; robot_model_ itself becomes the reduced model built from exactly that chain, below.
@@ -194,8 +205,8 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   if (*std::prev(target_it) > 0) {
     --target_it;  // the lowest common ancestor is a real joint; cover it once, via target_it
   } else if (*std::prev(base_it) > 0) {
-    --base_it;  // or via base_it, but nevere both
-  }  // the universal joint guarantees the existence of a prev. value, but must not to be included
+    --base_it;  // or via base_it, but never both
+  }             // the universal joint guarantees the existence of a prev. value, but must not to be included
 
   // model joint ids increase root-to-tip, matching target_it/base_it's walk direction: advance a cursor whenever
   // it points at the current joint, and it's on the chain; an untouched movable joint gets locked.
@@ -292,8 +303,8 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   qp_solver_->settings.eps_rel = 0.1 * params_->ik_precision;
   qp_solver_->settings.max_iter = params_->ik_max_iterations;
   qp_solver_->settings.max_iter_in = params_->ik_max_iterations - 2;
-  qp_solver_->settings.verbose = params_->enable_debug_log;
-  qp_solver_->settings.compute_timings = (params_->enable_debug_log || params_->enable_introspection);
+  qp_solver_->settings.verbose = (logger_level_ <= rclcpp::Logger::Level::Debug);
+  qp_solver_->settings.compute_timings = (qp_solver_->settings.verbose || params_->enable_introspection);
   qp_solver_->settings.initial_guess =
       proxsuite::proxqp::InitialGuessStatus::WARM_START_WITH_PREVIOUS_RESULT;  // ! IMPORTANT ! Don't reset this on
                                                                                // error, it will cause way more required
@@ -391,8 +402,8 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
 {
   if (params_->enable_introspection && qp_solver_) {  // qp_solver_ is null if on_configure() failed before creating it
     RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
-    using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
-                                         // namespace natively as done in the REGISTER function
+    // BUGFIX IN ROS2CONTROL !  UNREGISTER_ROS2_CONTROL_INTROSPECTION uses DEFAULT_REGISTRY_KEY unqualified
+    using hardware_interface::DEFAULT_REGISTRY_KEY;
     assert((robot_model_.nq == robot_model_.nv) && "all joints are mandatorily 1-DOF, so nq and nv must agree");
     for (std::size_t i = 0; i < static_cast<std::size_t>(robot_model_.nq); i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i));
@@ -441,7 +452,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
         RCLCPP_WARN(get_node()->get_logger(), "Failed to initialize command '%s'. Abort activation.",
                     command_itr->get_name().c_str());
         return controller_interface::CallbackReturn::FAILURE;
-      };
+      }
       ++command_itr;
       ++state_itr;
     }
@@ -451,7 +462,7 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
         RCLCPP_WARN(get_node()->get_logger(), "Failed to initialize command '%s'. Abort activation.",
                     command_itr->get_name().c_str());
         return controller_interface::CallbackReturn::FAILURE;
-      };
+      }
       ++command_itr;
     }
   }
@@ -537,6 +548,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   assert((time.get_clock_type() == Self::rcl_time_source) && "time provided by the wrong time source");
 
   const bool do_publications = (time.seconds() > topics_pub_next_time_);
+  const bool verbose = (logger_level_ <= rclcpp::Logger::Level::Debug) && do_publications;
   const double dt = std::fmax(period.seconds(), numeric_epsilon);  // never zero/negative, so problem_scale stays finite
   const double problem_scale = params_->motion_horizon / dt;
 
@@ -591,8 +603,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   }
 
   // Run the Optimization
-  const bool ik_unsolved =
-      !run_pose_diff_ik(problem_scale, diff_linear, diff_angular, params_->enable_debug_log && do_publications);
+  const bool ik_unsolved = !run_pose_diff_ik(problem_scale, diff_linear, diff_angular, verbose);
 
   // integrate joint positions and limit to the joint position limits (soft limits)
   assert(robot_model_.nv == state_q_.size());
@@ -626,7 +637,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
     command_controls();
   }
 
-  if ((do_publications && params_->enable_debug_log) || ik_unsolved) {
+  if (verbose || ik_unsolved) {
     log_statistics(target_v);
   }
   // Publish the current end effector pose and twist iff the time is right
