@@ -25,12 +25,15 @@
 
 // C++ system headers
 #include <functional>
+#include <iterator>
 #include <numbers>
 
+#include <pinocchio/algorithm/check-data.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
-#include <pinocchio/algorithm/check-data.hpp>
-#include <pinocchio/spatial.hpp>  // pinocchio::log3
+#include <pinocchio/algorithm/joint-configuration.hpp>  // pinocchio::neutral
+#include <pinocchio/algorithm/model.hpp>                // pinocchio::buildReducedModel
+#include <pinocchio/spatial.hpp>                        // pinocchio::log3
 
 // Other headers
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
@@ -75,15 +78,16 @@ controller_interface::InterfaceConfiguration CartesianPoseController::command_in
   if (params_->dry_run) {
     config.type = controller_interface::interface_configuration_type::NONE;
   } else {
+    assert((robot_model_.names[0] == "universe") && "joint 0 is expected to be Pinocchio's universe joint");
     config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
     // ensure the exact same order as for the state interfaces! (Used in on_activate)
-    for (const std::string& joint : params_->joints) {
-      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+    for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(robot_model_.njoints); j++) {
+      config.names.emplace_back(robot_model_.names[j] + "/" + hardware_interface::HW_IF_POSITION);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
     }
     if (params_->command_velocities) {
-      for (const std::string& joint : params_->joints) {
-        config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+      for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(robot_model_.njoints); j++) {
+        config.names.emplace_back(robot_model_.names[j] + "/" + hardware_interface::HW_IF_VELOCITY);
         RCLCPP_DEBUG(get_node()->get_logger(), "Require command interface %s", config.names.back().c_str());
       }
     }
@@ -95,15 +99,16 @@ controller_interface::InterfaceConfiguration CartesianPoseController::state_inte
 {
   // Claim the necessary state interfaces
   controller_interface::InterfaceConfiguration config;
+  assert((robot_model_.names[0] == "universe") && "joint 0 is expected to be Pinocchio's universe joint");
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
   // ensure the exact same order as for the command interfaces! (Used in on_activate)
-  for (const std::string& joint : params_->joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+  for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(robot_model_.njoints); j++) {
+    config.names.emplace_back(robot_model_.names[j] + "/" + hardware_interface::HW_IF_POSITION);
     RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
   }
   if (params_->velocity_feedback > 0.0) {
-    for (const std::string& joint : params_->joints) {
-      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(robot_model_.njoints); j++) {
+      config.names.emplace_back(robot_model_.names[j] + "/" + hardware_interface::HW_IF_VELOCITY);
       RCLCPP_DEBUG(get_node()->get_logger(), "Require state interface %s", config.names.back().c_str());
     }
   }
@@ -136,11 +141,110 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // create the pinocchio model from the urdf
+  // build the full pinocchio model from the urdf, used only to find the joint chain between base_frame and
+  // target_frame; robot_model_ itself becomes the reduced model built from exactly that chain, below.
   RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
-  pinocchio::Model new_model;  // rebuilding into the old model causes data-model inconsistency
-  pinocchio::urdf::buildModelFromXML(get_robot_description(), new_model);
-  robot_model_ = std::move(new_model);
+  pinocchio::Model full_model;
+  pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
+
+  if (!full_model.existFrame(params_->base_frame)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Base frame '%s' not found in Pinocchio model. Abort configuration.",
+                 params_->base_frame.c_str());
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!full_model.existFrame(params_->target_frame)) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Target frame '%s' not found in Pinocchio model. Abort configuration.",
+                 params_->target_frame.c_str());
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
+  RCLCPP_INFO(get_node()->get_logger(),
+              "Building reduced Pinocchio model for joint chain between base_frame '%s' and target_frame '%s'.",
+              params_->base_frame.c_str(), params_->target_frame.c_str());
+  // find the joint chain between base_frame and target_frame: each frame's ancestor chain up to their common ancestor
+  const auto ancestors = [&full_model, this](pinocchio::JointIndex joint_id, pinocchio::JointIndex sentinel) {
+    std::vector<pinocchio::JointIndex> chain{ sentinel };  // never a real joint id
+    assert((sentinel > static_cast<pinocchio::JointIndex>(full_model.njoints)) && "sentinel must not be a real joint "
+                                                                                  "id");
+    while (joint_id != 0) {
+      chain.push_back(joint_id);
+      RCLCPP_DEBUG_STREAM(this->get_node()->get_logger(), "Joint " << joint_id << ": " << full_model.names[joint_id]);
+      joint_id = full_model.parents[joint_id];
+    }
+    chain.push_back(0);  // the universe joint, id=0, is always the bottom most common root
+    return chain;
+  };
+
+  RCLCPP_DEBUG(get_node()->get_logger(), "Target Chain:");
+  const std::vector<pinocchio::JointIndex> target_chain =
+      ancestors(full_model.frames[full_model.getFrameId(params_->target_frame)].parentJoint,
+                static_cast<pinocchio::JointIndex>(-1));
+
+  RCLCPP_DEBUG(get_node()->get_logger(), "Base Chain:");
+  const std::vector<pinocchio::JointIndex> base_chain =
+      ancestors(full_model.frames[full_model.getFrameId(params_->base_frame)].parentJoint,
+                static_cast<pinocchio::JointIndex>(-2));
+  // both chains share the root; walk inward from there until they diverge, keeping the last match
+  auto target_it = target_chain.rbegin();
+  auto base_it = base_chain.rbegin();
+  while (*target_it == *base_it) {
+    ++target_it;
+    ++base_it;
+  }
+  if (*std::prev(target_it) > 0) {
+    --target_it;  // the lowest common ancestor is a real joint; cover it once, via target_it
+  } else if (*std::prev(base_it) > 0) {
+    --base_it;  // or via base_it, but nevere both
+  }  // the universal joint guarantees the existence of a prev. value, but must not to be included
+
+  // model joint ids increase root-to-tip, matching target_it/base_it's walk direction: advance a cursor whenever
+  // it points at the current joint, and it's on the chain; an untouched movable joint gets locked.
+  std::vector<pinocchio::JointIndex> joints_to_lock;
+  std::size_t active_count = 0;
+  RCLCPP_INFO(get_node()->get_logger(), "Configure Active Joints:");
+  for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(full_model.njoints); j++) {
+    bool on_chain = false;
+    if (*target_it == j) {
+      ++target_it;
+      on_chain = true;
+    } else if (*base_it == j) {
+      ++base_it;
+      on_chain = true;
+    }
+    const int joint_nq = full_model.joints[j].nq();
+    if (joint_nq == 0) {
+      continue;  // already a fixed joint, nothing to lock or activate
+    }
+    if (!on_chain) {
+      joints_to_lock.push_back(j);
+      continue;
+    }
+    if (joint_nq != 1) {
+      RCLCPP_ERROR(get_node()->get_logger(),
+                   "Joint '%s' has %d DOF; only 1-DOF joints are supported. Abort "
+                   "configuration.",
+                   full_model.names[j].c_str(), joint_nq);
+      return controller_interface::CallbackReturn::FAILURE;
+    }
+    RCLCPP_INFO(get_node()->get_logger(), " - %s", full_model.names[j].c_str());
+    active_count++;
+  }
+  if ((*target_it != static_cast<pinocchio::JointIndex>(-1)) || (*base_it != static_cast<pinocchio::JointIndex>(-2))) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Internal error: base_frame or target_frame chain were not fully consumed "
+                                           "during the construction of the reduced model. Abort configuration.");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (active_count == 0) {
+    RCLCPP_ERROR(get_node()->get_logger(),
+                 "No movable joint found between base_frame '%s' and target_frame '%s'. Abort configuration.",
+                 params_->base_frame.c_str(), params_->target_frame.c_str());
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+
+  // build the reduced model, welding every other movable joint at its neutral position
+  pinocchio::buildReducedModel(full_model, joints_to_lock, pinocchio::neutral(full_model), robot_model_);
+  assert((robot_model_.nq == robot_model_.nv) && (robot_model_.nv == robot_model_.njoints - 1) &&
+         "all joints are mandatorily 1-DOF, so nq, nv and njoints-1 must all agree");
   state_data_ = robot_model_.createData();
   if (!robot_model_.check(state_data_)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'state_data_' is not consistent with "
@@ -152,12 +256,6 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   control_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
   control_v_ = Eigen::VectorXd::Zero(robot_model_.nv);
   blend_delta_q_ = Eigen::VectorXd::Zero(robot_model_.nq);
-
-  // evaluate joits given
-  if (params_->joints.empty()) {
-    RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty. Abort configuration.");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
 
   assert(params_->motion_horizon > 0.0);
   RCLCPP_INFO(get_node()->get_logger(), "Linear limits: %.2f m/s, %.2f m/s^2.", params_->limits.velocity.linear,
@@ -171,51 +269,13 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   target_filter_rate_ = -1.0 / std::fmax(params_->target_filter, numeric_epsilon);
   RCLCPP_INFO(get_node()->get_logger(), "Target filter rate: %.6f", target_filter_rate_);
 
-  // build model joint caches
-  joint_q_idx_.clear();
-  joint_q_idx_.reserve(params_->joints.size());
-  joint_v_idx_.clear();
-  joint_v_idx_.reserve(params_->joints.size());
-  for (const std::string& joint : params_->joints) {
-    if (!robot_model_.existJointName(joint)) {
-      RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint.c_str());
-      return controller_interface::CallbackReturn::FAILURE;
-    } else {
-      const pinocchio::JointIndex jidx = robot_model_.getJointId(joint);
-      joint_q_idx_.push_back(robot_model_.idx_qs[jidx]);
-      joint_v_idx_.push_back(robot_model_.idx_vs[jidx]);
-    }
-  }
-  assert(joint_q_idx_.size() == params_->joints.size());
-  assert(joint_v_idx_.size() == params_->joints.size());
-
   // Store base frame index (all published poses/twists are expressed relative to this frame)
-  if (!robot_model_.existFrame(params_->base_frame)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Base frame '%s' not found in Pinocchio model. Abort configuration.",
-                 params_->base_frame.c_str());
-    return controller_interface::CallbackReturn::FAILURE;
-  } else {
-    base_frame_idx_ = robot_model_.getFrameId(params_->base_frame);
-  }
+  assert(robot_model_.existFrame(params_->base_frame) && "buildReducedModel must preserve frame names");
+  base_frame_idx_ = robot_model_.getFrameId(params_->base_frame);
 
-  // Store end effector frame index
-  if (!robot_model_.existFrame(params_->target_frame)) {
-    RCLCPP_ERROR(get_node()->get_logger(), "End effector frame '%s' not found in Pinocchio model. Abort configuration.",
-                 params_->target_frame.c_str());
-    return controller_interface::CallbackReturn::FAILURE;
-  } else {
-    target_frame_idx_ = robot_model_.getFrameId(params_->target_frame);
-  }
-
-  // setup and initialize QP
-  // TODO(patrick): always make a full model and use the joints parameters to define actively controlled joints
-  if (robot_model_.nv != static_cast<int>(params_->joints.size())) {
-    RCLCPP_ERROR(get_node()->get_logger(),
-                 "'joints' (%zu) must currently cover every DOF of the URDF model (%d); a strict subset is not yet "
-                 "supported. Abort configuration.",
-                 params_->joints.size(), robot_model_.nv);
-    return controller_interface::CallbackReturn::FAILURE;
-  }
+  // Store target frame index
+  assert(robot_model_.existFrame(params_->target_frame) && "buildReducedModel must preserve frame names");
+  target_frame_idx_ = robot_model_.getFrameId(params_->target_frame);
 
   // create QP solver
   RCLCPP_INFO(get_node()->get_logger(), "Setting up QP solver with %d result variables", robot_model_.nv);
@@ -250,17 +310,19 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // velocity as displacement limit: limit * dt * (scale := motion_horizon / dt) = limit * motion_horizon = const
   joint_velocity_box_ = Eigen::VectorXd::Zero(robot_model_.nv);
   joint_velocity_limit_ = Eigen::VectorXd::Zero(robot_model_.nv);
-  for (std::size_t i = 0; i < params_->joints.size(); i++) {
-    const double velocity_limit = robot_model_.velocityLimit[joint_v_idx_[i]];
+  assert((robot_model_.names[0] == "universe") && "joint 0 is expected to be Pinocchio's universe joint");
+  for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(robot_model_.njoints); j++) {
+    const Eigen::Index v_idx = robot_model_.idx_vs[j];
+    const double velocity_limit = robot_model_.velocityLimit[v_idx];
     if (velocity_limit >= 0.0) {
-      joint_velocity_limit_[joint_v_idx_[i]] = std::fmax(velocity_limit, numeric_epsilon);
+      joint_velocity_limit_[v_idx] = std::fmax(velocity_limit, numeric_epsilon);
       RCLCPP_INFO(get_node()->get_logger(), "Setting joint velocity limit for '%s' to %.2f rad/s.",
-                  params_->joints[i].c_str(), joint_velocity_limit_[joint_v_idx_[i]]);
+                  robot_model_.names[j].c_str(), joint_velocity_limit_[v_idx]);
     } else {
-      joint_velocity_limit_[joint_v_idx_[i]] = numeric_epsilon_inv;
+      joint_velocity_limit_[v_idx] = numeric_epsilon_inv;
       RCLCPP_WARN(get_node()->get_logger(),
                   "No valid velocity limit found for Joint '%s': using default velocity limit %.2f rad/s.",
-                  params_->joints[i].c_str(), joint_velocity_limit_[joint_v_idx_[i]]);
+                  robot_model_.names[j].c_str(), joint_velocity_limit_[v_idx]);
     }
   }
   joint_velocity_box_ = joint_velocity_limit_ * params_->motion_horizon;
@@ -302,11 +364,12 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
   // ros2control introspection
   if (params_->enable_introspection) {
     RCLCPP_INFO(get_node()->get_logger(), "Configuring ROS2control Introspection for internal state monitoring.");
-    for (std::size_t i = 0; i < params_->joints.size(); i++) {
-      REGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i), &state_q_[joint_q_idx_[i]]);
-      REGISTER_ROS2_CONTROL_INTROSPECTION("state_v_" + std::to_string(i), &state_v_[joint_v_idx_[i]]);
-      REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[joint_q_idx_[i]]);
-      REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[joint_v_idx_[i]]);
+    assert((robot_model_.nq == robot_model_.nv) && "all joints are mandatorily 1-DOF, so nq and nv must agree");
+    for (Eigen::Index i = 0; i < robot_model_.nq; i++) {
+      REGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i), &state_q_[i]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("state_v_" + std::to_string(i), &state_v_[i]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i), &control_q_[i]);
+      REGISTER_ROS2_CONTROL_INTROSPECTION("control_v_" + std::to_string(i), &control_v_[i]);
     }
     for (Eigen::Index i = 0; i < qp_solver_->model.dim; i++) {
       REGISTER_ROS2_CONTROL_INTROSPECTION("QP_result_" + std::to_string(i), &(qp_solver_->results.x[i]));
@@ -330,7 +393,8 @@ CartesianPoseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::Sta
     RCLCPP_INFO(get_node()->get_logger(), "Unconfiguring ROS2control Introspection.");
     using namespace hardware_interface;  // BUGFIX IN ROS2CONTROL !  The actual macro is missing to include this
                                          // namespace natively as done in the REGISTER function
-    for (std::size_t i = 0; i < params_->joints.size(); i++) {
+    assert((robot_model_.nq == robot_model_.nv) && "all joints are mandatorily 1-DOF, so nq and nv must agree");
+    for (std::size_t i = 0; i < static_cast<std::size_t>(robot_model_.nq); i++) {
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("state_q_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("state_v_" + std::to_string(i));
       UNREGISTER_ROS2_CONTROL_INTROSPECTION("control_q_" + std::to_string(i));
@@ -536,8 +600,8 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
                    .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
                    .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));
 
-  // estimate the piece-wise linear velocity (displacement) at the end of this control cycle
-  control_v_ = control_q_ - state_q_;  // yet representing the average displacement over this cycle
+  // piecewise-linear velocity
+  control_v_ = control_q_ - state_q_;  // average displacement over this cycle
   const double step_end_lin = std::fmax((2.0 * diff_lin_norm) - (target_v_lin_norm * dt), 0.0);
   const double step_end_ang = std::fmax((2.0 * diff_ang_norm) - (target_v_ang_norm * dt), 0.0);
   const double scale_lin = (step_end_lin + numeric_epsilon) / (diff_lin_norm + numeric_epsilon);
@@ -545,9 +609,9 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   const double scale_joint =
       (joint_velocity_limit_.array() * dt / (control_v_.cwiseAbs().array() + numeric_epsilon * dt))
           .minCoeff();  // epsilon margin keeps the result strictly below the limit
-  control_v_ *= std::fmin(scale_lin, std::fmin(scale_ang, scale_joint)) / dt;  // most conservative sccale
-  assert((control_v_.cwiseAbs().array() <= joint_velocity_limit_.array() + numeric_epsilon).all()  // new line
-         && "control_v_ exceeds a joint's velocity limit");
+  control_v_ *= std::fmin(scale_lin, std::fmin(scale_ang, scale_joint)) / dt;  // most conservative scale
+  assert((control_v_.cwiseAbs().array() <= joint_velocity_limit_.array() + numeric_epsilon).all() &&  //
+         "control_v_ exceeds a joint's velocity limit");
 
   // Never command or carry forward a non-finite result (e.g. from a degenerate period or solver failure); hold
   // the current state instead so a bad cycle cannot poison the next one via control_v_'s feedback blend.
@@ -579,13 +643,13 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
 void CartesianPoseController::read_states()
 {
   auto interface_iter = state_interfaces_.begin();
-  for (const auto idx : joint_q_idx_) {
-    state_q_[idx] = duatic::controllers::compat::require_value(*interface_iter);
+  for (auto& state : state_q_) {
+    state = duatic::controllers::compat::require_value(*interface_iter);
     interface_iter++;
   }
   if (params_->velocity_feedback > 0.0) {
-    for (const auto idx : joint_v_idx_) {
-      state_v_[idx] = duatic::controllers::compat::require_value(*interface_iter);
+    for (auto& state : state_v_) {
+      state = duatic::controllers::compat::require_value(*interface_iter);
       interface_iter++;
     }
   } else {
@@ -684,18 +748,18 @@ void CartesianPoseController::command_controls()
 {
   auto command_itr = command_interfaces_.begin();
   // make sure to have the same order as initially claimed within 'command_interface_configuration'
-  for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
-    if (!command_itr->set_value(control_q_[joint_q_idx_[i]])) {
-      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'",
-                  params_->joints[i].c_str());
+  for (const auto& control : control_q_) {
+    if (!command_itr->set_value(control)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command");
     }
+    command_itr++;
   }
   if (params_->command_velocities) {
-    for (std::size_t i = 0; i < params_->joints.size(); i++, command_itr++) {
-      if (!command_itr->set_value(control_v_[joint_v_idx_[i]])) {
-        RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command for joint '%s'",
-                    params_->joints[i].c_str());
+    for (const auto& control : control_v_) {
+      if (!command_itr->set_value(control)) {
+        RCLCPP_WARN(get_node()->get_logger(), "Failed to set velocity command");
       }
+      command_itr++;
     }
   }
   assert(command_itr == command_interfaces_.end());

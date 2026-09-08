@@ -94,8 +94,6 @@ private:
   double target_filter_rate_;   // -1.0 / target_filter; floored
 
   pinocchio::Model robot_model_;
-  std::vector<Eigen::Index> joint_q_idx_;
-  std::vector<Eigen::Index> joint_v_idx_;
   pinocchio::FrameIndex base_frame_idx_;  // frame all published poses/twists are expressed relative to
   pinocchio::FrameIndex target_frame_idx_;
 

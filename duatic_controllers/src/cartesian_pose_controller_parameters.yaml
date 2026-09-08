@@ -1,10 +1,4 @@
 cartesian_pose_controller:
-  joints:
-    type: string_array
-    default_value: []
-    description: Names of joints used by the controller
-    validation:
-      unique<>: null
   base_frame:
     type: string
     default_value: "base_link"
@@ -76,7 +70,7 @@ cartesian_pose_controller:
 
   motion_horizon:
     type: double
-    default_value: 0.1
+    default_value: 0.01
     description: "Time horizon in seconds used to scale the IK QP's joint displacement variable for numerical conditioning. Does not affect the commanded motion."
     validation:
       bounds<>: [0.001, 1.0]
