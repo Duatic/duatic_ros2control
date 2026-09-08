@@ -25,7 +25,6 @@
 
 // C++ system headers
 #include <functional>
-#include <iterator>
 #include <numbers>  // NOLINT(build/include_order)
 
 #include <pinocchio/algorithm/check-data.hpp>
@@ -182,31 +181,29 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
       RCLCPP_DEBUG_STREAM(this->get_node()->get_logger(), "Joint " << joint_id << ": " << full_model.names[joint_id]);
       joint_id = full_model.parents[joint_id];
     }
-    chain.push_back(0);  // the universe joint, id=0, is always the bottom most common root
     return chain;
   };
 
   RCLCPP_DEBUG(get_node()->get_logger(), "Target Chain:");
+  static constexpr pinocchio::JointIndex sentinel_target_chain = static_cast<pinocchio::JointIndex>(-1);
   const std::vector<pinocchio::JointIndex> target_chain =
-      ancestors(full_model.frames[full_model.getFrameId(params_->target_frame)].parentJoint,
-                static_cast<pinocchio::JointIndex>(-1));
+      ancestors(full_model.frames[full_model.getFrameId(params_->target_frame)].parentJoint, sentinel_target_chain);
 
   RCLCPP_DEBUG(get_node()->get_logger(), "Base Chain:");
+  static constexpr pinocchio::JointIndex sentinel_base_chain = static_cast<pinocchio::JointIndex>(-2);
   const std::vector<pinocchio::JointIndex> base_chain =
-      ancestors(full_model.frames[full_model.getFrameId(params_->base_frame)].parentJoint,
-                static_cast<pinocchio::JointIndex>(-2));
-  // both chains share the root; walk inward from there until they diverge, keeping the last match
+      ancestors(full_model.frames[full_model.getFrameId(params_->base_frame)].parentJoint, sentinel_base_chain);
+
+  static_assert((sentinel_target_chain != sentinel_base_chain) && "chain sentinels must be different to ensure "
+                                                                  "exception-free detection of chain divergence");
+
+  // walk inward until both chains diverge
   auto target_it = target_chain.rbegin();
   auto base_it = base_chain.rbegin();
   while (*target_it == *base_it) {
     ++target_it;
     ++base_it;
   }
-  if (*std::prev(target_it) > 0) {
-    --target_it;  // the lowest common ancestor is a real joint; cover it once, via target_it
-  } else if (*std::prev(base_it) > 0) {
-    --base_it;  // or via base_it, but never both
-  }             // the universal joint guarantees the existence of a prev. value, but must not to be included
 
   // model joint ids increase root-to-tip, matching target_it/base_it's walk direction: advance a cursor whenever
   // it points at the current joint, and it's on the chain; an untouched movable joint gets locked.
@@ -240,7 +237,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     RCLCPP_INFO(get_node()->get_logger(), " - %s", full_model.names[j].c_str());
     active_count++;
   }
-  if ((*target_it != static_cast<pinocchio::JointIndex>(-1)) || (*base_it != static_cast<pinocchio::JointIndex>(-2))) {
+  if ((*target_it != sentinel_target_chain) || (*base_it != sentinel_base_chain)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Internal error: base_frame or target_frame chain were not fully consumed "
                                            "during the construction of the reduced model. Abort configuration.");
     return controller_interface::CallbackReturn::FAILURE;
