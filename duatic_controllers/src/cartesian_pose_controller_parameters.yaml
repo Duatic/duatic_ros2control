@@ -5,8 +5,8 @@ cartesian_pose_controller:
     description: "Name of the base frame"
   target_frame:
     type: string
-    default_value: "flange"
-    description: "Name of the end effector frame to be controlled."
+    default_value: ""
+    description: "Name of the target frame to be controlled."
 
   topic_prefix:
     type: string
