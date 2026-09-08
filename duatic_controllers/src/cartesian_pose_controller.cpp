@@ -683,11 +683,9 @@ void CartesianPoseController::update_state()
 {
   // run forward kinematics and update end effector frame state
   pinocchio::forwardKinematics(robot_model_, state_data_, state_q_, state_v_);
-  // Computing only the single required Jacobian, computeFrameJacobian(target_frame_idx_), would redo forwardKinematics'
-  // placements for its whole support chain. Since the target usually sits at the tip of the kinematic chain, there
-  // would be no actual saving here.
-  pinocchio::computeJointJacobians(robot_model_, state_data_);
-  pinocchio::updateFramePlacements(robot_model_, state_data_);  // update all frames
+  // base_frame_idx_ and target_frame_idx_ are the only frames ever read from state_data_.oMf; update just those two
+  pinocchio::updateFramePlacement(robot_model_, state_data_, base_frame_idx_);
+  pinocchio::updateFramePlacement(robot_model_, state_data_, target_frame_idx_);
 }
 
 bool CartesianPoseController::run_pose_diff_ik(const double problem_scale, const Eigen::Vector3d& target_diff_linear,
@@ -695,8 +693,8 @@ bool CartesianPoseController::run_pose_diff_ik(const double problem_scale, const
 {
   // Construct Target Error Problem
   qp_jacobian_.setZero();
-  pinocchio::getFrameJacobian(robot_model_, state_data_, target_frame_idx_,
-                              pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, qp_jacobian_);
+  pinocchio::computeFrameJacobian(robot_model_, state_data_, state_q_, target_frame_idx_,
+                                  pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED, qp_jacobian_);
   const auto J_lin = qp_jacobian_.topRows<3>();
   const auto J_ang = qp_jacobian_.bottomRows<3>();
 
