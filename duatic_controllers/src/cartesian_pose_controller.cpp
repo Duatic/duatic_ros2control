@@ -153,7 +153,7 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
 
   // build the full pinocchio model from the urdf, used only to find the joint chain between base_frame and
   // target_frame; robot_model_ itself becomes the reduced model built from exactly that chain, below.
-  RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from XML");
+  RCLCPP_INFO(get_node()->get_logger(), "Load robot model from description");
   pinocchio::Model full_model;
   pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
 
@@ -168,10 +168,10 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  RCLCPP_INFO(get_node()->get_logger(),
-              "Building reduced Pinocchio model for joint chain between base_frame '%s' and target_frame '%s'.",
-              params_->base_frame.c_str(), params_->target_frame.c_str());
   // find the joint chain between base_frame and target_frame: each frame's ancestor chain up to their common ancestor
+  RCLCPP_INFO(get_node()->get_logger(),
+              "Reducing robot model to joint chain between base_frame '%s' and target_frame '%s'.",
+              params_->base_frame.c_str(), params_->target_frame.c_str());
   const auto ancestors = [&full_model, this](pinocchio::JointIndex joint_id, pinocchio::JointIndex sentinel) {
     std::vector<pinocchio::JointIndex> chain{ sentinel };  // never a real joint id
     assert((sentinel > static_cast<pinocchio::JointIndex>(full_model.njoints)) && "sentinel must not be a real joint "
@@ -249,8 +249,9 @@ CartesianPoseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::S
     return controller_interface::CallbackReturn::FAILURE;
   }
 
-  // build the reduced model, welding every other movable joint at its neutral position
-  pinocchio::buildReducedModel(full_model, joints_to_lock, pinocchio::neutral(full_model), robot_model_);
+  // actually building the reduced model
+  robot_model_ = std::move(pinocchio::buildReducedModel(full_model, joints_to_lock, pinocchio::neutral(full_model)));
+  // Important note: pinicchio cannot recreate a robot model in-place, i.e., creating a new one and reassign
   assert((robot_model_.nq == robot_model_.nv) && (robot_model_.nv == robot_model_.njoints - 1) &&
          "all joints are mandatorily 1-DOF, so nq, nv and njoints-1 must all agree");
   state_data_ = robot_model_.createData();
