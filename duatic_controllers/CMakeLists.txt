@@ -10,7 +10,6 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(duatic_controller_msgs REQUIRED)
-find_package(duatic_concurrency REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -107,7 +106,6 @@ if(COMMAND ament_target_dependencies)
       rclcpp_lifecycle
       realtime_tools
       duatic_controller_msgs
-      duatic_concurrency
       geometry_msgs
       std_srvs
       Eigen3
@@ -122,7 +120,6 @@ else()
       rclcpp_lifecycle::rclcpp_lifecycle
       realtime_tools::realtime_tools
       duatic_controller_msgs::duatic_controller_msgs
-      duatic_concurrency::duatic_concurrency
       geometry_msgs::geometry_msgs
       std_srvs::std_srvs
       Eigen3::Eigen

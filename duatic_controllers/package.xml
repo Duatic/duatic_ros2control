@@ -18,7 +18,6 @@
   <depend>generate_parameter_library</depend>
   <depend>realtime_tools</depend>
   <depend>duatic_controller_msgs</depend>
-  <depend>duatic_concurrency</depend>
   <depend>geometry_msgs</depend>
   <depend>std_srvs</depend>
   <depend>eigen</depend>

@@ -46,12 +46,12 @@
 // ROS2
 #include <rclcpp/logger.hpp>
 #include <rclcpp/time.hpp>
+#include <realtime_tools/realtime_buffer.hpp>
 #include <realtime_tools/realtime_publisher.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 
 // Project
-#include <duatic_concurrency/unidirectional_buffer.hpp>
 #include <duatic_controllers/cartesian_pose_controller_parameters.hpp>
 
 namespace duatic::controllers
@@ -116,8 +116,8 @@ private:
   // input topic subscription
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_msg_sub_;
 
-  // lock-free RT-NonRT unidirectional data exchange buffer holding the latest received target pose
-  duatic::concurrency::UnidirectionalBuffer<target_type> target_buffer_;
+  // NonRT->RT unidirectional data exchange buffer holding the latest received target pose
+  realtime_tools::RealtimeBuffer<target_type> target_buffer_;
   target_type control_target_;  // filtered target
 
   /* Quadratic programming solver

@@ -477,11 +477,8 @@ CartesianPoseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::St
   // Seed the target buffer with the current pose, so a cycle running before the first target message arrives
   // does not command a jump towards frame-origin/identity.
   const pinocchio::SE3 base_to_target = state_data_.oMf[base_frame_idx_].actInv(target_pose());
-  auto& [position, orientation] = target_buffer_.write();
-  position = base_to_target.translation();
-  orientation = Eigen::Quaterniond(base_to_target.rotation());
-  control_target_ = target_type(position, orientation);
-  target_buffer_.publish_write();  // one-time init: having this illegal second producer is safe herein
+  control_target_ = target_type(base_to_target.translation(), Eigen::Quaterniond(base_to_target.rotation()));
+  target_buffer_.writeFromNonRT(control_target_);
 
   // initialize IK QP
   qp_jacobian_.setZero();
@@ -517,7 +514,8 @@ void CartesianPoseController::handle_target_msg_sub(const geometry_msgs::msg::Po
 {
   // Accept targets given in 'base_frame'; an empty frame_id is treated as implicitly 'base_frame' too.
   if (msg->header.frame_id.empty() || (msg->header.frame_id == params_->base_frame)) {
-    auto& [position, orientation] = target_buffer_.write();
+    target_type target;
+    auto& [position, orientation] = target;
     position.x() = msg->pose.position.x;
     position.y() = msg->pose.position.y;
     position.z() = msg->pose.position.z;
@@ -527,7 +525,7 @@ void CartesianPoseController::handle_target_msg_sub(const geometry_msgs::msg::Po
     orientation.w() = msg->pose.orientation.w;
     if (std::abs(orientation.squaredNorm() - 1.0) <= 1e-2) {  // allow some tolerance to real unit quaternions
       orientation.normalize();
-      target_buffer_.publish_write();
+      target_buffer_.writeFromNonRT(target);
     } else {
       RCLCPP_WARN(get_node()->get_logger(),
                   "Ignoring target message with non-unit quaternion (x:%.4f, y:%.4f, z:%.4f, w:%.4f).",
@@ -555,7 +553,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   update_state();
 
   // filter target
-  const auto& [target_position, target_orientation] = target_buffer_.update_read();
+  const auto& [target_position, target_orientation] = *target_buffer_.readFromRT();
   const double target_filter_alpha = -std::expm1(dt * target_filter_rate_);
   auto& [control_target_position, control_target_orientation] = control_target_;
   control_target_position += target_filter_alpha * (target_position - control_target_position);
