@@ -813,24 +813,22 @@ void CartesianPoseController::publish_topics()
       pinocchio::getFrameVelocity(robot_model_, state_data_, base_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
   const pinocchio::SE3 base_to_target = oMbase.actInv(target_pose());
 
+  geometry_msgs::msg::PoseStamped pose_msg;
+  pose_msg.header.stamp = get_node()->now();
+  pose_msg.header.frame_id = params_->base_frame;
+  assign(base_to_target.translation(), Eigen::Quaterniond(base_to_target.rotation()), pose_msg.pose);
   assert(target_pose_pub_realtime_ != nullptr);
-  if (target_pose_pub_realtime_->trylock()) {
-    target_pose_pub_realtime_->msg_.header.stamp = get_node()->now();
-    target_pose_pub_realtime_->msg_.header.frame_id = params_->base_frame;
-    assign(base_to_target.translation(), Eigen::Quaterniond(base_to_target.rotation()),
-           target_pose_pub_realtime_->msg_.pose);
-    target_pose_pub_realtime_->unlockAndPublish();
-  }
+  duatic::controllers::compat::publish_rt(target_pose_pub_realtime_, pose_msg);
+
+  const pinocchio::Motion target_v_local =
+      pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
+  const pinocchio::Motion target_v_in_base = base_to_target.act(target_v_local) - base_v_local;
+  geometry_msgs::msg::TwistStamped twist_msg;
+  twist_msg.header.stamp = get_node()->now();
+  twist_msg.header.frame_id = params_->base_frame;
+  assign(target_v_in_base.linear(), target_v_in_base.angular(), twist_msg.twist);
   assert(target_twist_pub_realtime_ != nullptr);
-  if (target_twist_pub_realtime_->trylock()) {
-    const pinocchio::Motion target_v_local =
-        pinocchio::getFrameVelocity(robot_model_, state_data_, target_frame_idx_, pinocchio::ReferenceFrame::LOCAL);
-    const pinocchio::Motion target_v_in_base = base_to_target.act(target_v_local) - base_v_local;
-    target_twist_pub_realtime_->msg_.header.stamp = get_node()->now();
-    target_twist_pub_realtime_->msg_.header.frame_id = params_->base_frame;
-    assign(target_v_in_base.linear(), target_v_in_base.angular(), target_twist_pub_realtime_->msg_.twist);
-    target_twist_pub_realtime_->unlockAndPublish();
-  }
+  duatic::controllers::compat::publish_rt(target_twist_pub_realtime_, twist_msg);
 }
 
 }  // namespace duatic::controllers
