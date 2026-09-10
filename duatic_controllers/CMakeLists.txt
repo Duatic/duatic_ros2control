@@ -92,6 +92,7 @@ target_link_libraries(${PROJECT_NAME}
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    cartesian_pose_controller_parameters
     brake_release_controller_parameters
     pinocchio::pinocchio
     proxsuite::proxsuite
@@ -142,6 +143,7 @@ install(
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    cartesian_pose_controller_parameters
     brake_release_controller_parameters
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
