@@ -42,7 +42,7 @@ If `topic_pub_frequency` is greater than zero, the current target pose/twist rel
 | `base_frame` | Name of the base frame | `base_link` | - |
 | `target_frame` | Name of the target frame to be controlled | - | may not be empty |
 | `target_filter` | Exponential target filter time constant [s] | 0.1 | [0.0, 10.0] |
-| `command_velocities` | If true, also claims and commands the joints' velocity interface | *true** | - |
+| `command_velocities` | If true, also claims and commands the joints' velocity interface | true | - |
 | `limits.velocity.linear` | Maximum linear velocity [m/s] | 1.0 | [0.0, 10.0] |
 | `limits.velocity.angular` | Maximum angular velocity [rad/s] | 6.283 | [0.0, 62.83] |
 | `limits.acceleration.linear` | Maximum linear acceleration [m/s^2] | 2.0 | [0.0, 100.0] |

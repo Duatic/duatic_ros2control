@@ -602,7 +602,7 @@ controller_interface::return_type CartesianPoseController::update(const rclcpp::
   const bool ik_unsolved = !run_pose_diff_ik(problem_scale, diff_linear, diff_angular, verbose);
 
   // integrate joint positions and limit to the joint position limits (soft limits)
-  assert(robot_model_.nv == state_q_.size());
+  assert(robot_model_.nq == state_q_.size());
   control_q_ = (state_q_ + pose_diff_ik_result_)
                    .cwiseMax(robot_model_.lowerPositionLimit.cwiseMin(state_q_))
                    .cwiseMin(robot_model_.upperPositionLimit.cwiseMax(state_q_));
