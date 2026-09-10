@@ -13,7 +13,9 @@
   <test_depend>ament_lint_common</test_depend>
 
   <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
   <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>generate_parameter_library</depend>
   <depend>realtime_tools</depend>

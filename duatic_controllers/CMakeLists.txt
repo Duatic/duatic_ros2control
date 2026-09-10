@@ -5,6 +5,7 @@ project(duatic_controllers)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
@@ -102,6 +103,7 @@ target_link_libraries(${PROJECT_NAME}
 if(COMMAND ament_target_dependencies)
     ament_target_dependencies(${PROJECT_NAME}
       controller_interface
+      hardware_interface
       pluginlib
       rclcpp
       rclcpp_lifecycle
@@ -116,6 +118,7 @@ if(COMMAND ament_target_dependencies)
 else()
     target_link_libraries(${PROJECT_NAME}
       controller_interface::controller_interface
+      hardware_interface::hardware_interface
       pluginlib::pluginlib
       rclcpp::rclcpp
       rclcpp_lifecycle::rclcpp_lifecycle
