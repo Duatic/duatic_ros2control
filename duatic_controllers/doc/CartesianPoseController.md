@@ -78,3 +78,4 @@ If `topic_pub_frequency` is greater than zero, the current target pose/twist rel
 ## References
 
 * [Pinocchio library](https://github.com/stack-of-tasks/pinocchio)
+* [ProxSuite library](https://github.com/Simple-Robotics/proxsuite)
