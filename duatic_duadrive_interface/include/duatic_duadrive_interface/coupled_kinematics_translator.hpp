@@ -23,7 +23,9 @@
  */
 
 #pragma once
+#include <cstddef>
 #include <span>
+#include <type_traits>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
 
@@ -48,13 +50,21 @@ concept CoupledSerialMapping = requires(const Eigen::VectorXd& v)
     T::map_from_serial_to_coupled_torques(v)
     } -> std::same_as<Eigen::VectorXd>;
 
-  // Static size function
+  // Limit magnitudes use the element-wise absolute value of the mappings above
+  {
+    T::map_from_serial_to_coupled_coordinate_limits(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  {
+    T::map_from_serial_to_coupled_torque_limits(v)
+    } -> std::same_as<Eigen::VectorXd>;
+  // Static constexpr size function
   {
     T::input_size()
     } -> std::convertible_to<std::size_t>;
+  typename std::integral_constant<std::size_t, T::input_size()>;
 };
 
-template <typename Mapper>
+template <CoupledSerialMapping Mapper>
 struct KinematicsTranslator
 {
   using VectorType = Mapper::VectorType;
@@ -217,6 +227,38 @@ struct KinematicsTranslator
     VectorType v_c = Mapper::map_from_serial_to_coupled_coordinates(v_s);
     VectorType a_c = Mapper::map_from_serial_to_coupled_coordinates(a_s);
     VectorType t_c = Mapper::map_from_serial_to_coupled_torques(t_s);
+
+    for (std::size_t i = 0; i < input.size(); i++) {
+      output[i].position = p_c[i];
+      output[i].velocity = v_c[i];
+      output[i].acceleration = a_c[i];
+      output[i].torque = t_c[i];
+    }
+  }
+
+  static void map_from_serial_to_coupled_limits(std::span<const SerialCommand> input, std::span<CoupledCommand> output)
+  {
+    assert(input.size() == output.size());
+    if (input.size() != Mapper::input_size()) {
+      throw std::runtime_error("Wrong input size");
+    }
+    const std::size_t n = input.size();
+    VectorType p_s(n);
+    VectorType v_s(n);
+    VectorType a_s(n);
+    VectorType t_s(n);
+
+    for (std::size_t i = 0; i < input.size(); i++) {
+      p_s[i] = input[i].position;
+      v_s[i] = input[i].velocity;
+      a_s[i] = input[i].acceleration;
+      t_s[i] = input[i].torque;
+    }
+
+    VectorType p_c = Mapper::map_from_serial_to_coupled_coordinate_limits(p_s);
+    VectorType v_c = Mapper::map_from_serial_to_coupled_coordinate_limits(v_s);
+    VectorType a_c = Mapper::map_from_serial_to_coupled_coordinate_limits(a_s);
+    VectorType t_c = Mapper::map_from_serial_to_coupled_torque_limits(t_s);
 
     for (std::size_t i = 0; i < input.size(); i++) {
       output[i].position = p_c[i];
