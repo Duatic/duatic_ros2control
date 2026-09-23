@@ -43,7 +43,7 @@
 #include <rclcpp/macros.hpp>
 #include <rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp>
 #include <rclcpp_lifecycle/state.hpp>
-#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <ament_index_cpp/get_package_share_path.hpp>
 
 // sdk
 #include <duatic_duadrive_interface/interface_utils.hpp>
