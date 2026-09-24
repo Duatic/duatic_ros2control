@@ -126,59 +126,66 @@ public:
    */
   bool mark_as_ready(const Handle& handle)
   {
-    // Give it at least some thread safety
-    std::lock_guard<std::mutex> guard(lock_);
-    // 1. find the corresponding internal handle
-    const auto& network_interface = handle.ecat_bus->get_parameters().interface;
+    InternalHandle* internal_handle_ptr{ nullptr };
 
-    if (!has_bus(network_interface)) {
-      throw std::logic_error("EthercatMaster for interface: " + network_interface +
-                             " is not handled by this singleton");
-    }
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      // 1. find the corresponding internal handle
+      const auto& network_interface = handle.ecat_bus->get_parameters().interface;
 
-    auto& internal_handle = handles_.at(network_interface);
-
-    // 2. Check if the handle is already marked as ready
-    if (internal_handle.handles_ready.at(handle.id)) {
-      throw std::runtime_error("Handle with id: " + std::to_string(handle.id) + " on interface: " + network_interface +
-                               " was already marked as ready!");
-    }
-
-    // 3. Mark it as ready
-    internal_handle.handles_ready.at(handle.id) = true;
-
-    // 4. Check if all handles are ready
-    bool all_ready = true;
-    for (auto& [id, ready] : internal_handle.handles_ready) {
-      if (!ready) {
-        all_ready = false;
-        break;
+      if (!has_bus(network_interface)) {
+        throw std::logic_error("EthercatMaster for interface: " + network_interface +
+                               " is not handled by this singleton");
       }
-    }
 
-    if (!all_ready) {
-      logging::info() << "Not all handles ready - deferring start";
-      return false;
-    }
+      internal_handle_ptr = &handles_.at(network_interface);
 
-    // 5. Perform the startup (bus startup - this just starts setting up communication) and spin
-    internal_handle.ecat_bus->startup();
+      // 2. Check if the handle is already marked as ready
+      if (internal_handle_ptr->handles_ready.at(handle.id)) {
+        throw std::runtime_error("Handle with id: " + std::to_string(handle.id) +
+                                 " on interface: " + network_interface + " was already marked as ready!");
+      }
+
+      // 3. Mark it as ready
+      internal_handle_ptr->handles_ready.at(handle.id) = true;
+
+      // 4. Check if all handles are ready
+      bool all_ready = true;
+      for (auto& [id, ready] : internal_handle_ptr->handles_ready) {
+        if (!ready) {
+          all_ready = false;
+          break;
+        }
+      }
+
+      if (!all_ready) {
+        logging::info() << "Not all handles ready - deferring start";
+        return false;
+      }
+
+      logging::info() << "All handles ready - performing bus startup";
+
+      // 5. Perform the startup (bus startup - this just starts setting up communication) and spin
+      internal_handle_ptr->ecat_bus->startup();
+    }  // Important to release the lock here
 
     // 6. Call callback to allow clients to perform any work before going into PDO communication which is timing
     // sensitive
-    for (auto& cb : internal_handle.startup_finished_callbacks) {
+    for (auto& cb : internal_handle_ptr->startup_finished_callbacks) {
       if (cb) {
         cb();
       }
     }
 
+    // And acquire a new lock
+    std::lock_guard<std::mutex> guard(lock_);
     logging::info() << "Starting asynchronous worker thread for ethercat master on network interface: "
-                    << network_interface;
+                    << handle.ecat_bus->get_parameters().interface;
 
     // Start executor
-    internal_handle.ecat_bus->activate();
-    internal_handle.executor = std::make_unique<SingleBusExecutor>(internal_handle.ecat_bus);
-    internal_handle.executor->spin();
+    internal_handle_ptr->ecat_bus->activate();
+    internal_handle_ptr->executor = std::make_unique<SingleBusExecutor>(internal_handle_ptr->ecat_bus);
+    internal_handle_ptr->executor->spin();
     return true;
   }
   /**
