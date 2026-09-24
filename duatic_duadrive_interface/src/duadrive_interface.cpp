@@ -269,7 +269,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
     }
   }
   last_status_word_ = current_status_word;
-  last_reading_update_ = reading.time_stamp;
+  last_reading_update_ = reading.drive_time_stamp.value_or(reading.time_stamp);
 
   // Now update the state vector
   state_.joint_position = reading.joint_position;
