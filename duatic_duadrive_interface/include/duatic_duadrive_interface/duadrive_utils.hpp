@@ -147,6 +147,8 @@ inline duadrive_sdk::v1::Command build_command(const duadrive_sdk::v1::ControlMo
       return JointPositionTorqueCommand(joint_position, static_cast<float>(joint_torque));
     case CM::JointVelocity:
       return JointVelocityCommand(static_cast<float>(joint_velocity));
+    case CM::JointPositionVelocity:
+      return JointPositionVelocityCommand(static_cast<float>(joint_position), static_cast<float>(joint_velocity));
     case CM::JointPositionVelocityTorque:
       return JointPositionVelocityTorqueCommand(joint_position, static_cast<float>(joint_velocity),
                                                 static_cast<float>(joint_torque));
