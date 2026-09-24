@@ -65,7 +65,7 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::deactivate()
 hardware_interface::return_type DuaDriveInterfaceMock::read([[maybe_unused]] const rclcpp::Time& time,
                                                             [[maybe_unused]] const rclcpp::Duration& period)
 {
-  last_reading_update_ = std::chrono::system_clock::now();
+  last_reading_update_ = duadrive_sdk::v1::Clock::now();
   return hardware_interface::return_type::OK;
 }
 
@@ -77,13 +77,13 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = command_.joint_torque;
   state_.current_drive_mode = active_mode_;
-  state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
+  state_.current_drive_state = duadrive_sdk::v1::FSMState::ControlOp;
 
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::Freeze) {
+  if (active_mode_ == duadrive_sdk::v1::ControlMode::Freeze) {
     return hardware_interface::return_type::OK;
   }
 
-  if (active_mode_ == rsl_drive_sdk::mode::ModeEnum::JointVelocity) {
+  if (active_mode_ == duadrive_sdk::v1::ControlMode::JointVelocity) {
     // Especially support the joint velocity mode where we calculate the position from the last position and the
     // velocity
     state_.joint_velocity = command_.joint_velocity;
