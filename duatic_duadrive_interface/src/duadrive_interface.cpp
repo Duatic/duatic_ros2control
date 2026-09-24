@@ -105,7 +105,8 @@ void DuaDriveInterface::on_bus_startup_finished()
                                                        << "\n   Build date: " << info.build_date << "\n   Git tag: "
                                                        << info.git_tag << "\n   Git hash: " << info.git_hash
                                                        << "\n   Firmware version: " << fw_version);
-  const auto gains = drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorque);
+  const auto gains =
+      drive_->configuration_interface().read_control_gains(ControlMode::JointPositionVelocityTorquePidGains);
 
   command_.p_gain = gains.p;
   command_.i_gain = gains.i;
@@ -222,7 +223,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  last_reading_update_ = std::chrono::system_clock::now();
+  last_reading_update_ = duadrive_sdk::v1::Clock::now();
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -253,6 +254,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
 {
   drive_->sync_read();
   // Obtain the latest reading from the drive (note: we assume asynchronous spinning)
+  if (!drive_->has_reading()) {
+    return hardware_interface::return_type::ERROR;
+  }
   duadrive_sdk::v1::Reading reading = drive_->get_latest_reading();
 
   // Print any status word changes (e.g. motor temperature warning has appeared)
@@ -265,7 +269,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
     }
   }
   last_status_word_ = current_status_word;
-  // last_reading_update_ = reading.time_stamp;
+  last_reading_update_ = reading.time_stamp;
 
   // Now update the state vector
   state_.joint_position = reading.joint_position;

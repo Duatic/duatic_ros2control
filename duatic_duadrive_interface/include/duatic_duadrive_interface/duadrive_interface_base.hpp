@@ -211,7 +211,7 @@ public:
 
   bool communication_has_timeout() const
   {
-    return std::chrono::system_clock::now() - last_reading_update_ > params_.communication_timeout;
+    return duadrive_sdk::v1::Clock::now() - last_reading_update_ > params_.communication_timeout;
   };
 
 protected:
@@ -222,7 +222,7 @@ protected:
   DuaDriveInterfaceParameters params_;
   DuaDriveInterfaceInfo drive_info_;
 
-  std::chrono::system_clock::time_point last_reading_update_;
+  duadrive_sdk::v1::TimeStamp last_reading_update_;
 
   duadrive_sdk::v1::ControlMode active_mode_{ duadrive_sdk::v1::ControlMode::Freeze };
   duadrive_sdk::v1::ControlMode previous_mode_{ duadrive_sdk::v1::ControlMode::JointPositionVelocityTorquePidGains };

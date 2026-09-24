@@ -126,6 +126,8 @@ public:
    */
   bool mark_as_ready(const Handle& handle)
   {
+    // Give it at least some thread safety
+    std::lock_guard<std::mutex> guard(lock_);
     // 1. find the corresponding internal handle
     const auto& network_interface = handle.ecat_bus->get_parameters().interface;
 
@@ -257,7 +259,9 @@ private:
   {
     // Tell every update thread to stop spinning
     for (auto& [interface, handle] : handles_) {
-      handle.executor->stop();
+      if (handle.executor && handle.ecat_bus) {
+        handle.executor->stop();
+      }
     }
   }
 
