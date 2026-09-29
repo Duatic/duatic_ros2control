@@ -44,9 +44,8 @@
 
 namespace duatic::duadrive_interface
 {
-// Factor by which we extend the hard limits so that what an application uses as limit for the input and what we use as
-// hard safe factors is a bit scaled
-inline constexpr double velocity_range_extension_factor = 1.1;
+// Factor by which we extend the HW limits so that what an application uses as limit is a bit scaled for the drives
+constexpr double hw_limits_gain = 1.01;  // default scale = 1%
 
 struct DuaDriveInterfaceParameters
 {

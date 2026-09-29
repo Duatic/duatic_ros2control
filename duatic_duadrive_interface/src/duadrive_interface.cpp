@@ -133,27 +133,37 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains.value());
 
-  // Maximum torque/velocity values
-  // NOTE: this overrides any values that are configured in the drive config files
+  // Maximum velocity -- NOTE: this overrides any values configured in the drive config files
   if (!drive_->getGearboxRatio(configured_gear_ratio_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain gear ratio");
-    // Throw as this is critical because we cannot use it to calculate the proper maximum motor velocity
-    throw std::runtime_error("Failed to btain the gear box ration of drive: " + get_name());
+    // Throw as this is ratio is required to calculate the maximum motor velocity
+    throw std::runtime_error("Failed to obtain gear ration of drive: " + get_name());
   }
-
-  if (!drive_->setMaxJointTorque(params_.maximum_joint_effort)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to configure maximum joint torque");
+  const auto maximum_motor_velocity = params_.maximum_joint_velocity * configured_gear_ratio_ * hw_limits_gain;
+  if (maximum_motor_velocity <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor velocity of " + std::to_string(maximum_motor_velocity) +
+                             " for drive: " + get_name());
   }
-  const auto maximum_motor_velocity =
-      velocity_range_extension_factor * params_.maximum_joint_velocity * configured_gear_ratio_;
   if (!drive_->setMaxMotorVelocity(maximum_motor_velocity)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to configure maximum motor velocity");
+    throw std::runtime_error("Failed to configure maximum motor velocity");
   }
-  RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << params_.maximum_joint_effort << "Nm "
-                                                       << " maximum motor velocity: " << maximum_motor_velocity
-                                                       << " rad/s");
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
+                                                         << " Maximum motor velocity: " << maximum_motor_velocity
+                                                         << " rad/s");
+
+  // Maximum torque -- NOTE: this overrides any values configured in the drive config files
+  const auto maximum_motor_torque = params_.maximum_joint_effort * hw_limits_gain;
+  if (maximum_motor_torque <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor torque of " + std::to_string(maximum_motor_torque) +
+                             " for drive: " + get_name());
+  }
+  if (!drive_->setMaxJointTorque(maximum_motor_torque)) {
+    throw std::runtime_error("Failed to configure maximum joint torque");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint effort: " << params_.maximum_joint_effort << "Nm "
+                                                       << " maximum motor torque: " << maximum_motor_torque << " Nm");
+
   if (!drive_->getBrakeCurrentState(current_brake_state_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain current brake state");
+    throw std::runtime_error("Failed to obtain current brake state");
   }
   RCLCPP_INFO_STREAM(logger_, "Current brake state: " << current_brake_state_);
 }

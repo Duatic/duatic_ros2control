@@ -84,7 +84,7 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   }
 
   // Try to achieve similar error handling behavior as on the real time (aka freeze + error) (in our case -> abort)
-  if (std::abs(command_.joint_velocity) > params_.maximum_joint_velocity * velocity_range_extension_factor) {
+  if (std::abs(command_.joint_velocity) > params_.maximum_joint_velocity * hw_limits_gain) {
     throw std::runtime_error("Maximum velocity exceeded on joint: " + get_name());
   }
 
