@@ -4,20 +4,32 @@ project(duatic_controllers)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(controller_interface REQUIRED)
-find_package(hardware_interface REQUIRED)
-find_package(pluginlib REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_lifecycle REQUIRED)
-find_package(realtime_tools REQUIRED)
-find_package(duatic_controller_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(generate_parameter_library REQUIRED)
-find_package(std_srvs REQUIRED)
-find_package(Eigen3 REQUIRED)
-find_package(eigen3_cmake_module REQUIRED)
-find_package(pinocchio REQUIRED)
-find_package(proxsuite REQUIRED)
+
+# CMake-only packages: code generators and find helpers, nothing to link
+set(CMAKE_DEPENDENCIES
+  generate_parameter_library
+  eigen3_cmake_module
+)
+
+set(PACKAGE_DEPENDENCIES
+  controller_interface
+  hardware_interface
+  pluginlib
+  rclcpp
+  rclcpp_lifecycle
+  realtime_tools
+  duatic_controller_msgs
+  geometry_msgs
+  std_srvs
+  Eigen3
+  pinocchio
+  proxsuite
+)
+
+foreach(Dependency IN ITEMS ${CMAKE_DEPENDENCIES} ${PACKAGE_DEPENDENCIES})
+  find_package(${Dependency} REQUIRED)
+endforeach()
+
 # Generate code from parameter description yaml files
 generate_parameter_library(
     duadrive_status_broadcaster_parameters
@@ -101,20 +113,7 @@ target_link_libraries(${PROJECT_NAME}
 
 # Support ros distros older than lyrical
 if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME}
-      controller_interface
-      hardware_interface
-      pluginlib
-      rclcpp
-      rclcpp_lifecycle
-      realtime_tools
-      duatic_controller_msgs
-      geometry_msgs
-      std_srvs
-      Eigen3
-      pinocchio
-      proxsuite
-    )
+    ament_target_dependencies(${PROJECT_NAME} ${PACKAGE_DEPENDENCIES})
 else()
     target_link_libraries(${PROJECT_NAME}
       controller_interface::controller_interface
@@ -167,6 +166,8 @@ ament_export_libraries(
 ament_export_targets(
   export_${PROJECT_NAME}
 )
+
+ament_export_dependencies(${CMAKE_DEPENDENCIES} ${PACKAGE_DEPENDENCIES})
 
 
 ament_package()
