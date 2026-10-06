@@ -23,11 +23,11 @@
  */
 
 #pragma once
-#include <cstddef>
 #include <span>
-#include <type_traits>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
+#include <cstddef>
+#include <type_traits>
 
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
 

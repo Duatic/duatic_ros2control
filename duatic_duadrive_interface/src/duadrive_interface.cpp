@@ -100,6 +100,12 @@ hardware_interface::CallbackReturn DuaDriveInterface::configure()
 
 void DuaDriveInterface::on_bus_startup_finished()
 {
+  // Try to bring the drive into configure state - if that fails within the time limit - just try to access the fields.
+  // Sometimes a takes a bit more time
+  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, true, 1.0, 10)) {
+    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into configure");
+  }
+
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
   rsl_drive_sdk::common::BuildInfo info;
   if (!drive_->getBuildInfo(info)) {
