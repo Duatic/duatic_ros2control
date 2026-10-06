@@ -99,37 +99,31 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 # Link against the controller parameter targets
 target_link_libraries(${PROJECT_NAME}
-    duadrive_status_broadcaster_parameters
-    force_torque_broadcaster_parameters
-    freedrive_controller_parameters
-    duadrive_pid_tuner_parameters
-    gravity_compensation_controller_parameters
-    freeze_controller_parameters
-    cartesian_pose_controller_parameters
-    brake_release_controller_parameters
-    pinocchio::pinocchio
-    proxsuite::proxsuite
+  duadrive_status_broadcaster_parameters
+  force_torque_broadcaster_parameters
+  freedrive_controller_parameters
+  duadrive_pid_tuner_parameters
+  gravity_compensation_controller_parameters
+  freeze_controller_parameters
+  cartesian_pose_controller_parameters
+  brake_release_controller_parameters
 )
 
-# Support ros distros older than lyrical
-if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME} ${PACKAGE_DEPENDENCIES})
-else()
-    target_link_libraries(${PROJECT_NAME}
-      controller_interface::controller_interface
-      hardware_interface::hardware_interface
-      pluginlib::pluginlib
-      rclcpp::rclcpp
-      rclcpp_lifecycle::rclcpp_lifecycle
-      realtime_tools::realtime_tools
-      duatic_controller_msgs::duatic_controller_msgs
-      geometry_msgs::geometry_msgs
-      std_srvs::std_srvs
-      Eigen3::Eigen
-      pinocchio::pinocchio
-      proxsuite::proxsuite
-    )
-endif()
+# Link against the package dependencies (one target per entry of PACKAGE_DEPENDENCIES)
+target_link_libraries(${PROJECT_NAME}
+  controller_interface::controller_interface
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  realtime_tools::realtime_tools
+  duatic_controller_msgs::duatic_controller_msgs
+  geometry_msgs::geometry_msgs
+  std_srvs::std_srvs
+  Eigen3::Eigen
+  pinocchio::pinocchio
+  proxsuite::proxsuite
+)
 
 # prevent pluginlib from using boost
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
