@@ -102,8 +102,16 @@ void DuaDriveInterface::on_bus_startup_finished()
 {
   // Try to bring the drive into configure state - if that fails within the time limit - just try to access the fields.
   // Sometimes a takes a bit more time
-  if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, true, 1.0, 10)) {
-    RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into configure");
+  drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::Configure, false, 0, 0);
+  const auto start_time = std::chrono::steady_clock::now();
+  while (!drive_->goalStateHasBeenReached() &&
+         (std::chrono::steady_clock::now() - start_time < std::chrono::milliseconds(500))) {
+    drive_->updateWrite();
+    drive_->updateRead();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (!drive_->goalStateHasBeenReached()) {
+    RCLCPP_ERROR_STREAM(logger_, "Drive: " << get_name() << " failed to reach configure state");
   }
 
   // Log the firmware information of the drive. Might be useful for debugging issues at customer
