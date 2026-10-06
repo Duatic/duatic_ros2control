@@ -4,32 +4,20 @@ project(duatic_controllers)
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-
-# CMake-only packages: code generators and find helpers, nothing to link
-set(CMAKE_DEPENDENCIES
-  generate_parameter_library
-  eigen3_cmake_module
-)
-
-set(PACKAGE_DEPENDENCIES
-  controller_interface
-  hardware_interface
-  pluginlib
-  rclcpp
-  rclcpp_lifecycle
-  realtime_tools
-  duatic_controller_msgs
-  geometry_msgs
-  std_srvs
-  Eigen3
-  pinocchio
-  proxsuite
-)
-
-foreach(Dependency IN ITEMS ${CMAKE_DEPENDENCIES} ${PACKAGE_DEPENDENCIES})
-  find_package(${Dependency} REQUIRED)
-endforeach()
-
+find_package(controller_interface REQUIRED)
+find_package(hardware_interface REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(realtime_tools REQUIRED)
+find_package(duatic_controller_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(generate_parameter_library REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(eigen3_cmake_module REQUIRED)
+find_package(pinocchio REQUIRED)
+find_package(proxsuite REQUIRED)
 # Generate code from parameter description yaml files
 generate_parameter_library(
     duadrive_status_broadcaster_parameters
@@ -99,17 +87,18 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 # Link against the controller parameter targets
 target_link_libraries(${PROJECT_NAME}
-  duadrive_status_broadcaster_parameters
-  force_torque_broadcaster_parameters
-  freedrive_controller_parameters
-  duadrive_pid_tuner_parameters
-  gravity_compensation_controller_parameters
-  freeze_controller_parameters
-  cartesian_pose_controller_parameters
-  brake_release_controller_parameters
+    duadrive_status_broadcaster_parameters
+    force_torque_broadcaster_parameters
+    freedrive_controller_parameters
+    duadrive_pid_tuner_parameters
+    gravity_compensation_controller_parameters
+    freeze_controller_parameters
+    cartesian_pose_controller_parameters
+    brake_release_controller_parameters
+    pinocchio::pinocchio
+    proxsuite::proxsuite
 )
 
-# Link against the package dependencies (one target per entry of PACKAGE_DEPENDENCIES)
 target_link_libraries(${PROJECT_NAME}
   controller_interface::controller_interface
   hardware_interface::hardware_interface
@@ -160,8 +149,20 @@ ament_export_libraries(
 ament_export_targets(
   export_${PROJECT_NAME}
 )
-
-ament_export_dependencies(${CMAKE_DEPENDENCIES} ${PACKAGE_DEPENDENCIES})
-
-
+ament_export_dependencies(
+  generate_parameter_library
+  eigen3_cmake_module
+  controller_interface
+  hardware_interface
+  pluginlib
+  rclcpp
+  rclcpp_lifecycle
+  realtime_tools
+  duatic_controller_msgs
+  geometry_msgs
+  std_srvs
+  Eigen3
+  pinocchio
+  proxsuite
+)
 ament_package()
