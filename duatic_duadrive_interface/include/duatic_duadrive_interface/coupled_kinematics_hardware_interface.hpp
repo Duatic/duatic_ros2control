@@ -406,6 +406,10 @@ public:
 
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& /*previous_state*/) override
   {
+    // Allow the limiters to be re-seeded with the measured position on the next activation
+    for (auto& limiter : position_limiters_) {
+      limiter.reset();
+    }
     for (auto& drive : drives_) {
       // Call deactivate for each drive and propagate errors if necessary
       if (drive->deactivate() != hardware_interface::CallbackReturn::SUCCESS) {
