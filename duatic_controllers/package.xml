@@ -8,24 +8,34 @@
   <license>BSD3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>eigen3_cmake_module</buildtool_depend>
+  <buildtool_depend>generate_parameter_library</buildtool_depend>
+  <buildtool_export_depend>generate_parameter_library</buildtool_export_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
+  <!-- PUBLIC: used in public headers -->
   <depend>controller_interface</depend>
   <depend>hardware_interface</depend>
-  <depend>pluginlib</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
-  <depend>generate_parameter_library</depend>
   <depend>realtime_tools</depend>
   <depend>duatic_controller_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>std_srvs</depend>
+  <depend>trajectory_msgs</depend>
   <depend>eigen</depend>
-  <depend>eigen3_cmake_module</depend>
   <depend>pinocchio</depend>
   <depend>proxsuite</depend>
+
+  <!-- PRIVATE: used only in sources -->
+  <build_depend>pluginlib</build_depend>
+  <exec_depend>pluginlib</exec_depend>
+  <build_depend>lifecycle_msgs</build_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <build_depend>fmt</build_depend>
+  <exec_depend>fmt</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
