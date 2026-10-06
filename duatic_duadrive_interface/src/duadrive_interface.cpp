@@ -133,32 +133,14 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains.value());
 
-  // Maximum torque/velocity values
-  // We use this to provide the possibility to scale down the safety values
-
-  if (!drive_->getMaxJointTorque(configured_max_torque_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain maximum joint torque");
-  }
-
+  // Maximum velocity -- NOTE: this overrides any values configured in the drive config files
   if (!drive_->getGearboxRatio(configured_gear_ratio_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain gear ratio");
+    // Throw as this is ratio is required to calculate the maximum motor velocity
+    throw std::runtime_error("Failed to obtain gear ration of drive: " + get_name());
   }
 
-  double max_motor_velocity{};
-  if (!drive_->getMaxMotorVelocity(max_motor_velocity)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain maximum motor velocity");
-  }
-  // Actually store the velocity in joint coordinates
-  configured_max_velocity_ = max_motor_velocity / configured_gear_ratio_;
-
-  current_max_torque_ = configured_max_torque_;
-  current_max_velocity_ = configured_max_velocity_;
-
-  RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << configured_max_torque_ << "Nm "
-                                                       << " maximum joint velocity: " << configured_max_velocity_
-                                                       << " rad/s");
   if (!drive_->getBrakeCurrentState(current_brake_state_)) {
-    RCLCPP_ERROR_STREAM(logger_, "Failed to obtain current brake state");
+    throw std::runtime_error("Failed to obtain current brake state");
   }
   RCLCPP_INFO_STREAM(logger_, "Current brake state: " << current_brake_state_);
 }
@@ -216,6 +198,30 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
       break;
     }
   }
+
+  const auto maximum_motor_velocity = params_.maximum_joint_velocity * configured_gear_ratio_ * hw_limits_gain;
+  if (maximum_motor_velocity <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor velocity of " + std::to_string(maximum_motor_velocity) +
+                             " for drive: " + get_name());
+  }
+  if (!drive_->setMaxMotorVelocity(maximum_motor_velocity)) {
+    throw std::runtime_error("Failed to configure maximum motor velocity");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
+                                                         << " Maximum motor velocity: " << maximum_motor_velocity
+                                                         << " rad/s");
+
+  // Maximum torque -- NOTE: this overrides any values configured in the drive config files
+  const auto maximum_motor_torque = params_.maximum_joint_effort * hw_limits_gain;
+  if (maximum_motor_torque <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor torque of " + std::to_string(maximum_motor_torque) +
+                             " for drive: " + get_name());
+  }
+  if (!drive_->setMaxJointTorque(maximum_motor_torque)) {
+    throw std::runtime_error("Failed to configure maximum joint torque");
+  }
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint effort: " << params_.maximum_joint_effort << "Nm "
+                                                       << " maximum motor torque: " << maximum_motor_torque << " Nm");
 
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
@@ -362,29 +368,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
     // We always fill all command fields but depending on the mode only a subset is used
     drive_->setCommand(cmd);
 
-    // DISABLED at the moment as we run into issues with sending these values via ethercat
-
-    // Given the current scaling values calculate the maximum torque/maximum velocity values (NOTE until the point where
-    // we set it we are in joint coordinates)
-    // const double new_max_torque = std::clamp(command_.scaling_factor_max_torque, 0.0, 1.0) * configured_max_torque_;
-    // const double new_max_velocity =
-    //    std::clamp(command_.scaling_factor_max_velocity, 0.0, 1.0) * configured_max_velocity_;
-
-    // In case the changed enough -> perform an sdo write of the new maximum values
-
-    /*if (std::abs(new_max_torque - current_max_torque_) > 0.5) {
-      current_max_torque_ = new_max_torque;
-      RCLCPP_INFO_STREAM(logger_, "New maximum torque: " << new_max_torque << "N");
-      drive_->setMaxJointTorque(current_max_torque_);
-    }
-    if (std::abs(new_max_velocity - current_max_velocity_) > 1.0) {
-      RCLCPP_INFO_STREAM(logger_, "New maximum joint velocity: " << new_max_velocity << "rad/s (motor:"
-                                                                 << new_max_velocity * configured_gear_ratio_ << ")");
-      current_max_velocity_ = new_max_velocity;
-      // Convert to motor velocity
-      drive_->setMaxMotorVelocity(current_max_velocity_ * configured_gear_ratio_);
-    }*/
-
+    // Workaround for arms with brakes -> if the brakes are active we do not allow the freeze mode
+    // as it might vibrate on the brake depending on tuning
     if (params_.has_brake && command_.target_brake_state != current_target_brake_state) {
       current_target_brake_state = command_.target_brake_state;
       // Safety check that only valid values are commanded
@@ -401,10 +386,12 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
   } else {
     rsl_drive_sdk::ReadingExtended reading;
     drive_->getReading(reading);
-    RCLCPP_ERROR_STREAM(
-        logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: " << drive_->getActiveStateEnum()
-                            << " Raw status word: " << drive_->getStatusword().getData()
-                            << " raw status word from reading: " << reading.getState().getStatusword().getData());
+
+    RCLCPP_ERROR_STREAM_THROTTLE(
+        logger_, throttle_clock_, 1000,
+        get_name() << " Is not in target FSM Mode: ControlOP actual mode: " << drive_->getActiveStateEnum()
+                   << " Raw status word: " << drive_->getStatusword().getData()
+                   << " raw status word from reading: " << reading.getState().getStatusword().getData());
   }
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
