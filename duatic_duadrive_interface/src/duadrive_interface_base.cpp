@@ -100,10 +100,10 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
   state_interface_mapping_.insert({ state_interface_descriptions_[20].get_name(), &state_.voltage_coil_B });
   state_interface_mapping_.insert({ state_interface_descriptions_[21].get_name(), &state_.voltage_coil_C });
 
-  if (state_interface_mapping_.size() != state_interface_descriptions_.size()) {
-    throw std::logic_error("Error in interface mapping sizes");
-  }
+  assert((state_interface_mapping_.size() == state_interface_descriptions_.size()) && "Error in interface mapping "
+                                                                                      "sizes");
 }
+
 void DuaDriveInterfaceBase::generate_command_interface_desriptions()
 {
   command_interface_descriptions_ = {
@@ -126,9 +126,8 @@ void DuaDriveInterfaceBase::generate_command_interface_desriptions()
   command_interface_mapping_.insert({ command_interface_descriptions_[6].get_name(), &command_.d_gain });
   command_interface_mapping_.insert({ command_interface_descriptions_[7].get_name(), &command_.target_brake_state });
 
-  if (command_interface_mapping_.size() != command_interface_descriptions_.size()) {
-    throw std::logic_error("Error in interface mapping sizes");
-  }
+  assert((command_interface_mapping_.size() == command_interface_descriptions_.size()) && "Error in interface mapping "
+                                                                                          "sizes");
 }
 
 hardware_interface::CallbackReturn DuaDriveInterfaceBase::configure()
