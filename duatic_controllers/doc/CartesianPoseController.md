@@ -46,7 +46,7 @@ If `topic_pub_frequency` is greater than zero, the current target pose/twist rel
 | `limits.velocity.linear` | Maximum linear velocity [m/s] | 1.0 | [0.0, 10.0] |
 | `limits.velocity.angular` | Maximum angular velocity [rad/s] | 6.283 | [0.0, 62.83] |
 | `limits.acceleration.linear` | Maximum linear acceleration [m/s^2] | 2.0 | [0.0, 100.0] |
-| `limits.acceleration.angular` | Maximum angular acceleration [rad/s^2] | 12.466 | [0.0, 628.3] |
+| `limits.acceleration.angular` | Maximum angular acceleration [rad/s^2] | 12.566 | [0.0, 628.3] |
 | `topic_prefix` | Prefix to all topics. If empty, the controller name is used | - | - |
 | `target_topic_suffix` | Suffix added to the target frame topic for receiving control inputs | `target` | - |
 | `topic_pub_frequency` | Frequency of the published end effector pose/twist topics. Zero disables publishing | 10.0 | [0.0, 1000.0] |

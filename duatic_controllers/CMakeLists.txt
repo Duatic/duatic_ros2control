@@ -99,38 +99,20 @@ target_link_libraries(${PROJECT_NAME}
     proxsuite::proxsuite
 )
 
-# Support ros distros older than lyrical
-if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME}
-      controller_interface
-      hardware_interface
-      pluginlib
-      rclcpp
-      rclcpp_lifecycle
-      realtime_tools
-      duatic_controller_msgs
-      geometry_msgs
-      std_srvs
-      Eigen3
-      pinocchio
-      proxsuite
-    )
-else()
-    target_link_libraries(${PROJECT_NAME}
-      controller_interface::controller_interface
-      hardware_interface::hardware_interface
-      pluginlib::pluginlib
-      rclcpp::rclcpp
-      rclcpp_lifecycle::rclcpp_lifecycle
-      realtime_tools::realtime_tools
-      duatic_controller_msgs::duatic_controller_msgs
-      geometry_msgs::geometry_msgs
-      std_srvs::std_srvs
-      Eigen3::Eigen
-      pinocchio::pinocchio
-      proxsuite::proxsuite
-    )
-endif()
+target_link_libraries(${PROJECT_NAME}
+  controller_interface::controller_interface
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  realtime_tools::realtime_tools
+  duatic_controller_msgs::duatic_controller_msgs
+  geometry_msgs::geometry_msgs
+  std_srvs::std_srvs
+  Eigen3::Eigen
+  pinocchio::pinocchio
+  proxsuite::proxsuite
+)
 
 # prevent pluginlib from using boost
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
@@ -167,6 +149,20 @@ ament_export_libraries(
 ament_export_targets(
   export_${PROJECT_NAME}
 )
-
-
+ament_export_dependencies(
+  generate_parameter_library
+  eigen3_cmake_module
+  controller_interface
+  hardware_interface
+  pluginlib
+  rclcpp
+  rclcpp_lifecycle
+  realtime_tools
+  duatic_controller_msgs
+  geometry_msgs
+  std_srvs
+  Eigen3
+  pinocchio
+  proxsuite
+)
 ament_package()
