@@ -179,8 +179,7 @@ public:
     RCLCPP_INFO_STREAM(logger_, "Start with drives: detected " << system_info.hardware_info.joints.size()
                                                                << " joints in the hardware info");
 
-    // Serial-kinematics limits collected per joint. They are converted to coupled
-    // kinematics in a single step after this loop.
+    // Serial-kinematics limits collected per joint
     std::vector<double> serial_maximum_joint_effort;
     std::vector<double> serial_maximum_joint_velocity;
     // Partially filled drive parameters - the coupled quantities are added later
