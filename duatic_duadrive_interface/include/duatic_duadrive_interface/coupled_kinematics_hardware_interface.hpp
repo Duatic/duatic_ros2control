@@ -172,22 +172,16 @@ public:
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
-    // We obtain information about configured joints and create DuaDriveInterface instances from them.
-    // The drives are only constructed here - the actual init() happens at the end of this function,
-    // once the serial -> coupled conversion of the limits (and the initial positions) has been done.
-    // reason: for the transformation all values are needed
+    // Create DuaDriveInterface instances
     RCLCPP_INFO_STREAM(logger_, "Start with drives: detected " << system_info.hardware_info.joints.size()
                                                                << " joints in the hardware info");
 
-    // Serial-kinematics limits collected per joint. They are converted to coupled
-    // kinematics in a single step after this loop.
+    // Serial-kinematics limits collected per joint.
     std::vector<double> serial_maximum_joint_effort;
     std::vector<double> serial_maximum_joint_velocity;
-    // Partially filled drive parameters - the coupled quantities are added later
-    std::vector<DuaDriveInterfaceParameters> drive_parameters;
+    std::vector<DuaDriveInterfaceParameters> drive_parameters;  // Partially filled, coupled quantities are added later
 
-    // Reason we collect the limits separately -> need to be converted into coupled coordinates first before being
-    // applied
+    // Reason we collect the limits separately: need to be converted into coupled coordinates before being applied
     const auto joint_count = system_info.hardware_info.joints.size();
     serial_maximum_joint_effort.reserve(joint_count);
     serial_maximum_joint_velocity.reserve(joint_count);
@@ -272,14 +266,9 @@ public:
       });
     }
 
-    // Serial -> coupled conversion of all per-joint quantities.
-    //
-    // Initial positions are a mock-only parameter and are coordinates, so they use the
-    // ordinary coordinate mapping. The limits are interval radii and use the dedicated
-    // limit mapping - hence two separate conversions below.
-    //
-    // The initial positions are a mock-only parameter. On real hardware the
-    // position channel stays zero and the converted result is discarded.
+    // Serial -> coupled conversion of all per-joint quantities:
+    // Initial positions are a mock-only coordinates parameters.
+    // Limits are interval radii and use the limit mapping.
     std::vector<double> serial_initial_positions(drives_.size(), 0.0);
     bool apply_initial_positions = false;
 
