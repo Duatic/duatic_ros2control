@@ -263,6 +263,7 @@ public:
           .has_brake = has_brake,
           .maximum_joint_effort = 0.0,
           .maximum_joint_velocity = 0.0,
+          .communication_timeout = communication_timeout,
       });
     }
 
@@ -315,7 +316,7 @@ public:
       RCLCPP_INFO_STREAM(logger_, " - max joint effort  : " << drive_parameters[i].maximum_joint_effort << " Nm");
 
       drives_[i]->init(drive_parameters[i]);
-      current_active_drive_modes_.insert({ drives_[i]->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
+      current_active_drive_modes_.insert({ drives_[i]->get_name(), duadrive_sdk::v1::ControlMode::Freeze });
 
       // Only for mock enforce the starting position
       if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
@@ -434,8 +435,8 @@ public:
       state.torque_commanded = latest_reading.joint_torque_commanded;
 
       // Error handling section
-      if (latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Error ||
-          latest_reading.current_drive_state == rsl_drive_sdk::fsm::StateEnum::Fatal) {
+      if (latest_reading.current_drive_state == duadrive_sdk::v1::FSMState::Error ||
+          latest_reading.current_drive_state == duadrive_sdk::v1::FSMState::Fatal) {
         RCLCPP_ERROR_STREAM_ONCE(logger_,
                                  "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
         error_active_ = true;
@@ -576,7 +577,7 @@ protected:
   rclcpp::Logger logger_;
 
   std::unordered_map<std::string, std::set<std::string>> currently_active_interfaces_;
-  std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
+  std::unordered_map<std::string, duadrive_sdk::v1::ControlMode> current_active_drive_modes_;
 
   bool error_active_{ false };
 
