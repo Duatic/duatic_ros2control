@@ -95,13 +95,7 @@ private:
   std::optional<duadrive_sdk::v1::Statusword> last_status_word_;
   duadrive_sdk::v1::BrakeState current_brake_state_{ duadrive_sdk::v1::BrakeState::Engaged };
 
-  double configured_max_torque_{ 0.0 };
-  double configured_max_velocity_{ 0.0 };
   float configured_gear_ratio_{ 0.0 };
-
-  double current_max_torque_{ 0.0 };
-  double current_max_velocity_{ 0.0 };
-
   int current_target_brake_state{ 0 };
 
   // Gets called when the bus startup has been finished but before going into the RT loop

@@ -45,13 +45,18 @@
 
 namespace duatic::duadrive_interface
 {
+// Factor by which we extend the HW limits so that what an application uses as limit is a bit scaled for the drives
+constexpr double hw_limits_gain = 1.01;  // default scale = 1%
+
 struct DuaDriveInterfaceParameters
 {
   std::string ethercat_bus;
   std::string joint_name;
   std::string drive_parameter_file_path;
   int device_address;
-  bool has_brake;
+  bool has_brake{ true };
+  double maximum_joint_effort{};
+  double maximum_joint_velocity{};
   // interval after which we assume there is a communication issue
   std::chrono::milliseconds communication_timeout{ 100 };
 };
@@ -112,10 +117,6 @@ struct DuaDriveInterfaceCommands
   double p_gain{};
   double i_gain{};
   double d_gain{};
-
-  // Scaling factors which allow to scale down the maximum torque/velocity settings of a drive
-  double scaling_factor_max_torque{ 1.0 };
-  double scaling_factor_max_velocity{ 1.0 };
 
   int target_brake_state{ 0 };  // 0 engaged, 1 excite, 2 hold
 };
@@ -216,6 +217,7 @@ public:
 
 protected:
   rclcpp::Logger logger_;
+  rclcpp::Clock throttle_clock_{ RCL_STEADY_TIME };
 
   DuaDriveInterfaceState state_;
   DuaDriveInterfaceCommands command_;

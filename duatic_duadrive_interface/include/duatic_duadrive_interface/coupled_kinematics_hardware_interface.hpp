@@ -172,10 +172,21 @@ public:
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
-    // We obtain information about configured joints and create DuaDriveInterface instances from them
-    // and initialize them
+    // Create DuaDriveInterface instances
     RCLCPP_INFO_STREAM(logger_, "Start with drives: detected " << system_info.hardware_info.joints.size()
                                                                << " joints in the hardware info");
+
+    // Serial-kinematics limits collected per joint.
+    std::vector<double> serial_maximum_joint_effort;
+    std::vector<double> serial_maximum_joint_velocity;
+    std::vector<DuaDriveInterfaceParameters> drive_parameters;  // Partially filled, coupled quantities are added later
+
+    // Reason we collect the limits separately: need to be converted into coupled coordinates before being applied
+    const auto joint_count = system_info.hardware_info.joints.size();
+    serial_maximum_joint_effort.reserve(joint_count);
+    serial_maximum_joint_velocity.reserve(joint_count);
+    drive_parameters.reserve(joint_count);
+
     for (const auto& joint : system_info.hardware_info.joints) {
       const auto ethercat_address = std::stoi(joint.parameters.at("ethercat_address"));
       const auto ethercat_bus = joint.parameters.at("ethercat_bus");
@@ -190,6 +201,16 @@ public:
         return hardware_interface::CallbackReturn::FAILURE;
       }
 
+      // Enforce limits on every joint
+      if (urdf_joint->limits) {
+        serial_maximum_joint_effort.push_back(urdf_joint->limits->effort);
+        serial_maximum_joint_velocity.push_back(urdf_joint->limits->velocity);
+      } else {
+        RCLCPP_FATAL_STREAM(logger_, "Joint has no limits defined in urdf: " << joint_name
+                                                                             << " please define all relevant limits");
+        return hardware_interface::CallbackReturn::FAILURE;
+      }
+
       RCLCPP_INFO_STREAM(logger_, "Setup drive instance for joint: " << joint_name
                                                                      << " on ethercat bus:" << ethercat_bus
                                                                      << " at address: " << ethercat_address);
@@ -201,6 +222,7 @@ public:
         RCLCPP_ERROR_STREAM(logger_, "Drive parameter file does not exist!");
         return hardware_interface::CallbackReturn::FAILURE;
       }
+      // create the actual drive interface instance
       drives_.emplace_back(std::make_unique<DriveTypeT>(logger_));
       // As we need to apply the kinematic translation we need some place to store the corresponding data
       // TODO(firesurfer) we could ellide copies if we would directly use pointers on the state interface
@@ -210,6 +232,7 @@ public:
       const auto position_limits = system_info.hardware_info.limits.at(joint_name);
 
       // Disable position limits for joint types where it does not make sense
+      // (the limiter treats lower == upper == 0.0 as "disabled")
       auto limit_lower = position_limits.min_position;
       auto limit_upper = position_limits.max_position;
 
@@ -218,26 +241,38 @@ public:
         limit_upper = 0.0;
         RCLCPP_INFO_STREAM(logger_, "Disable advanced position limiter for: " << joint_name);
       } else {
-        RCLCPP_INFO_STREAM(logger_, "Position limits: min: " << position_limits.min_position
-                                                             << " max: " << position_limits.max_position);
+        RCLCPP_INFO_STREAM(logger_, "Position limits (serial): min: " << position_limits.min_position << "rad"
+                                                                      << " max: " << position_limits.max_position
+                                                                      << "rad");
       }
+      RCLCPP_INFO_STREAM(logger_, "Maximum joint torque (serial): " << urdf_joint->limits->effort << "Nm");
+      RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity (serial): " << urdf_joint->limits->velocity << "rad/s");
 
-      position_limiters_.emplace_back(
-          AdvancedPositionCommandLimiter{ joint_name, position_limits.min_position, position_limits.max_position });
+      position_limiters_.emplace_back(AdvancedPositionCommandLimiter{ joint_name, limit_lower, limit_upper });
 
+      // build the fields we use later to translate our command
       commands_coupled_kinematics_.emplace_back(SerialCommand{});
       commands_serial_kinematics_.emplace_back(CoupledCommand{});
-      // Init doesn't really do anything apart from setting parameters
-      drives_.back()->init(DuaDriveInterfaceParameters{ .ethercat_bus = ethercat_bus,
-                                                        .joint_name = joint_name,
-                                                        .drive_parameter_file_path = drive_parameter_file_path,
-                                                        .device_address = ethercat_address,
-                                                        .has_brake = has_brake,
-                                                        .communication_timeout = communication_timeout });
-      current_active_drive_modes_.insert({ drives_.back()->get_name(), duadrive_sdk::v1::ControlMode::Freeze });
+
+      // The coupled quantities are unknown at this point - they are filled in below
+      drive_parameters.push_back(DuaDriveInterfaceParameters{
+          .ethercat_bus = ethercat_bus,
+          .joint_name = joint_name,
+          .drive_parameter_file_path = drive_parameter_file_path,
+          .device_address = ethercat_address,
+          .has_brake = has_brake,
+          .maximum_joint_effort = 0.0,
+          .maximum_joint_velocity = 0.0,
+          .communication_timeout = communication_timeout,
+      });
     }
 
-    // TODO(firesurfer) - this could probably be implemented in a nicer way (no constexpr if on a specific type !)
+    // Serial -> coupled conversion of all per-joint quantities:
+    // Initial positions are a mock-only coordinates parameters.
+    // Limits are interval radii and use the limit mapping.
+    std::vector<double> serial_initial_positions(drives_.size(), 0.0);
+    bool apply_initial_positions = false;
+
     // In case there are predefined positions for mock operation we enforce them
     // This is a pure compile time statement
     if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
@@ -245,22 +280,51 @@ public:
         const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
                                                                                                         "positions"));
         if (positions.size() == drives_.size()) {
-          std::vector<CoupledCommand> positions_coupled;
-          std::vector<SerialCommand> positions_serial;
-          for (std::size_t i = 0; i < drives_.size(); i++) {
-            positions_coupled.push_back(CoupledCommand{ positions[i], 0, 0, 0 });
-            positions_serial.push_back(SerialCommand{ positions[i], 0, 0, 0 });
-          }
-          kinematics_translator::map_from_serial_to_coupled(positions_serial, positions_coupled);
-
-          for (std::size_t i = 0; i < drives_.size(); i++) {
-            RCLCPP_INFO_STREAM(logger_, "Initial position: " << drives_[i]->get_name() << ": " << positions[i]);
-            drives_[i]->enforce_position(positions_coupled[i].position);
-          }
+          serial_initial_positions = positions;
+          apply_initial_positions = true;
         } else {
           RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
                                           << positions.size() << ") does not match amount of drives (" << drives_.size()
                                           << ") We do not apply the initial positions therefore");
+        }
+      }
+    }
+
+    // Now convert serial to coupled
+    std::vector<SerialCommand> serial_mock_init_states(drives_.size(), SerialCommand{});
+    std::vector<SerialCommand> serial_limits(drives_.size(), SerialCommand{});
+    for (std::size_t i = 0; i < drives_.size(); i++) {
+      serial_mock_init_states[i].position = serial_initial_positions[i];
+      serial_limits[i].velocity = serial_maximum_joint_velocity[i];
+      serial_limits[i].torque = serial_maximum_joint_effort[i];
+      // acceleration intentionally left at 0.0 - there is no acceleration limit to convert
+    }
+
+    // Handle limits and initial state separately (needs a different transform)
+    std::vector<CoupledCommand> coupled_limits(drives_.size(), CoupledCommand{});
+    std::vector<CoupledCommand> coupled_mock_init_states(drives_.size(), CoupledCommand{});
+    kinematics_translator::map_from_serial_to_coupled(serial_mock_init_states, coupled_mock_init_states);
+    kinematics_translator::map_from_serial_to_coupled_limits(serial_limits, coupled_limits);
+
+    // Now that the coupled quantities are known we can initialize the drives.
+    for (std::size_t i = 0; i < drives_.size(); i++) {
+      drive_parameters[i].maximum_joint_velocity = coupled_limits[i].velocity;
+      drive_parameters[i].maximum_joint_effort = coupled_limits[i].torque;
+
+      RCLCPP_INFO_STREAM(logger_, "Coupled limits for " << drive_parameters[i].joint_name << ":");
+      RCLCPP_INFO_STREAM(logger_, " - max joint velocity: " << drive_parameters[i].maximum_joint_velocity << " rad/s");
+      RCLCPP_INFO_STREAM(logger_, " - max joint effort  : " << drive_parameters[i].maximum_joint_effort << " Nm");
+
+      drives_[i]->init(drive_parameters[i]);
+      current_active_drive_modes_.insert({ drives_[i]->get_name(), duadrive_sdk::v1::ControlMode::Freeze });
+
+      // Only for mock enforce the starting position
+      if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
+        if (apply_initial_positions) {
+          drives_[i]->enforce_position(coupled_mock_init_states[i].position);
+          RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_parameters[i].joint_name
+                                                           << " serial: " << serial_initial_positions[i]
+                                                           << " coupled: " << coupled_mock_init_states[i].position);
         }
       }
     }
@@ -332,6 +396,10 @@ public:
 
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& /*previous_state*/) override
   {
+    // Allow the limiters to be re-seeded with the measured position on the next activation
+    for (auto& limiter : position_limiters_) {
+      limiter.reset();
+    }
     for (auto& drive : drives_) {
       // Call deactivate for each drive and propagate errors if necessary
       if (drive->deactivate() != hardware_interface::CallbackReturn::SUCCESS) {

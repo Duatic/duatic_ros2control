@@ -114,23 +114,10 @@ void DuaDriveInterface::on_bus_startup_finished()
 
   RCLCPP_INFO_STREAM(logger_, "PID Gains: " << gains);
 
-  // Maximum torque/velocity values
-  // We use this to provide the possibility to scale down the safety values
-  configured_max_torque_ = drive_->configuration_interface().read_maximum_joint_torque();
+  // Required to calculate the maximum motor velocity
   configured_gear_ratio_ = static_cast<float>(drive_->configuration_interface().read_gearbox_ratio());
 
-  double max_motor_velocity = drive_->configuration_interface().read_maximum_motor_velocity();
-  // Actually store the velocity in joint coordinates
-  configured_max_velocity_ = max_motor_velocity / configured_gear_ratio_;
-
-  current_max_torque_ = configured_max_torque_;
-  current_max_velocity_ = configured_max_velocity_;
-
-  RCLCPP_INFO_STREAM(logger_, "Maximum joint torque: " << configured_max_torque_ << "Nm "
-                                                       << " maximum joint velocity: " << configured_max_velocity_
-                                                       << " rad/s");
   current_brake_state_ = drive_->configuration_interface().read_current_brake_state();
-
   RCLCPP_INFO_STREAM(logger_, "Current brake state: " << current_brake_state_);
 }
 hardware_interface::CallbackReturn DuaDriveInterface::activate()
@@ -197,6 +184,26 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
       break;
     }
   }
+
+  const auto maximum_motor_velocity = params_.maximum_joint_velocity * configured_gear_ratio_ * hw_limits_gain;
+  if (maximum_motor_velocity <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor velocity of " + std::to_string(maximum_motor_velocity) +
+                             " for drive: " + get_name());
+  }
+  drive_->configuration_interface().write_maximum_motor_velocity(maximum_motor_velocity);
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
+                                                         << " Maximum motor velocity: " << maximum_motor_velocity
+                                                         << " rad/s");
+
+  // Maximum torque -- NOTE: this overrides any values configured in the drive config files
+  const auto maximum_motor_torque = params_.maximum_joint_effort * hw_limits_gain;
+  if (maximum_motor_torque <= 0.0) {
+    throw std::runtime_error("Implausible maximum motor torque of " + std::to_string(maximum_motor_torque) +
+                             " for drive: " + get_name());
+  }
+  drive_->configuration_interface().write_maximum_joint_torque(maximum_motor_torque);
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint effort: " << params_.maximum_joint_effort << "Nm "
+                                                       << " maximum motor torque: " << maximum_motor_torque << " Nm");
 
   // Perform the initial readout to set the current positions as targets
   if (read(rclcpp::Time{}, rclcpp::Duration(0, 0)) != hardware_interface::return_type::OK) {
@@ -357,7 +364,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
   } else {
     const auto reading = drive_->get_latest_reading();
-    RCLCPP_ERROR_STREAM(logger_, get_name() << " Is not in target FSM Mode: ControlOP actual mode: "
+    RCLCPP_ERROR_STREAM_THROTTLE(logger_, throttle_clock_, 1000,
+                                 get_name() << " Is not in target FSM Mode: ControlOP actual mode: "
                                             << reading.status_word.get_fsm_state()
                                             << " Raw status word: " << reading.status_word.get_raw());
   }
