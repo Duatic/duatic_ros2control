@@ -245,7 +245,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   // Set joint position command to current position
   command_.joint_position = state_.joint_position;
 
-  // Some drives need just over 1 s from Configure to ControlOp.
+  // Wait for drive to reach into ControlOp
   if (!drive_->setFSMGoalState(rsl_drive_sdk::fsm::StateEnum::ControlOp, true, 3.0, 10)) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " failed to put drive into control op");
     return hardware_interface::CallbackReturn::ERROR;
