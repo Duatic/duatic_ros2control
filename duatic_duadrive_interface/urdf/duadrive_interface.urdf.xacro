@@ -28,7 +28,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 <!--Base macro which represents a single duadrive as joint in ros2control-->
-<xacro:macro name="duadrive_interface_joint" params="name ethercat_address ethercat_bus mode parent_unit drive_parameter_file_path has_brake:=true">
+<xacro:macro name="duadrive_interface_joint" params="name ethercat_address ethercat_bus mode parent_unit drive_parameter_file_path has_brake:=true brake_clearance:=1.2">
     <joint name="${name}">
       <xacro:if value="${mode != 'isaac'}">
         <!--This is used for gazebo sim, mock hardware and real hardware-->
@@ -39,6 +39,8 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
         <param name="drive_parameter_file_path">${drive_parameter_file_path}</param>
         <!--Information if a drive is used which included a pin brake-->
         <param name="has_brake">${has_brake}</param>
+        <!--Motor travel in rad that an engaged brake pin still allows, used to detect a released brake-->
+        <param name="brake_clearance">${brake_clearance}</param>
         <!--Timeout in ms after which we decide that the communication with a drive has failed and we decide and error has ocurred-->
         <param name="communication_timeout">100</param>
         <state_interface name="position">
