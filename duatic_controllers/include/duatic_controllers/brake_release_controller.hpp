@@ -31,18 +31,9 @@
 #include <memory>
 #include <algorithm>
 
-// Pinocchio
-#include <Eigen/Dense>  // NOLINT(build/include_order)
-#include <pinocchio/algorithm/compute-all-terms.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/parsers/srdf.hpp>
-#include "pinocchio/algorithm/joint-configuration.hpp"
-#include "pinocchio/algorithm/geometry.hpp"
-
 // Other headers
 #include <controller_interface/controller_interface.hpp>
+#include <controller_manager_msgs/srv/switch_controller.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
@@ -65,7 +56,6 @@ public:
   enum class State
   {
     Init,
-    Exciting,
     Commanding,
     Holding
   };
@@ -90,20 +80,50 @@ public:
 
 protected:
 private:
+  // Per joint state of the direction search in mode "auto"
+  struct JointProbe
+  {
+    double target{};
+    // Even attempts push in the positive direction, odd ones in the negative direction
+    std::size_t attempt{ 0 };
+  };
+
   // Access to controller parameters via generate_parameter_library
   std::unique_ptr<brake_release_controller::ParamListener> param_listener_;
   brake_release_controller::Params params_;
 
-  // pinocchio representation of the world
-  pinocchio::Model pinocchio_model_;
-  pinocchio::Data pinocchio_data_;
-
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> brake_target_command_interfaces_;
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_effort_state_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> brake_released_state_interfaces_;
+
+  rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client_;
+  rclcpp::Time last_status_log_time_;
+  std::vector<JointProbe> probes_;
+
+  /**
+   * @brief whether every drive reports its brake as released
+   */
+  bool all_brakes_released() const;
+  /**
+   * @brief comma separated names of the joints whose brakes are not released yet
+   */
+  std::string unreleased_joints() const;
+  /**
+   * @brief command all brakes into the holding state
+   */
+  void hold_brakes();
+  /**
+   * @brief command a joint position target at zero velocity
+   */
+  void command_joint(std::size_t index, double position);
+  /**
+   * @brief ask the controller manager to deactivate this controller
+   */
+  void request_deactivation();
 
   State current_state_{ State::Init };
   std::optional<rclcpp::Time> last_state_change_time_;

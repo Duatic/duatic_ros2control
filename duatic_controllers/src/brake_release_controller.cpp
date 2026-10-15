@@ -22,22 +22,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-
 #include <duatic_controllers/brake_release_controller.hpp>
 
 // C++ system headers
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <deque>
-#include <unordered_set>
-
-#include <pinocchio/collision/collision.hpp>
-#include <pinocchio/algorithm/joint-configuration.hpp>
-#include <pinocchio/algorithm/frames.hpp>
-#include <pinocchio/algorithm/jacobian.hpp>
-#include <pinocchio/algorithm/check-data.hpp>
+#include <array>
 
 // Other headers
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
@@ -50,6 +38,30 @@
 
 namespace duatic::controllers
 {
+namespace
+{
+/**
+ * @brief whether the hardware reports the brake behind this state interface as released
+ */
+bool is_brake_released(const hardware_interface::LoanedStateInterface& interface)
+{
+  const auto value = duatic::controllers::compat::try_get_value(interface);
+  return value && *value != 0.0;
+}
+
+// Fractions of max_torque tried in both directions before the next higher one, to load the pins as little as possible
+constexpr std::array<double, 3> torque_fractions{ 0.25, 0.5, 1.0 };
+// A probe that reaches this attempt has stopped searching
+constexpr std::size_t max_attempts = 2 * torque_fractions.size();
+
+/**
+ * @brief direction a probe pushes the joint in during the given attempt
+ */
+double probe_direction(std::size_t attempt)
+{
+  return attempt % 2 == 0 ? 1.0 : -1.0;
+}
+}  // namespace
 
 BrakeReleaseController::BrakeReleaseController() : controller_interface::ControllerInterface()
 {
@@ -63,8 +75,7 @@ controller_interface::InterfaceConfiguration BrakeReleaseController::command_int
 
   const auto joints = params_.joints;
   for (auto& joint : joints) {
-    // Even though we are only commanding positions we also claim the velocity interface in order to put the drive into
-    // the right control mode
+    // Leaving effort unclaimed lets a gravity compensation add its feedforward torque to the position control
     if (mode_ == Mode::Auto) {
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
       config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
@@ -83,9 +94,11 @@ controller_interface::InterfaceConfiguration BrakeReleaseController::state_inter
 
   const auto joints = params_.joints;
   for (auto& joint : joints) {
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
-    config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
-    config.names.emplace_back(joint + "/" + "acceleration_commanded");
+    if (mode_ == Mode::Auto) {
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
+      config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_EFFORT);
+    }
+    config.names.emplace_back(joint + "/" + "brake_released");
   }
 
   return config;
@@ -125,66 +138,14 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
   try {
     // obtain the operation mode
     mode_ = mode_from_str(params_.mode);
-    // 1. build the pinocchio model from the urdf
-    RCLCPP_INFO(get_node()->get_logger(), "Building Pinocchio model from URDF...");
-    {
-      pinocchio::Model full_model;
-      pinocchio::urdf::buildModelFromXML(get_robot_description(), full_model);
-
-      // So pinocchio is very counter intuitive. We specify joints that are marked as FIXED in the reduced model
-      // We we built an inversed list
-      // This is needed so that the controller will only do the IK for the specified joint list
-      std::unordered_set<pinocchio::JointIndex> keep;
-
-      for (const auto& joint : params_.joints) {
-        pinocchio::JointIndex id = full_model.getJointId(joint);
-        keep.insert(id);
-
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), "keeping joint: " << joint << " id=" << id);
-      }
-
-      std::vector<pinocchio::JointIndex> indices;
-
-      for (pinocchio::JointIndex j = 1; j < static_cast<pinocchio::JointIndex>(full_model.njoints); ++j) {
-        if (keep.find(j) == keep.end()) {
-          indices.push_back(j);
-          RCLCPP_INFO_STREAM(get_node()->get_logger(), "locking joint: " << full_model.names[j] << " id=" << j);
-        }
-      }
-      Eigen::VectorXd q0 = pinocchio::neutral(full_model);
-      pinocchio::Model reduced_model;  // rebuilding into the old model causes data-model inconsistency
-      pinocchio::buildReducedModel(full_model, indices, q0, reduced_model);
-      pinocchio_model_ = std::move(reduced_model);
-      pinocchio_data_ = std::move(pinocchio_model_.createData());
-      if (!pinocchio_model_.check(pinocchio_data_)) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Pinocchio data check failed, 'pinocchio_data_' is not consistent with "
-                                               "'pinocchio_model_'");
-        return controller_interface::CallbackReturn::ERROR;
-      }
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), pinocchio_model_.njoints << " " << pinocchio_model_.nv);
-      for (pinocchio::JointIndex j = 0; j < static_cast<pinocchio::JointIndex>(pinocchio_model_.njoints); ++j) {
-        RCLCPP_INFO_STREAM(get_node()->get_logger(), "Joint " << j << ": " << pinocchio_model_.names[j]);
-      }
-      RCLCPP_INFO(get_node()->get_logger(), "Pinocchio model built with %zu joints",
-                  pinocchio_model_.joints.size() - 1);
-    }
-
-    // 2. Validate that all controller joints exist in the Pinocchio model
-    RCLCPP_INFO(get_node()->get_logger(), "Validating controller joints...");
-    std::vector<pinocchio::JointIndex> controller_joint_indices;
-    for (const auto& joint_name : params_.joints) {
-      if (!pinocchio_model_.existJointName(joint_name)) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Joint '%s' not found in Pinocchio model.", joint_name.c_str());
-        return controller_interface::CallbackReturn::ERROR;
-      }
-      auto joint_id = pinocchio_model_.getJointId(joint_name);
-      controller_joint_indices.push_back(joint_id);
-      RCLCPP_INFO(get_node()->get_logger(), "Joint '%s' found with index %ld", joint_name.c_str(), joint_id);
-    }
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Exception during Pinocchio model setup: %s", e.what());
+    RCLCPP_ERROR(get_node()->get_logger(), "Exception during configuration: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
   }
+  // A controller node lives in the namespace of its controller manager
+  const std::string switch_controller_service = "controller_manager/switch_controller";
+  switch_controller_client_ =
+      get_node()->create_client<controller_manager_msgs::srv::SwitchController>(switch_controller_service);
   RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial setup done");
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -194,42 +155,58 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 {
   // clear out vectors in case of restart (reactivation to be precise)
   joint_position_command_interfaces_.clear();
+  joint_velocity_command_interfaces_.clear();
   brake_target_command_interfaces_.clear();
   joint_position_state_interfaces_.clear();
-  joint_velocity_state_interfaces_.clear();
-  joint_acceleration_state_interfaces_.clear();
+  joint_effort_state_interfaces_.clear();
+  brake_released_state_interfaces_.clear();
+  probes_.assign(params_.joints.size(), JointProbe{});
   last_state_change_time_ = std::nullopt;
   current_state_ = State::Init;
 
   // get the actual interface in an ordered way (same order as the joints parameter)
-  if (!controller_interface::get_ordered_interfaces(
-          state_interfaces_, params_.joints, hardware_interface::HW_IF_POSITION, joint_position_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - position");
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "brake_released",
+                                                    brake_released_state_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - brake_released");
     return controller_interface::CallbackReturn::FAILURE;
   }
-  if (!controller_interface::get_ordered_interfaces(
-          state_interfaces_, params_.joints, hardware_interface::HW_IF_VELOCITY, joint_velocity_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - velocity");
-    return controller_interface::CallbackReturn::FAILURE;
-  }
-  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "acceleration_commanded",
-                                                    joint_acceleration_state_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - acceleration");
+  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, "target_brake_state",
+                                                    brake_target_command_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - target_brake_state");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
   if (mode_ == Mode::Auto) {
+    if (!controller_interface::get_ordered_interfaces(
+            state_interfaces_, params_.joints, hardware_interface::HW_IF_POSITION, joint_position_state_interfaces_)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - position");
+      return controller_interface::CallbackReturn::FAILURE;
+    }
+    if (!controller_interface::get_ordered_interfaces(
+            state_interfaces_, params_.joints, hardware_interface::HW_IF_EFFORT, joint_effort_state_interfaces_)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered state interfaces - effort");
+      return controller_interface::CallbackReturn::FAILURE;
+    }
     if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
                                                       hardware_interface::HW_IF_POSITION,
                                                       joint_position_command_interfaces_)) {
       RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - position");
       return controller_interface::CallbackReturn::FAILURE;
     }
-  }
-  if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, "target_brake_state",
-                                                    brake_target_command_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - target_brake_state");
-    return controller_interface::CallbackReturn::FAILURE;
+    if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,
+                                                      hardware_interface::HW_IF_VELOCITY,
+                                                      joint_velocity_command_interfaces_)) {
+      RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interfaces - velocity");
+      return controller_interface::CallbackReturn::FAILURE;
+    }
+    for (std::size_t i = 0; i < probes_.size(); i++) {
+      const auto position = duatic::controllers::compat::try_get_value(joint_position_state_interfaces_.at(i).get());
+      if (!position) {
+        RCLCPP_WARN(get_node()->get_logger(), "No initial position for joint '%s'", params_.joints[i].c_str());
+        return controller_interface::CallbackReturn::FAILURE;
+      }
+      probes_[i].target = *position;
+    }
   }
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -238,13 +215,7 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 controller_interface::CallbackReturn
 BrakeReleaseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  for (auto& interface : brake_target_command_interfaces_) {
-    // Put the brakes into hold mode
-    if (!interface.get().set_value<int>(2)) {
-      RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Failed to put brake into holding state for: "
-                                                        << interface.get().get_name() << " during deactivation");
-    }
-  }
+  hold_brakes();
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -265,114 +236,134 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
                             "Failed to put brake into 'excite' state for: " << interface.get().get_name());
       }
     }
-    // Depending on the mode we now need to go into a different state
-    // Auto needs now to command a new target position into the right direction
-    // Manual just says: just stay here (aka we say we already commanded a position)
-    if (mode_ == Mode::Auto) {
-      current_state_ = State::Exciting;
-    } else {
-      current_state_ = State::Commanding;
-    }
+    current_state_ = State::Commanding;
     last_state_change_time_ = time;
+    last_status_log_time_ = time;
   }
 
-  if (mode_ == Mode::Auto) {
-    if (current_state_ == State::Exciting && (time - last_state_change_time_.value()) > rclcpp::Duration(1, 0)) {
-      const std::size_t joint_count = joint_position_state_interfaces_.size();
+  bool finished = false;
+  // Auto mode pushes each joint with a growing torque in alternating directions and escalating torque limits, until the
+  // motor lifts the load off the pin and the brake releases
+  if (mode_ == Mode::Auto && current_state_ == State::Commanding) {
+    const double step = params_.probe_velocity * period.seconds();
+    finished = true;
+    for (std::size_t i = 0; i < params_.joints.size(); i++) {
+      double position{};
+      double effort{};
+      try {
+        position = duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
+        effort = duatic::controllers::compat::require_value(joint_effort_state_interfaces_.at(i).get());
+      } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state of joint '%s': %s", params_.joints[i].c_str(),
+                     e.what());
+        return controller_interface::return_type::ERROR;
+      }
 
-      // Build full-size vectors for all robot joints (Pinocchio expects this)
-      Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-      Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-      Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-
-      for (std::size_t i = 0; i < joint_count; i++) {
-        const std::string& joint_name = params_.joints[i];
-        const auto idx = pinocchio_model_.getJointId(joint_name);
-
-        try {
-          q[pinocchio_model_.joints[idx].idx_q()] =
-              duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-
-          v[pinocchio_model_.joints[idx].idx_v()] =
-              duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-
-          a[pinocchio_model_.joints[idx].idx_v()] =
-              duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-        } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-          RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state for joint '%s': %s", joint_name.c_str(),
-                       e.what());
-          return controller_interface::return_type::ERROR;
+      auto& probe = probes_[i];
+      if (probe.attempt < max_attempts) {
+        const double direction = probe_direction(probe.attempt);
+        const double torque_limit = params_.max_torque * torque_fractions[probe.attempt / 2];
+        // While the joint is blocked the growing position error raises the drive torque in the probing direction
+        const bool blocked = effort * direction > torque_limit;
+        if (is_brake_released(brake_released_state_interfaces_.at(i).get())) {
+          RCLCPP_INFO_STREAM(get_node()->get_logger(), "Brake released, holding joint: " << params_.joints[i]);
+          probe.target = position;
+          probe.attempt = max_attempts;
+        } else if (blocked) {
+          // Restarting from the measured position takes the extra torque off the pin at once
+          probe.target = position;
+          if (++probe.attempt < max_attempts) {
+            RCLCPP_INFO_STREAM(get_node()->get_logger(),
+                               "No release up to " << torque_limit << " Nm, changing direction: " << params_.joints[i]);
+          }
         }
       }
-
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Current configuration: " << q.transpose());
-
-      // Calculate the necessary torques to hold the arm at is current location
-      Eigen::VectorXd tau = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q);
-
-      // Determine the direction we need to move into in order to unload the brake pins
-      Eigen::VectorXd direction = Eigen::VectorXd::Zero(tau.size());
-
-      for (int i = 0; i < tau.size(); ++i) {
-        // Need to move into the opposite direction
-        if (tau[i] > 1e-6)
-          direction[i] = 1.0;
-        else if (tau[i] < -1e-6)
-          direction[i] = -1.0;
+      if (probe.attempt < max_attempts) {
+        probe.target += probe_direction(probe.attempt) * step;
+        finished = false;
       }
-      // Define the new targets
-      Eigen::VectorXd nudge = direction * params_.position_kick;  // size nv
-      Eigen::VectorXd q_target = pinocchio::integrate(pinocchio_model_, q, nudge);
-
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Command new target positions: " << q_target.transpose());
-
-      // And command it
-      for (std::size_t i = 0; i < params_.joints.size(); i++) {
-        const std::string& joint_name = params_.joints[i];
-        const auto idx = pinocchio_model_.getJointId(joint_name);
-        if (!joint_position_command_interfaces_.at(i).get().set_value<double>(
-                q_target[pinocchio_model_.joints[idx].idx_q()])) {
-          RCLCPP_WARN(get_node()->get_logger(), "Failed to set position command for joint '%s'", joint_name.c_str());
-        }
-      }
-
-      current_state_ = State::Commanding;
-      last_state_change_time_ = time;
-    }
-
-    // Only auto mode goes directly into brake holding state
-    if (current_state_ == State::Commanding && (time - last_state_change_time_.value()) > rclcpp::Duration(3, 0)) {
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
-      for (auto& interface : brake_target_command_interfaces_) {
-        // Put the brakes into holding state
-        if (!interface.get().set_value<int>(2)) {
-          RCLCPP_ERROR_STREAM(get_node()->get_logger(),
-                              "Failed to put brake into 'holding' state for: " << interface.get().get_name());
-        }
-      }
-      current_state_ = State::Holding;
-      last_state_change_time_ = time;
+      command_joint(i, probe.target);
     }
   }
-  // Manual mode waits for a user configurable amount of time
-  if (mode_ == Mode::Manual) {
-    if (current_state_ == State::Commanding &&
-        time - last_state_change_time_.value() > rclcpp::Duration(std::chrono::duration<double>(params_.timeout))) {
-      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Putting brakes to hold state");
-      for (auto& interface : brake_target_command_interfaces_) {
-        // Put the brakes into holding state
-        if (!interface.get().set_value<int>(2)) {
-          RCLCPP_ERROR_STREAM(get_node()->get_logger(),
-                              "Failed to put brake into 'holding' state for: " << interface.get().get_name());
-        }
-      }
-      current_state_ = State::Holding;
-      last_state_change_time_ = time;
+  // Manual mode waits until all brakes are released or a user configurable timeout expires
+  if (mode_ == Mode::Manual && current_state_ == State::Commanding) {
+    finished = all_brakes_released() || time - last_state_change_time_.value() >
+                                            rclcpp::Duration(std::chrono::duration<double>(params_.timeout));
+  }
+
+  if (finished) {
+    hold_brakes();
+    if (all_brakes_released()) {
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "All brakes released and put to hold state, deactivating");
+      request_deactivation();
+    } else {
+      RCLCPP_WARN_STREAM(get_node()->get_logger(), "Brakes put to hold state, not released: " << unreleased_joints());
     }
+    current_state_ = State::Holding;
+  }
+
+  if (current_state_ == State::Commanding && time - last_status_log_time_ > rclcpp::Duration(3, 0)) {
+    RCLCPP_INFO_STREAM(get_node()->get_logger(), "Brakes not released yet: " << unreleased_joints());
+    last_status_log_time_ = time;
   }
 
   return controller_interface::return_type::OK;
 }
+bool BrakeReleaseController::all_brakes_released() const
+{
+  return std::all_of(brake_released_state_interfaces_.begin(), brake_released_state_interfaces_.end(),
+                     [](const auto& interface) { return is_brake_released(interface.get()); });
+}
+
+std::string BrakeReleaseController::unreleased_joints() const
+{
+  std::string names;
+  for (std::size_t i = 0; i < brake_released_state_interfaces_.size(); i++) {
+    if (!is_brake_released(brake_released_state_interfaces_.at(i).get())) {
+      names += (names.empty() ? "" : ", ") + params_.joints.at(i);
+    }
+  }
+  return names;
+}
+
+void BrakeReleaseController::hold_brakes()
+{
+  for (auto& interface : brake_target_command_interfaces_) {
+    if (!interface.get().set_value<int>(2)) {
+      RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                          "Failed to put brake into 'holding' state for: " << interface.get().get_name());
+    }
+  }
+}
+
+void BrakeReleaseController::command_joint(std::size_t index, double position)
+{
+  // A velocity target would add its damping torque at once instead of letting the position error ramp it up
+  if (!joint_position_command_interfaces_.at(index).get().set_value(position) ||
+      !joint_velocity_command_interfaces_.at(index).get().set_value(0.0)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Failed to set command for joint '%s'", params_.joints[index].c_str());
+  }
+}
+
+void BrakeReleaseController::request_deactivation()
+{
+  if (!switch_controller_client_->service_is_ready()) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                        "Cannot deactivate, service not available: " << switch_controller_client_->get_service_name());
+    return;
+  }
+  auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+  request->deactivate_controllers.push_back(get_node()->get_name());
+  request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+  switch_controller_client_->async_send_request(
+      request, [logger = get_node()->get_logger()](
+                   rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedFuture future) {
+        if (!future.get()->ok) {
+          RCLCPP_ERROR_STREAM(logger, "Failed to deactivate: " << future.get()->message);
+        }
+      });
+}
+
 controller_interface::CallbackReturn
 BrakeReleaseController::on_cleanup([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
