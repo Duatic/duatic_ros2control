@@ -41,6 +41,8 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::init(const DuaDriveInt
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterfaceMock_" + params.joint_name);
   generate_state_interface_descriptions();
   generate_command_interface_desriptions();
+  // Simulated drives have no brake pin that could hold the joint
+  state_.brake_released = 1.0;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
