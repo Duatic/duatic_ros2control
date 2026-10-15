@@ -195,6 +195,11 @@ public:
       const auto urdf_joint = urdf_model.getJoint(joint_name);
       const auto has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
       const std::chrono::milliseconds communication_timeout{ std::stoi(joint.parameters.at("communication_timeout")) };
+      const auto brake_clearance = std::stod(joint.parameters.at("brake_clearance"));
+      if (!(brake_clearance > 0.0)) {
+        RCLCPP_FATAL_STREAM(logger_, "brake_clearance must be a positive number of rad, got: " << brake_clearance);
+        return hardware_interface::CallbackReturn::FAILURE;
+      }
 
       if (!urdf_joint) {
         RCLCPP_FATAL_STREAM(logger_, "Failed to obtain joint from urdf: " << joint_name);
@@ -261,6 +266,7 @@ public:
           .drive_parameter_file_path = drive_parameter_file_path,
           .device_address = ethercat_address,
           .has_brake = has_brake,
+          .brake_clearance = brake_clearance,
           .maximum_joint_effort = 0.0,
           .maximum_joint_velocity = 0.0,
       });
