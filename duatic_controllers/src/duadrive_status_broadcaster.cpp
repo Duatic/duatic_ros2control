@@ -75,6 +75,8 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/voltage_coil_A");
     config.names.emplace_back(joint + "/voltage_coil_B");
     config.names.emplace_back(joint + "/voltage_coil_C");
+
+    config.names.emplace_back(joint + "/brake_released");
   }
   return config;
 }
@@ -144,6 +146,7 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_voltage_phase_a_interfaces_.clear();
   joint_voltage_phase_b_interfaces_.clear();
   joint_voltage_phase_c_interfaces_.clear();
+  joint_brake_released_interfaces_.clear();
 
   state_msg.states.clear();
   state_msg.states.resize(params_.joints.size());
@@ -254,6 +257,11 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - voltage_coil_C");
     return controller_interface::CallbackReturn::FAILURE;
   }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "brake_released",
+                                                    joint_brake_released_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - brake_released");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -320,6 +328,9 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
           duatic::controllers::compat::require_value(joint_voltage_phase_b_interfaces_.at(i).get());
       drive_state_msg.voltage_phase_c =
           duatic::controllers::compat::require_value(joint_voltage_phase_c_interfaces_.at(i).get());
+
+      drive_state_msg.brake_released =
+          duatic::controllers::compat::require_value(joint_brake_released_interfaces_.at(i).get()) != 0.0;
     } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state interface values for joint '%s': %s",
                    params_.joints[i].c_str(), e.what());
