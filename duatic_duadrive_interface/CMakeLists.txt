@@ -89,6 +89,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_coupled_kinematics_position_limiter
     duatic_duadrive_interface
   )
+  ament_add_gtest(test_travel_range
+    test/test_travel_range.cpp
+  )
+  target_link_libraries(test_travel_range
+    duatic_duadrive_interface
+  )
 endif()
 
 ament_export_include_directories(

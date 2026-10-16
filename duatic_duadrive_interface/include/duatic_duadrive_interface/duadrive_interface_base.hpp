@@ -54,6 +54,8 @@ struct DuaDriveInterfaceParameters
   std::string drive_parameter_file_path;
   int device_address;
   bool has_brake{ true };
+  // motor travel in [rad] that an engaged brake pin still allows
+  double brake_clearance{};
   double maximum_joint_effort{};
   double maximum_joint_velocity{};
   // interval after which we assume there is a communication issue
@@ -91,6 +93,8 @@ struct DuaDriveInterfaceState
   double temperature_coil_B{};
   double temperature_coil_C{};
   double bus_voltage{};
+  // 1.0 once motor motion proved the brake pin is out, 0.0 otherwise
+  double brake_released{};
 
   // These 2 fields are not exported to the outside but are just intended to be used within the coupled kinematics
   // hardware interface

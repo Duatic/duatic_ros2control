@@ -41,6 +41,7 @@
 #include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
 #include <rsl_drive_sdk/Drive.hpp>
 
+#include "duatic_duadrive_interface/travel_range.hpp"
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
 #include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 
@@ -94,6 +95,7 @@ private:
 
   rsl_drive_sdk::Statusword last_status_word_;
   rsl_drive_sdk::BrakeState current_brake_state_{ rsl_drive_sdk::BrakeState::Engaged };
+  TravelRange motor_travel_;
 
   float configured_gear_ratio_{ 0.0 };
   int current_target_brake_state{ 0 };
