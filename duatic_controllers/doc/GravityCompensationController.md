@@ -9,6 +9,8 @@ You may activate this controller on startup
 2. Activate the controller -> If no other controller is loaded and the brakes are released you should now be able the freely move around the controller
 
 This controller can be run in parallel to all other controllers and calculates the necessary torque feed-forward value.
+This controller can also be used in chained mode. It exports an `effort` reference interface per joint: `<controller_name>/<joint>/effort`.
+A preceding controller may claim it and add a torque on top of the compensation torque.
 
 ### Configuration example
 
