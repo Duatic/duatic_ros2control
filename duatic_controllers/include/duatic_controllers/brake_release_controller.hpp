@@ -110,6 +110,7 @@ private:
   rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client_;
   rclcpp::Time last_status_log_time_;
   std::vector<JointProbe> probes_;
+  std::vector<double> coupling_;
   std::vector<double> joint_velocities_;
 
   /**
@@ -144,6 +145,11 @@ private:
    * @brief give a drive back to its position loop without a torque offset
    */
   void hand_back(std::size_t index);
+  /**
+   * @brief read the coupling between drives and joints from the hardware nodes
+   * @return false if a hardware node is not reachable or a drive turns a joint that is not configured
+   */
+  bool read_torque_coupling();
   /**
    * @brief the configured joints as the gravity compensation prefixes their effort references
    */

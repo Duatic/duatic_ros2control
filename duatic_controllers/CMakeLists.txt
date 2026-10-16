@@ -122,6 +122,7 @@ pluginlib_export_plugin_description_file(controller_interface controller_interfa
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   ament_add_gtest(test_force_torque_broadcaster
     test/test_force_torque_broadcaster.cpp
   )
@@ -129,10 +130,17 @@ if(BUILD_TESTING)
     ${PROJECT_NAME}
   )
 
-  ament_add_gtest(test_controller_activation
+  ament_add_ros_isolated_gtest(test_controller_activation
     test/test_controller_activation.cpp
   )
   target_link_libraries(test_controller_activation
+    ${PROJECT_NAME}
+  )
+
+  ament_add_ros_isolated_gtest(test_brake_release_controller
+    test/test_brake_release_controller.cpp
+  )
+  target_link_libraries(test_brake_release_controller
     ${PROJECT_NAME}
   )
 endif()
