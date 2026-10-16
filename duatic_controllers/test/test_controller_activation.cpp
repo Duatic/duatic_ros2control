@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <controller_interface/chainable_controller_interface.hpp>
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
@@ -59,7 +60,7 @@ constexpr char kUrdf[] = R"(<?xml version="1.0"?>
 struct ControllerCase
 {
   std::string name;
-  std::function<std::unique_ptr<controller_interface::ControllerInterface>()> make;
+  std::function<std::unique_ptr<controller_interface::ControllerInterfaceBase>()> make;
   std::vector<rclcpp::Parameter> parameters;
 };
 
@@ -137,6 +138,8 @@ TEST_P(ControllerActivationTest, ActivatesWithAllClaimedInterfaces)
   ASSERT_EQ(controller->init(params), controller_interface::return_type::OK);
 
   ASSERT_EQ(controller->get_node()->configure().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  // The controller manager exports the reference interfaces of chainable controllers after configuring them
+  controller->export_reference_interfaces();
 
   // The interfaces must outlive the loans handed to the controller
   std::vector<hardware_interface::StateInterface::SharedPtr> state_storage;
@@ -195,18 +198,27 @@ TEST(ControllerRegistryTest, EveryRegisteredControllerHasAnActivationCase)
     tested.emplace(typeid(*controller));
   }
 
+  std::size_t registered = 0;
+  // Plugins are declared per base class, so chainable controllers need their own loader
+  auto check_registered = [&](auto& loader) {
+    for (const auto& lookup_name : loader.getDeclaredClasses()) {
+      if (lookup_name.rfind("duatic_controllers/", 0) != 0) {
+        continue;
+      }
+      ++registered;
+      const auto controller = loader.createUniqueInstance(lookup_name);
+      EXPECT_TRUE(tested.count(typeid(*controller)) == 1) << lookup_name << " has no case in controller_cases()";
+    }
+  };
   pluginlib::ClassLoader<controller_interface::ControllerInterface> loader("controller_interface", "controller_"
                                                                                                    "interface::"
                                                                                                    "ControllerInterfac"
                                                                                                    "e");
-  std::size_t registered = 0;
-  for (const auto& lookup_name : loader.getDeclaredClasses()) {
-    if (lookup_name.rfind("duatic_controllers/", 0) != 0) {
-      continue;
-    }
-    ++registered;
-    const auto controller = loader.createUniqueInstance(lookup_name);
-    EXPECT_TRUE(tested.count(typeid(*controller)) == 1) << lookup_name << " has no case in controller_cases()";
-  }
+  check_registered(loader);
+  pluginlib::ClassLoader<controller_interface::ChainableControllerInterface> chainable_loader("controller_interface",
+                                                                                              "controller_interface::"
+                                                                                              "ChainableControllerInter"
+                                                                                              "face");
+  check_registered(chainable_loader);
   EXPECT_GT(registered, 0u) << "no duatic_controllers plugins found, is the workspace sourced?";
 }
