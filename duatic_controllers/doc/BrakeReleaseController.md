@@ -41,19 +41,19 @@ It changes direction by ramping through 0, never by a step.
 A level is only left once the drive no longer moves in the pushed direction faster than `stop_velocity`: a joint pressing on its pin stops at once, while a free joint keeps moving against the drive's damping until it has travelled far enough for its release to be detected.
 A free joint is therefore handed back while it still moves at about offset divided by the drive's damping gain.
 
-As soon as a joint reports `brake_released`, its offset is removed, its gains are restored and it is held at its current position.
-A joint whose sweep ends without a release gives up and is held the same way.
-Once no joint is searching any more, the brakes are put into hold.
+As soon as a joint reports `brake_released`, its offset is removed, its brake is put into hold, its gains are restored and it is held at its current position.
+A joint whose sweep ends without a release gives up and is held the same way, but its brake stays excited, since a coupled drive that is still searching may unload its pin later.
+Once no joint is searching any more, the remaining brakes are put into hold.
 If every drive reports `brake_released`, the controller deactivates itself. Otherwise it logs the joints that are not released and keeps holding them until it is deactivated.
 
 ### Mode: "manual"
 
 In this mode the controller simply performs the unlock lifecycle by:
 
-"excite brakes" -> user moves the joints until every drive reports `brake_released` -> "put drives into hold" -> deactivate itself
+"excite brakes" -> user moves the joints until every drive reports `brake_released` -> deactivate itself
 
+The brake of each drive is put into hold as soon as that drive reports `brake_released`.
 While waiting, the controller logs every 3 seconds which drives are not released yet.
-If not all drives are released within "timeout" seconds, it puts the drives into hold and stays active.
 
 ## Checking the release
 
@@ -88,7 +88,6 @@ Activate, manually move all joints around until the controller reports all brake
 | `coupling` | Row-major matrix in mode "auto" mapping the torque of each drive to the torques of the joints, both in the order of `joints`, as the coupled to serial torque mapping of the robot's kinematics | [] (every joint has its own drive) | `joints` squared entries |
 | `gravity_compensation_controller` | Name of the GravityCompensationController whose effort references carry the offset in mode "auto" | "gravity_compensation_controller" | - |
 | `mode` | Select as an alternative manual mode. Read-only, so a change needs the controller to be reloaded | "auto" | "auto" or "manual" |
-| `timeout`| Time in manual mode after which brakes are put into hold mode even if not all are released | 50.0 | >= 0.0 |
 
 ## Notes
 

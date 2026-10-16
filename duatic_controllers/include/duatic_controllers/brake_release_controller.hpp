@@ -125,6 +125,10 @@ private:
    */
   void hold_brakes();
   /**
+   * @brief command the brake of a drive into the holding state
+   */
+  void hold_brake(std::size_t index);
+  /**
    * @brief command a joint position target at zero velocity
    */
   void command_joint(std::size_t index, double position);
@@ -150,7 +154,6 @@ private:
   void request_deactivation();
 
   State current_state_{ State::Init };
-  std::optional<rclcpp::Time> last_state_change_time_;
   Mode mode_{ Mode::Auto };
 
   /**
