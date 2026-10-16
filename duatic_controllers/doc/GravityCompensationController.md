@@ -28,6 +28,15 @@ gravity_compensation_controller:
 
 None, only activate, deactivate
 
+### Chaining
+
+The controller is chainable. It exports an `effort` reference interface per joint, named `<controller_name>/<joint>/effort`.
+A preceding controller that claims it adds a torque in [Nm] on top of the compensation torque, for example to push a joint without taking over its effort interface.
+An unset reference (NaN) adds nothing. A preceding controller sets its references back to NaN when it is deactivated, since the controller may stay chained to others.
+
+Switching the chained mode restarts the controller.
+It commands the compensation torque already while activating, so the restart does not leave a cycle without compensation.
+
 
 ## Parameters
 
