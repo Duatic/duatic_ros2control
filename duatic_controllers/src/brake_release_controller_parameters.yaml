@@ -5,16 +5,37 @@ brake_release_controller:
     description: Names of joints used by the controller
     validation:
       unique<>: null
-  position_kick:
+  torque_rate:
     type: double
-    default_value: 0.005
-    description: "Distance to move the actuator in order to move the brake in [rad]"
+    default_value: 20.0
+    description: "Rate in 'auto' mode in [Nm/s] at which the torque offset changes"
     validation:
-      bounds<>: [0.0,0.2]
+      gt<>: [0.0]
+  max_torque:
+    type: double
+    default_value: 12.0
+    description: "Largest torque offset in 'auto' mode in [Nm] per drive, added on top of the gravity compensation. It is drive torque: at the output of the drive, after its gearbox and before any coupling or transmission outside the drive. Both directions are tried with a quarter, a half and then the full value"
+    validation:
+      gt<>: [0.0]
+  stop_velocity:
+    type: double
+    default_value: 0.02
+    description: "Drive speed in 'auto' mode in [rad/s], in drive coordinates, below which a drive counts as stopped. A sweep level is held as long as the drive moves faster in the pushed direction, so a free joint keeps moving until its release is detected. A coupling with gearing outside the drives scales it against the joint speed"
+    validation:
+      gt<>: [0.0]
+  coupling:
+    type: double_array
+    default_value: []
+    description: "Row-major matrix in 'auto' mode mapping the torque of each drive to the torques of the joints, both in the order of 'joints', as the coupled to serial torque mapping of the robot's kinematics. Empty means every joint has its own drive"
+  gravity_compensation_controller:
+    type: string
+    default_value: "gravity_compensation_controller"
+    description: "Name of the GravityCompensationController whose effort references carry the torque offset in 'auto' mode"
   mode:
     type: string
     default_value: "auto"
     description: "Select between 'auto', 'manual' mode for brake release. In manual the user has a certain amount of time to manually move all drives around."
+    read_only: true
     validation:
       one_of<>: [["auto", "manual"]]
   timeout:
