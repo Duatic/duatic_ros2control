@@ -238,7 +238,7 @@ GravityCompensationController::on_deactivate([[maybe_unused]] const rclcpp_lifec
 std::vector<hardware_interface::CommandInterface::SharedPtr>
 GravityCompensationController::on_export_reference_interfaces_list()
 {
-  // Each joint accepts an effort in [Nm] from a preceding controller which is added to the compensation torque
+  // Each joint accepts an effort in [Nm] from a preceding controller which is added to the commanded effort
   std::vector<hardware_interface::CommandInterface::SharedPtr> reference_interfaces;
   for (const auto& joint : params_.joints) {
     hardware_interface::InterfaceInfo info;
@@ -310,7 +310,7 @@ bool GravityCompensationController::command_efforts()
 {
   const std::size_t joint_count = joint_position_state_interfaces_.size();
   assert(joint_count == joint_velocity_state_interfaces_.size());
-  // Map: Pinocchio joint name -> index in q/v
+  // Map: Joint name -> index in q/v
   try {
     for (std::size_t i = 0; i < joint_count; i++) {
       q_[joint_q_idx_[i]] = duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
