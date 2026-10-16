@@ -326,7 +326,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = state.getStatusword().getStateEnum();
 
-  // The pin sits on the motor side and only allows brake_clearance of travel while engaged
+  // Update brake release state
   motor_travel_.update(state.getMotorPosition());
   state_.brake_released = (!params_.has_brake || motor_travel_.span() > params_.brake_clearance) ? 1.0 : 0.0;
 
