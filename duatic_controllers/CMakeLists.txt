@@ -5,6 +5,7 @@ project(duatic_controllers)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -101,6 +102,7 @@ target_link_libraries(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
   controller_interface::controller_interface
+  controller_manager_msgs::controller_manager_msgs
   hardware_interface::hardware_interface
   pluginlib::pluginlib
   rclcpp::rclcpp
@@ -153,6 +155,7 @@ ament_export_dependencies(
   generate_parameter_library
   eigen3_cmake_module
   controller_interface
+  controller_manager_msgs
   hardware_interface
   pluginlib
   rclcpp

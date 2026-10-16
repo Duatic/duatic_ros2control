@@ -31,18 +31,9 @@
 #include <memory>
 #include <algorithm>
 
-// Pinocchio
-#include <Eigen/Dense>  // NOLINT(build/include_order)
-#include <pinocchio/algorithm/compute-all-terms.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/parsers/srdf.hpp>
-#include "pinocchio/algorithm/joint-configuration.hpp"
-#include "pinocchio/algorithm/geometry.hpp"
-
 // Other headers
 #include <controller_interface/controller_interface.hpp>
+#include <controller_manager_msgs/srv/switch_controller.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
@@ -65,7 +56,6 @@ public:
   enum class State
   {
     Init,
-    Exciting,
     Commanding,
     Holding
   };
@@ -90,23 +80,86 @@ public:
 
 protected:
 private:
+  // Per drive state of the torque sweep in mode "auto", the drives are named like the joints
+  struct JointProbe
+  {
+    // Drive output torque in [Nm] added on top of the gravity compensation
+    double offset{};
+    // Index of the sweep level the offset moves towards, the search is over once it is past the last level
+    std::size_t level{ 0 };
+    // Position loop gains of the drive before the search, restored when the joint is handed back
+    double p_gain{};
+    double i_gain{};
+  };
+
   // Access to controller parameters via generate_parameter_library
   std::unique_ptr<brake_release_controller::ParamListener> param_listener_;
   brake_release_controller::Params params_;
 
-  // pinocchio representation of the world
-  pinocchio::Model pinocchio_model_;
-  pinocchio::Data pinocchio_data_;
-
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_p_gain_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_i_gain_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> effort_reference_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> brake_target_command_interfaces_;
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_acceleration_state_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> brake_released_state_interfaces_;
+
+  rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client_;
+  rclcpp::Time last_status_log_time_;
+  std::vector<JointProbe> probes_;
+  std::vector<double> coupling_;
+  std::vector<double> joint_velocities_;
+
+  /**
+   * @brief whether every drive reports its brake as released
+   */
+  bool all_brakes_released() const;
+  /**
+   * @brief comma separated names of the joints whose brakes are not released yet
+   */
+  std::string unreleased_joints() const;
+  /**
+   * @brief command all brakes into the holding state
+   */
+  void hold_brakes();
+  /**
+   * @brief command the brake of a drive into the holding state
+   */
+  void hold_brake(std::size_t index);
+  /**
+   * @brief command a joint position target at zero velocity
+   */
+  void command_joint(std::size_t index, double position);
+  /**
+   * @brief command the joint torques that put the torque offset of each drive on its motor
+   */
+  void command_offsets();
+  /**
+   * @brief velocity of a drive in [rad/s] in drive coordinates, from the last read joint velocities
+   */
+  double drive_velocity(std::size_t index) const;
+  /**
+   * @brief give a drive back to its position loop without a torque offset
+   */
+  void hand_back(std::size_t index);
+  /**
+   * @brief read the coupling between drives and joints from the hardware nodes
+   * @return false if a hardware node is not reachable or a drive turns a joint that is not configured
+   */
+  bool read_torque_coupling();
+  /**
+   * @brief the configured joints as the gravity compensation prefixes their effort references
+   */
+  std::vector<std::string> reference_joint_names() const;
+  /**
+   * @brief ask the controller manager to deactivate this controller
+   */
+  void request_deactivation();
 
   State current_state_{ State::Init };
-  std::optional<rclcpp::Time> last_state_change_time_;
   Mode mode_{ Mode::Auto };
 
   /**
