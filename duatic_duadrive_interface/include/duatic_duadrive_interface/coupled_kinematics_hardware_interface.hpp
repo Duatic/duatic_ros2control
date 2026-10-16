@@ -334,6 +334,8 @@ public:
       }
     }
 
+    declare_torque_coupling(system_info.hardware_info);
+
     RCLCPP_INFO_STREAM(logger_, "Done setting up drives");
     return hardware_interface::CallbackReturn::SUCCESS;
   }
@@ -587,6 +589,38 @@ protected:
   bool error_active_{ false };
 
   // Internal methods
+  /**
+   * @brief publish the mapping from drive torques to joint torques as read-only parameters of the hardware node, so
+   * controllers that plan torques per drive do not need their own copy of it
+   */
+  void declare_torque_coupling(const hardware_interface::HardwareInfo& info)
+  {
+    const auto node = this->get_node();
+    if (!node) {
+      RCLCPP_WARN_STREAM(logger_, "No hardware node, the torque coupling is not published");
+      return;
+    }
+    const std::size_t joint_count = info.joints.size();
+    std::vector<std::string> joints;
+    std::vector<double> coupling(joint_count * joint_count, 0.0);
+    for (std::size_t k = 0; k < joint_count; k++) {
+      joints.push_back(info.joints[k].name);
+      // The mapping is linear, so the torque of one drive at a time gives one column of the matrix
+      Eigen::VectorXd drive_torques = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(joint_count));
+      drive_torques[static_cast<Eigen::Index>(k)] = 1.0;
+      const Eigen::VectorXd joint_torques = kinematics_mapping::map_from_coupled_to_serial_torques(drive_torques);
+      for (std::size_t i = 0; i < joint_count; i++) {
+        coupling[i * joint_count + k] = joint_torques[static_cast<Eigen::Index>(i)];
+      }
+    }
+    rcl_interfaces::msg::ParameterDescriptor descriptor;
+    descriptor.read_only = true;
+    descriptor.description = "Joints of this hardware in the order of the torque coupling matrix";
+    node->declare_parameter("torque_coupling.joints", joints, descriptor);
+    descriptor.description = "Row-major matrix mapping the torque of each drive to the torques of the joints";
+    node->declare_parameter("torque_coupling.matrix", coupling, descriptor);
+  }
+
   std::vector<double> parse_initial_positions(std::string initial_positions_str)
   {
     std::vector<double> initial_positions;
