@@ -25,12 +25,17 @@
 #include <duatic_controllers/brake_release_controller.hpp>
 
 // C++ system headers
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
 // Other headers
+#include <hardware_interface/component_parser.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
+#include <rclcpp/parameter_client.hpp>
 
 #include <controller_interface/helpers.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
@@ -142,10 +147,7 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  const std::size_t joint_count = params_.joints.size();
-  if (mode_ == Mode::Auto && !params_.coupling.empty() && params_.coupling.size() != joint_count * joint_count) {
-    RCLCPP_ERROR(get_node()->get_logger(), "'coupling' has %zu entries, expected %zu for %zu joints",
-                 params_.coupling.size(), joint_count * joint_count, joint_count);
+  if (mode_ == Mode::Auto && !read_torque_coupling()) {
     return controller_interface::CallbackReturn::FAILURE;
   }
   // A controller node lives in the namespace of its controller manager
@@ -425,13 +427,9 @@ void BrakeReleaseController::command_offsets()
 {
   const std::size_t joint_count = probes_.size();
   for (std::size_t i = 0; i < joint_count; i++) {
-    // Without a coupling every joint has its own drive
-    double effort = probes_[i].offset;
-    if (!params_.coupling.empty()) {
-      effort = 0.0;
-      for (std::size_t k = 0; k < joint_count; k++) {
-        effort += params_.coupling[i * joint_count + k] * probes_[k].offset;
-      }
+    double effort = 0.0;
+    for (std::size_t k = 0; k < joint_count; k++) {
+      effort += coupling_[i * joint_count + k] * probes_[k].offset;
     }
     if (!effort_reference_interfaces_.at(i).get().set_value(effort)) {
       RCLCPP_WARN(get_node()->get_logger(), "Failed to set the effort offset of joint '%s'", params_.joints[i].c_str());
@@ -442,13 +440,10 @@ void BrakeReleaseController::command_offsets()
 double BrakeReleaseController::drive_velocity(std::size_t index) const
 {
   // The drive velocities follow from the joint velocities through the transpose of the torque coupling
-  if (params_.coupling.empty()) {
-    return joint_velocities_[index];
-  }
   const std::size_t joint_count = joint_velocities_.size();
   double velocity = 0.0;
   for (std::size_t i = 0; i < joint_count; i++) {
-    velocity += params_.coupling[i * joint_count + index] * joint_velocities_[i];
+    velocity += coupling_[i * joint_count + index] * joint_velocities_[i];
   }
   return velocity;
 }
@@ -461,6 +456,98 @@ void BrakeReleaseController::hand_back(std::size_t index)
       !joint_i_gain_command_interfaces_.at(index).get().set_value(probe.i_gain)) {
     RCLCPP_ERROR(get_node()->get_logger(), "Failed to hand back joint '%s'", params_.joints[index].c_str());
   }
+}
+
+bool BrakeReleaseController::read_torque_coupling()
+{
+  const std::size_t joint_count = params_.joints.size();
+  // Without a published coupling every joint has its own drive
+  coupling_.assign(joint_count * joint_count, 0.0);
+  for (std::size_t i = 0; i < joint_count; i++) {
+    coupling_[i * joint_count + i] = 1.0;
+  }
+
+  std::vector<hardware_interface::HardwareInfo> hardware;
+  try {
+    hardware = hardware_interface::parse_control_resources_from_urdf(get_robot_description());
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to parse the hardware from the robot description: %s", e.what());
+    return false;
+  }
+
+  // A node of its own spins the parameter client without blocking the executor of the controller manager
+  const auto client_node = std::make_shared<rclcpp::Node>(
+      std::string(get_node()->get_name()) + "_coupling_client", get_node()->get_namespace(),
+      rclcpp::NodeOptions().use_global_arguments(false).start_parameter_services(false));
+  for (const auto& info : hardware) {
+    const bool handles_joint = std::any_of(info.joints.begin(), info.joints.end(), [this](const auto& joint) {
+      return std::find(params_.joints.begin(), params_.joints.end(), joint.name) != params_.joints.end();
+    });
+    if (!handles_joint) {
+      continue;
+    }
+
+    // The controller manager names the node of a hardware component after it in lower case
+    std::string node_name = info.name;
+    std::transform(node_name.begin(), node_name.end(), node_name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    rclcpp::SyncParametersClient client(client_node, node_name);
+    if (!client.wait_for_service(std::chrono::seconds(2))) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Hardware node '%s' of '%s' is not reachable", node_name.c_str(),
+                   info.name.c_str());
+      return false;
+    }
+    if (!client.has_parameter("torque_coupling.matrix")) {
+      RCLCPP_INFO(get_node()->get_logger(),
+                  "Hardware '%s' publishes no torque coupling, each drive turns its own joint", info.name.c_str());
+      continue;
+    }
+    std::vector<std::string> hardware_joints;
+    std::vector<double> matrix;
+    try {
+      const auto values = client.get_parameters({ "torque_coupling.joints", "torque_coupling.matrix" });
+      hardware_joints = values.at(0).as_string_array();
+      matrix = values.at(1).as_double_array();
+    } catch (const std::exception& e) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Failed to read the torque coupling of '%s': %s", info.name.c_str(),
+                   e.what());
+      return false;
+    }
+    const std::size_t hardware_joint_count = hardware_joints.size();
+    if (matrix.size() != hardware_joint_count * hardware_joint_count) {
+      RCLCPP_ERROR(get_node()->get_logger(), "Torque coupling of '%s' has %zu entries for %zu joints",
+                   info.name.c_str(), matrix.size(), hardware_joint_count);
+      return false;
+    }
+
+    for (std::size_t k = 0; k < joint_count; k++) {
+      const auto drive = std::find(hardware_joints.begin(), hardware_joints.end(), params_.joints[k]);
+      if (drive == hardware_joints.end()) {
+        continue;
+      }
+      const std::size_t hardware_drive = static_cast<std::size_t>(drive - hardware_joints.begin());
+      coupling_[k * joint_count + k] = 0.0;
+      for (std::size_t j = 0; j < hardware_joint_count; j++) {
+        const double factor = matrix[j * hardware_joint_count + hardware_drive];
+        if (factor == 0.0) {
+          continue;
+        }
+        const auto joint = std::find(params_.joints.begin(), params_.joints.end(), hardware_joints[j]);
+        if (joint == params_.joints.end()) {
+          RCLCPP_ERROR(get_node()->get_logger(), "Drive '%s' also turns joint '%s', which has to be in 'joints'",
+                       params_.joints[k].c_str(), hardware_joints[j].c_str());
+          return false;
+        }
+        const std::size_t i = static_cast<std::size_t>(joint - params_.joints.begin());
+        coupling_[i * joint_count + k] = factor;
+        if (i != k) {
+          RCLCPP_INFO(get_node()->get_logger(), "Drive '%s' also turns joint '%s' (factor %g)",
+                      params_.joints[k].c_str(), params_.joints[i].c_str(), factor);
+        }
+      }
+    }
+  }
+  return true;
 }
 
 std::vector<std::string> BrakeReleaseController::reference_joint_names() const

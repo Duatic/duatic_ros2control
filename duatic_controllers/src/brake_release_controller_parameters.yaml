@@ -23,10 +23,6 @@ brake_release_controller:
     description: "Drive speed in 'auto' mode in [rad/s], in drive coordinates, below which a drive counts as stopped. A sweep level is held as long as the drive moves faster in the pushed direction, so a free joint keeps moving until its release is detected. A coupling with gearing outside the drives scales it against the joint speed"
     validation:
       gt<>: [0.0]
-  coupling:
-    type: double_array
-    default_value: []
-    description: "Row-major matrix in 'auto' mode mapping the torque of each drive to the torques of the joints, both in the order of 'joints', as the coupled to serial torque mapping of the robot's kinematics. Empty means every joint has its own drive"
   gravity_compensation_controller:
     type: string
     default_value: "gravity_compensation_controller"
