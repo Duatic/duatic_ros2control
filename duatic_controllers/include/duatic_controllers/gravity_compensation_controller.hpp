@@ -31,7 +31,7 @@
 
 // ROS2
 #include <realtime_tools/realtime_publisher.hpp>
-#include <controller_interface/controller_interface.hpp>
+#include <controller_interface/chainable_controller_interface.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 
@@ -51,18 +51,33 @@
 
 namespace duatic::controllers
 {
-class GravityCompensationController : public controller_interface::ControllerInterface
+class GravityCompensationController : public controller_interface::ChainableControllerInterface
 {
 public:
   GravityCompensationController();
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
-  controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   controller_interface::CallbackReturn on_init() override;
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_cleanup(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   controller_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
+
+protected:
+  /**
+   * @brief export one effort reference per joint, which a preceding controller adds to the compensation torque
+   */
+  std::vector<hardware_interface::CommandInterface::SharedPtr> on_export_reference_interfaces_list() override;
+  /**
+   * @brief keep the effort references as they are, since they have no topic input
+   */
+  controller_interface::return_type update_reference_from_subscribers(const rclcpp::Time& time,
+                                                                      const rclcpp::Duration& period) override;
+  /**
+   * @brief check for a jump after activation, command the compensation torque and publish the status
+   */
+  controller_interface::return_type update_and_write_commands(const rclcpp::Time& time,
+                                                              const rclcpp::Duration& period) override;
 
 private:
   // Access to controller parameters via generate_parameter_library
@@ -98,5 +113,11 @@ private:
   std::vector<double> joint_effort_;
 
   StatusMsg state_msg_;
+
+  /**
+   * @brief command the gravity and coriolis torque of the current state plus the effort references
+   * @return false if a joint state could not be read or an effort command could not be written
+   */
+  bool command_efforts();
 };
 }  // namespace duatic::controllers
