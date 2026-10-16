@@ -171,7 +171,6 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
   brake_released_state_interfaces_.clear();
   probes_.assign(params_.joints.size(), JointProbe{});
   joint_velocities_.assign(params_.joints.size(), 0.0);
-  last_state_change_time_ = std::nullopt;
   current_state_ = State::Init;
 
   // get the actual interface in an ordered way (same order as the joints parameter)
@@ -278,7 +277,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
   }
 
   // 1. In all mode at the beginning we need to excite the brake (high power try to pull the pin)
-  if (current_state_ == State::Init && !last_state_change_time_) {
+  if (current_state_ == State::Init) {
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Releasing brakes");
     for (auto& interface : brake_target_command_interfaces_) {
       // Excite the brakes
@@ -288,7 +287,6 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
       }
     }
     current_state_ = State::Commanding;
-    last_state_change_time_ = time;
     last_status_log_time_ = time;
   }
 
@@ -324,6 +322,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
       if (is_brake_released(brake_released_state_interfaces_.at(i).get())) {
         RCLCPP_INFO_STREAM(get_node()->get_logger(), "Brake released, holding joint: " << params_.joints[i]);
         probe.level = sweep_levels.size();
+        hold_brake(i);
       } else {
         const double level = sweep_levels[probe.level] * params_.max_torque;
         probe.offset = std::clamp(level, probe.offset - step, probe.offset + step);
@@ -352,13 +351,18 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
     }
     command_offsets();
   }
-  // Manual mode waits until all brakes are released or a user configurable timeout expires
+  // Manual mode holds every brake as soon as it is released and waits until all are
   if (mode_ == Mode::Manual && current_state_ == State::Commanding) {
-    finished = all_brakes_released() || time - last_state_change_time_.value() >
-                                            rclcpp::Duration(std::chrono::duration<double>(params_.timeout));
+    for (std::size_t i = 0; i < brake_released_state_interfaces_.size(); i++) {
+      if (is_brake_released(brake_released_state_interfaces_.at(i).get())) {
+        hold_brake(i);
+      }
+    }
+    finished = all_brakes_released();
   }
 
   if (finished) {
+    // Released brakes are in hold already, the others stayed excited in case a coupled drive unloaded them late
     hold_brakes();
     if (all_brakes_released()) {
       RCLCPP_INFO_STREAM(get_node()->get_logger(), "All brakes released and put to hold state, deactivating");
@@ -395,11 +399,17 @@ std::string BrakeReleaseController::unreleased_joints() const
 
 void BrakeReleaseController::hold_brakes()
 {
-  for (auto& interface : brake_target_command_interfaces_) {
-    if (!interface.get().set_value<int>(2)) {
-      RCLCPP_ERROR_STREAM(get_node()->get_logger(),
-                          "Failed to put brake into 'holding' state for: " << interface.get().get_name());
-    }
+  for (std::size_t i = 0; i < brake_target_command_interfaces_.size(); i++) {
+    hold_brake(i);
+  }
+}
+
+void BrakeReleaseController::hold_brake(std::size_t index)
+{
+  auto& interface = brake_target_command_interfaces_.at(index).get();
+  if (!interface.set_value<int>(2)) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(),
+                        "Failed to put brake into 'holding' state for: " << interface.get_name());
   }
 }
 
