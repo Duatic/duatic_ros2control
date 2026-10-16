@@ -56,7 +56,8 @@ bool is_brake_released(const hardware_interface::LoanedStateInterface& interface
   return value && *value != 0.0;
 }
 
-// Torque offsets as fractions of max_torque the sweep moves through in turn, to load the pins as little as possible
+// Torque offsets as fractions of max_drive_torque the sweep moves through in turn, to load the pins as little as
+// possible
 constexpr std::array<double, 7> sweep_levels{ 0.25, -0.25, 0.5, -0.5, 1.0, -1.0, 0.0 };
 }  // namespace
 
@@ -80,7 +81,7 @@ controller_interface::InterfaceConfiguration BrakeReleaseController::command_int
     }
     config.names.emplace_back(joint + "/" + "target_brake_state");
   }
-  // The torque offset is chained onto the gravity compensation, which keeps carrying the load
+  // The torque offset is chained onto the gravity compensation
   if (mode_ == Mode::Auto) {
     for (const auto& name : reference_joint_names()) {
       config.names.emplace_back(name + "/" + hardware_interface::HW_IF_EFFORT);
@@ -150,7 +151,6 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
   if (mode_ == Mode::Auto && !read_torque_coupling()) {
     return controller_interface::CallbackReturn::FAILURE;
   }
-  // A controller node lives in the namespace of its controller manager
   const std::string switch_controller_service = "controller_manager/switch_controller";
   switch_controller_client_ =
       get_node()->create_client<controller_manager_msgs::srv::SwitchController>(switch_controller_service);
@@ -293,8 +293,8 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
   }
 
   bool finished = false;
-  // Auto mode sweeps a torque offset per drive through alternating directions and growing levels, until the motor lifts
-  // the load off the pin and the brake releases
+  // Auto mode sweeps a torque offset per drive through alternating directions and growing levels, until the brake
+  // releases
   if (mode_ == Mode::Auto && current_state_ == State::Commanding) {
     const double step = params_.torque_rate * period.seconds();
     try {
@@ -326,7 +326,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
         probe.level = sweep_levels.size();
         hold_brake(i);
       } else {
-        const double level = sweep_levels[probe.level] * params_.max_torque;
+        const double level = sweep_levels[probe.level] * params_.max_drive_torque;
         probe.offset = std::clamp(level, probe.offset - step, probe.offset + step);
         if (probe.offset == level) {
           // A level is held while the drive moves in the pushed direction, so a free joint travels until its release is
@@ -554,7 +554,7 @@ std::vector<std::string> BrakeReleaseController::reference_joint_names() const
 {
   std::vector<std::string> names;
   for (const auto& joint : params_.joints) {
-    names.emplace_back(params_.gravity_compensation_controller + "/" + joint);
+    names.emplace_back(params_.gravity_compensation_controller_name + "/" + joint);
   }
   return names;
 }
