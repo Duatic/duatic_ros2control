@@ -80,12 +80,16 @@ public:
 
 protected:
 private:
-  // Per joint state of the direction search in mode "auto"
+  // Per drive state of the torque sweep in mode "auto", the drives are named like the joints
   struct JointProbe
   {
-    double target{};
-    // Even attempts push in the positive direction, odd ones in the negative direction
-    std::size_t attempt{ 0 };
+    // Drive output torque in [Nm] added on top of the gravity compensation
+    double offset{};
+    // Index of the sweep level the offset moves towards, the search is over once it is past the last level
+    std::size_t level{ 0 };
+    // Position loop gains of the drive before the search, restored when the joint is handed back
+    double p_gain{};
+    double i_gain{};
   };
 
   // Access to controller parameters via generate_parameter_library
@@ -94,15 +98,19 @@ private:
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_position_command_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_velocity_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_p_gain_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_i_gain_command_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> effort_reference_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> brake_target_command_interfaces_;
 
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_position_state_interfaces_;
-  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_effort_state_interfaces_;
+  std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_velocity_state_interfaces_;
   std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> brake_released_state_interfaces_;
 
   rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client_;
   rclcpp::Time last_status_log_time_;
   std::vector<JointProbe> probes_;
+  std::vector<double> joint_velocities_;
 
   /**
    * @brief whether every drive reports its brake as released
@@ -120,6 +128,22 @@ private:
    * @brief command a joint position target at zero velocity
    */
   void command_joint(std::size_t index, double position);
+  /**
+   * @brief command the joint torques that put the torque offset of each drive on its motor
+   */
+  void command_offsets();
+  /**
+   * @brief velocity of a drive in [rad/s] in drive coordinates, from the last read joint velocities
+   */
+  double drive_velocity(std::size_t index) const;
+  /**
+   * @brief give a drive back to its position loop without a torque offset
+   */
+  void hand_back(std::size_t index);
+  /**
+   * @brief the configured joints as the gravity compensation prefixes their effort references
+   */
+  std::vector<std::string> reference_joint_names() const;
   /**
    * @brief ask the controller manager to deactivate this controller
    */

@@ -5,18 +5,32 @@ brake_release_controller:
     description: Names of joints used by the controller
     validation:
       unique<>: null
-  probe_velocity:
+  torque_rate:
     type: double
-    default_value: 0.6
-    description: "Speed of the position target in 'auto' mode in [rad/s], which also sets how fast the torque grows while a joint is blocked"
+    default_value: 20.0
+    description: "Rate in 'auto' mode in [Nm/s] at which the torque offset changes"
     validation:
       gt<>: [0.0]
   max_torque:
     type: double
-    default_value: 3.0
-    description: "Largest measured drive torque in 'auto' mode in [Nm], including the torque of other controllers. Both directions are tried with a quarter, a half and then the full value"
+    default_value: 12.0
+    description: "Largest torque offset in 'auto' mode in [Nm] per drive, added on top of the gravity compensation. It is drive torque: at the output of the drive, after its gearbox and before any coupling or transmission outside the drive. Both directions are tried with a quarter, a half and then the full value"
     validation:
       gt<>: [0.0]
+  stop_velocity:
+    type: double
+    default_value: 0.02
+    description: "Drive speed in 'auto' mode in [rad/s], in drive coordinates, below which a drive counts as stopped. A sweep level is held as long as the drive moves faster in the pushed direction, so a free joint keeps moving until its release is detected. A coupling with gearing outside the drives scales it against the joint speed"
+    validation:
+      gt<>: [0.0]
+  coupling:
+    type: double_array
+    default_value: []
+    description: "Row-major matrix in 'auto' mode mapping the torque of each drive to the torques of the joints, both in the order of 'joints', as the coupled to serial torque mapping of the robot's kinematics. Empty means every joint has its own drive"
+  gravity_compensation_controller:
+    type: string
+    default_value: "gravity_compensation_controller"
+    description: "Name of the GravityCompensationController whose effort references carry the torque offset in 'auto' mode"
   mode:
     type: string
     default_value: "auto"
