@@ -56,8 +56,7 @@ bool is_brake_released(const hardware_interface::LoanedStateInterface& interface
   return value && *value != 0.0;
 }
 
-// Torque offsets as fractions of max_drive_torque the sweep moves through in turn, to load the pins as little as
-// possible
+// Torque offsets as fractions of max_drive_torque the sweep moves through in turn
 constexpr std::array<double, 7> sweep_levels{ 0.25, -0.25, 0.5, -0.5, 1.0, -1.0, 0.0 };
 }  // namespace
 
@@ -261,8 +260,7 @@ BrakeReleaseController::on_deactivate([[maybe_unused]] const rclcpp_lifecycle::S
         hand_back(i);
       }
     }
-    // NaN is the unset reference, so the gravity compensation adds nothing even if it stays chained to another
-    // controller
+    // NaN is the unset reference, so the gravity compensation adds nothing
     for (auto& interface : effort_reference_interfaces_) {
       (void)interface.get().set_value(std::numeric_limits<double>::quiet_NaN());
     }
@@ -293,8 +291,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
   }
 
   bool finished = false;
-  // Auto mode sweeps a torque offset per drive through alternating directions and growing levels, until the brake
-  // releases
+  // Auto mode sweeps an alternating torque offset per drive with growing levels, until the brake releases
   if (mode_ == Mode::Auto && current_state_ == State::Commanding) {
     const double step = params_.torque_rate * period.seconds();
     try {
@@ -329,8 +326,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
         const double level = sweep_levels[probe.level] * params_.max_drive_torque;
         probe.offset = std::clamp(level, probe.offset - step, probe.offset + step);
         if (probe.offset == level) {
-          // A level is held while the drive moves in the pushed direction, so a free joint travels until its release is
-          // detected, while a drive ringing on its pin does not hold it
+          // A level is held while the drive moves in the pushed direction
           const double direction = (level > 0.0) - (level < 0.0);
           if (drive_velocity(i) * direction < params_.stop_velocity) {
             if (++probe.level < sweep_levels.size()) {
