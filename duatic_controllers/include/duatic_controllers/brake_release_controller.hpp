@@ -85,9 +85,9 @@ private:
   {
     // Drive output torque in [Nm] added on top of the gravity compensation
     double offset{};
-    // Index of the sweep level the offset moves towards, the search is over once it is past the last level
+    // Index of the sweep level the offset moves towards
     std::size_t level{ 0 };
-    // Position loop gains of the drive before the search, restored when the joint is handed back
+    // Position loop gains of the drive before the search
     double p_gain{};
     double i_gain{};
   };
