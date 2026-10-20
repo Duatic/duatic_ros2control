@@ -52,13 +52,13 @@ The twist is taken at the `target_frame` origin, expressed in `base_frame` axes.
 | `target_frame` | Name of the target frame to be controlled | - | required for configuration, see [Notes](#notes) |
 | `target_filter` | Exponential target filter time constant [s] | 0.1 | [0.0, 10.0] |
 | `command_velocities` | If true, also claims and commands the joints' velocity interface | true | - |
-| `limits.velocity.linear` | Maximum linear velocity [m/s]. Zero disables linear motion | 1.0 | [0.0, 10.0] |
-| `limits.velocity.angular` | Maximum angular velocity [rad/s]. Zero disables angular motion | 6.283 | [0.0, 62.83] |
-| `limits.acceleration.linear` | Maximum linear acceleration [m/s^2]. Zero disables linear motion | 2.0 | [0.0, 100.0] |
-| `limits.acceleration.angular` | Maximum angular acceleration [rad/s^2]. Zero disables angular motion | 12.566 | [0.0, 628.3] |
+| `limits.velocity.linear` | Maximum linear velocity [m/s] | 1.0 | [0.0, 10.0] |
+| `limits.velocity.angular` | Maximum angular velocity [rad/s] | 6.283 | [0.0, 62.83] |
+| `limits.acceleration.linear` | Maximum linear acceleration [m/s^2] | 2.0 | [0.0, 100.0] |
+| `limits.acceleration.angular` | Maximum angular acceleration [rad/s^2] | 12.566 | [0.0, 628.3] |
 | `topic_prefix` | Prefix to all topics. If empty, the controller name is used | - | - |
 | `target_topic_suffix` | Suffix added to the target frame topic for receiving control inputs | `target` | - |
-| `topic_pub_frequency` | Frequency of the published end effector pose/twist topics. Zero disables publishing | 10.0 | [0.0, 1000.0] |
+| `topic_pub_frequency` | Frequency of the published end effector pose/twist topics | 10.0 | [0.0, 1000.0] |
 
 ### Debug parameters
 
