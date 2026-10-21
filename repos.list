@@ -1,20 +1,16 @@
 repositories:
-  ethercat_sdk_master:
+  duatic_duadrive_sdk:
     type: git
-    url: https://github.com/Duatic/ethercat_sdk_master.git
-    version: master
+    url: https://github.com/Duatic/duatic_duadrive_sdk.git
+    version: main
+  duatic_ethercat_interface:
+    type: git
+    url: https://github.com/Duatic/duatic_ethercat_interface.git
+    version: main
   duatic_message_logger:
     type: git
     url: https://github.com/Duatic/duatic_message_logger.git
     version: main
-  rsl_drive_sdk:
-    type: git
-    url: https://github.com/Duatic/rsl_drive_sdk.git
-    version: main
-  soem_interface:
-    type: git
-    url: https://github.com/Duatic/soem_interface.git
-    version: master
   soem_vendor:
     type: git
     url: https://github.com/Duatic/soem_vendor.git
