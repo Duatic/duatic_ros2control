@@ -39,10 +39,11 @@
 namespace duatic::controllers
 {
 
-const geometry_msgs::msg::WrenchStamped apply_wrench_offset(const geometry_msgs::msg::WrenchStamped& msg,
-                                                            const geometry_msgs::msg::WrenchStamped& offset)
+void apply_wrench_offset(const geometry_msgs::msg::WrenchStamped& msg, const geometry_msgs::msg::WrenchStamped& offset,
+                         geometry_msgs::msg::WrenchStamped& corrected_msg)
 {
-  geometry_msgs::msg::WrenchStamped corrected_msg = msg;
+  // Copy assignment reuses the frame_id capacity of corrected_msg
+  corrected_msg = msg;
 
   // Subtract the offset from the force components
   corrected_msg.wrench.force.x = msg.wrench.force.x - offset.wrench.force.x;
@@ -53,8 +54,37 @@ const geometry_msgs::msg::WrenchStamped apply_wrench_offset(const geometry_msgs:
   corrected_msg.wrench.torque.x = msg.wrench.torque.x - offset.wrench.torque.x;
   corrected_msg.wrench.torque.y = msg.wrench.torque.y - offset.wrench.torque.y;
   corrected_msg.wrench.torque.z = msg.wrench.torque.z - offset.wrench.torque.z;
+}
 
-  return corrected_msg;
+WrenchSolver::WrenchSolver(const Eigen::Index nv)
+  : J_reg_(nv, 6), svd_(nv, 6, Eigen::ComputeThinU | Eigen::ComputeThinV)
+{
+}
+
+bool WrenchSolver::solve(const Jacobian& J, const Eigen::VectorXd& tau_ext, const double lambda,
+                         const bool use_svd_solver, Wrench& wrench)
+{
+  // Eigen 3.4 SVD solves read an uninitialised rank on non-finite input and can segfault
+  if (!J.allFinite() || !tau_ext.allFinite()) {
+    return false;
+  }
+
+  // Solve for wrench: F = (J^T)^+ * tau_ext
+  if (use_svd_solver) {
+    J_reg_ = J.transpose();
+    J_reg_.diagonal().array() += lambda;
+    svd_.compute(J_reg_);
+    // Same result as svd_.solve(tau_ext), which allocates a temporary
+    const Eigen::Index rank = svd_.rank();
+    Wrench scaled = Wrench::Zero();
+    scaled.head(rank).noalias() = svd_.matrixU().leftCols(rank).transpose() * tau_ext;
+    scaled.head(rank).array() /= svd_.singularValues().head(rank).array();
+    wrench.noalias() = svd_.matrixV().leftCols(rank) * scaled.head(rank);
+    return true;
+  }
+  const Eigen::Matrix<double, 6, 6> A = J * J.transpose() + lambda * Eigen::Matrix<double, 6, 6>::Identity();
+  wrench = A.ldlt().solve(J * tau_ext);
+  return true;
 }
 
 ForceTorqueBroadcaster::ForceTorqueBroadcaster() : controller_interface::ControllerInterface()
@@ -142,6 +172,18 @@ ForceTorqueBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
     joint_indices_.push_back(pinocchio_model_.getJointId(joint));
   }
 
+  // Entries of joints not in params_.joints stay zero, and so do the J_ columns getFrameJacobian never writes
+  q_ = Eigen::VectorXd::Zero(pinocchio_model_.nq);
+  v_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  a_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  torque_meas_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  tau_ext_ = Eigen::VectorXd::Zero(pinocchio_model_.nv);
+  J_ = WrenchSolver::Jacobian::Zero(6, pinocchio_model_.nv);
+  wrench_solver_ = WrenchSolver(pinocchio_model_.nv);
+
+  torques_msg_.joints = params_.joints;
+  torques_msg_.torques.assign(params_.joints.size(), 0.0);
+
   // The wrench publisher
   wrench_pub_ =
       get_node()->create_publisher<WrenchStamped>("~/wrench", 10);  // TODO(firesurfer) what is the right qos ?
@@ -212,11 +254,6 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
 
   const std::size_t joint_count = joint_position_state_interfaces_.size();
 
-  // Build full-size vectors for all robot joints (Pinocchio expects this)
-  Eigen::VectorXd q = Eigen::VectorXd::Zero(pinocchio_model_.nq);
-  Eigen::VectorXd v = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  Eigen::VectorXd a = Eigen::VectorXd::Zero(pinocchio_model_.nv);
-  Eigen::VectorXd torque_meas = Eigen::VectorXd::Zero(pinocchio_model_.nv);
   // Map: Pinocchio joint name -> index in q/v
   for (std::size_t i = 0; i < joint_count; i++) {
     const std::string& joint_name = params_.joints[i];
@@ -226,39 +263,31 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
       return controller_interface::return_type::ERROR;
     }
     // Pinocchio joint index starts at 1, q/v index is idx-1
-    q[pinocchio_model_.joints[idx].idx_q()] =
+    q_[pinocchio_model_.joints[idx].idx_q()] =
         duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-    v[pinocchio_model_.joints[idx].idx_v()] =
+    v_[pinocchio_model_.joints[idx].idx_v()] =
         duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-    a[pinocchio_model_.joints[idx].idx_v()] =
+    a_[pinocchio_model_.joints[idx].idx_v()] =
         duatic::controllers::compat::require_value(joint_acceleration_state_interfaces_.at(i).get());
-    torque_meas[pinocchio_model_.joints[idx].idx_v()] =
+    torque_meas_[pinocchio_model_.joints[idx].idx_v()] =
         duatic::controllers::compat::require_value(joint_effort_state_interfaces_.at(i).get());
   }
 
-  forwardKinematics(pinocchio_model_, pinocchio_data_, q, v, a);
-  const auto tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q, v, a);
+  forwardKinematics(pinocchio_model_, pinocchio_data_, q_, v_, a_);
+  const auto& tau = pinocchio::rnea(pinocchio_model_, pinocchio_data_, q_, v_, a_);
   // These are the actual external torques
   // Note: inverted because of sign convention
-  Eigen::VectorXd tau_ext = tau - torque_meas;
+  tau_ext_ = tau - torque_meas_;
 
-  pinocchio::computeJointJacobians(pinocchio_model_, pinocchio_data_, q);
+  pinocchio::computeJointJacobians(pinocchio_model_, pinocchio_data_, q_);
   pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
-  Eigen::Matrix<double, 6, Eigen::Dynamic> J(6, pinocchio_model_.nv);
   pinocchio::getFrameJacobian(pinocchio_model_, pinocchio_data_, frame_index_, pinocchio::LOCAL,
-                              J);  // LOCAL or LOCAL_WORLD_ALIGNED
+                              J_);
 
-  // Solve for wrench: F = (J^T)^+ * tau_ext
-  const double lambda = params_.lambda_regularization;  // Regularization parameter
-  Eigen::VectorXd wrench;
-  if (params_.use_svd_solver) {
-    Eigen::MatrixXd J_reg = J.transpose();
-    J_reg.diagonal().array() += lambda;
-    Eigen::BDCSVD<Eigen::MatrixXd> svd(J_reg, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    wrench = svd.solve(tau_ext);
-  } else {
-    Eigen::Matrix<double, 6, 6> A = J * J.transpose() + lambda * Eigen::Matrix<double, 6, 6>::Identity();
-    wrench = A.ldlt().solve(J * tau_ext);
+  if (!wrench_solver_.solve(J_, tau_ext_, params_.lambda_regularization, params_.use_svd_solver, wrench_)) {
+    RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                         "Non-finite Jacobian or joint torques, skipping wrench estimation for this cycle");
+    return controller_interface::return_type::OK;
   }
 
   // Publish the wrench as wrench stamped
@@ -267,33 +296,28 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
   wrench_raw_msg_.header.frame_id = params_.endeffector_frame;
 
   // Force
-  wrench_raw_msg_.wrench.force.x = wrench(0);
-  wrench_raw_msg_.wrench.force.y = wrench(1);
-  wrench_raw_msg_.wrench.force.z = wrench(2);
+  wrench_raw_msg_.wrench.force.x = wrench_(0);
+  wrench_raw_msg_.wrench.force.y = wrench_(1);
+  wrench_raw_msg_.wrench.force.z = wrench_(2);
 
   // Torque
-  wrench_raw_msg_.wrench.torque.x = wrench(3);
-  wrench_raw_msg_.wrench.torque.y = wrench(4);
-  wrench_raw_msg_.wrench.torque.z = wrench(5);
+  wrench_raw_msg_.wrench.torque.x = wrench_(3);
+  wrench_raw_msg_.wrench.torque.y = wrench_(4);
+  wrench_raw_msg_.wrench.torque.z = wrench_(5);
 
-  wrench_msg_ = apply_wrench_offset(wrench_raw_msg_, wrench_offset_);
+  apply_wrench_offset(wrench_raw_msg_, wrench_offset_, wrench_msg_);
 
   // and we try to have our realtime publisher publish the message
   // if this doesn't succeed - well it will probably next time
   duatic::controllers::compat::publish_rt(wrench_pub_rt_, wrench_msg_);
 
-  MeasuredTorques torques_msg;
-  torques_msg.header = wrench_msg_.header;
+  torques_msg_.header = wrench_msg_.header;
   // Publish the calculated external torques per joint
   for (std::size_t i = 0; i < joint_count; i++) {
-    const std::string& joint_name = params_.joints[i];
-    auto idx = pinocchio_model_.getJointId(joint_name);
-    torques_msg.joints.push_back(joint_name);
-    const double effort = tau_ext[pinocchio_model_.joints[idx].idx_v()];
-    torques_msg.torques.push_back(effort);
+    torques_msg_.torques[i] = tau_ext_[pinocchio_model_.joints[joint_indices_[i]].idx_v()];
   }
 
-  duatic::controllers::compat::publish_rt(external_torques_pub__rt_, torques_msg);
+  duatic::controllers::compat::publish_rt(external_torques_pub__rt_, torques_msg_);
 
   return controller_interface::return_type::OK;
 }
