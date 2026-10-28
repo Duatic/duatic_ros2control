@@ -49,6 +49,7 @@ For each drive the following information is published:
 | current phase a | measured current of phase 1 in A |
 | current phase b | measured current of phase 2 in A |
 | current phase c | measured current of phase 3 in A |
+| brake released | true once motor motion proved the brake pin is out, see [BrakeReleaseController](./BrakeReleaseController.md#checking-the-release) |
 
 ## Parameters
 
