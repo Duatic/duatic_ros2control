@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <optional>
 
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
@@ -51,6 +52,13 @@
 
 namespace duatic::controllers
 {
+/**
+ * @brief Solves J^T * wrench = tau_ext for the wrench, regularised by lambda.
+ * @return The wrench, or std::nullopt if J or tau_ext holds a non-finite value.
+ */
+std::optional<Eigen::VectorXd> solve_wrench(const Eigen::Matrix<double, 6, Eigen::Dynamic>& J,
+                                            const Eigen::VectorXd& tau_ext, double lambda, bool use_svd_solver);
+
 class ForceTorqueBroadcaster : public controller_interface::ControllerInterface
 {
 public:

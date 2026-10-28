@@ -57,6 +57,26 @@ const geometry_msgs::msg::WrenchStamped apply_wrench_offset(const geometry_msgs:
   return corrected_msg;
 }
 
+std::optional<Eigen::VectorXd> solve_wrench(const Eigen::Matrix<double, 6, Eigen::Dynamic>& J,
+                                            const Eigen::VectorXd& tau_ext, const double lambda,
+                                            const bool use_svd_solver)
+{
+  // Eigen 3.4 BDCSVD::solve reads an uninitialised rank on non-finite input and can segfault
+  if (!J.allFinite() || !tau_ext.allFinite()) {
+    return std::nullopt;
+  }
+
+  // Solve for wrench: F = (J^T)^+ * tau_ext
+  if (use_svd_solver) {
+    Eigen::MatrixXd J_reg = J.transpose();
+    J_reg.diagonal().array() += lambda;
+    Eigen::BDCSVD<Eigen::MatrixXd> svd(J_reg, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    return svd.solve(tau_ext);
+  }
+  Eigen::Matrix<double, 6, 6> A = J * J.transpose() + lambda * Eigen::Matrix<double, 6, 6>::Identity();
+  return A.ldlt().solve(J * tau_ext);
+}
+
 ForceTorqueBroadcaster::ForceTorqueBroadcaster() : controller_interface::ControllerInterface()
 {
 }
@@ -248,18 +268,13 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
   pinocchio::getFrameJacobian(pinocchio_model_, pinocchio_data_, frame_index_, pinocchio::LOCAL,
                               J);  // LOCAL or LOCAL_WORLD_ALIGNED
 
-  // Solve for wrench: F = (J^T)^+ * tau_ext
-  const double lambda = params_.lambda_regularization;  // Regularization parameter
-  Eigen::VectorXd wrench;
-  if (params_.use_svd_solver) {
-    Eigen::MatrixXd J_reg = J.transpose();
-    J_reg.diagonal().array() += lambda;
-    Eigen::BDCSVD<Eigen::MatrixXd> svd(J_reg, Eigen::ComputeThinU | Eigen::ComputeThinV);
-    wrench = svd.solve(tau_ext);
-  } else {
-    Eigen::Matrix<double, 6, 6> A = J * J.transpose() + lambda * Eigen::Matrix<double, 6, 6>::Identity();
-    wrench = A.ldlt().solve(J * tau_ext);
+  const auto solved = solve_wrench(J, tau_ext, params_.lambda_regularization, params_.use_svd_solver);
+  if (!solved) {
+    RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
+                         "Non-finite Jacobian or joint torques, skipping wrench estimation for this cycle");
+    return controller_interface::return_type::OK;
   }
+  const Eigen::VectorXd& wrench = *solved;
 
   // Publish the wrench as wrench stamped
 
