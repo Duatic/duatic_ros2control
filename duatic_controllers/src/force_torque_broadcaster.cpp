@@ -282,7 +282,7 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
   pinocchio::computeJointJacobians(pinocchio_model_, pinocchio_data_, q_);
   pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
   pinocchio::getFrameJacobian(pinocchio_model_, pinocchio_data_, frame_index_, pinocchio::LOCAL,
-                              J_);  // LOCAL or LOCAL_WORLD_ALIGNED
+                              J_);
 
   if (!wrench_solver_.solve(J_, tau_ext_, params_.lambda_regularization, params_.use_svd_solver, wrench_)) {
     RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
