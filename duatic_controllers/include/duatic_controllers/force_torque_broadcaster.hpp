@@ -28,7 +28,6 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
-#include <optional>
 
 #include <controller_interface/controller_interface.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
@@ -39,6 +38,8 @@
 
 // ROS2
 #include <realtime_tools/realtime_publisher.hpp>
+
+#include <Eigen/SVD>  // NOLINT(build/include_order)
 
 // Pinocchio
 #include <pinocchio/algorithm/compute-all-terms.hpp>
@@ -53,11 +54,28 @@
 namespace duatic::controllers
 {
 /**
- * @brief Solves J^T * wrench = tau_ext for the wrench, regularised by lambda.
- * @return The wrench, or std::nullopt if J or tau_ext holds a non-finite value.
+ * @brief Estimates a wrench from external joint torques, allocating memory only on construction.
  */
-std::optional<Eigen::VectorXd> solve_wrench(const Eigen::Matrix<double, 6, Eigen::Dynamic>& J,
-                                            const Eigen::VectorXd& tau_ext, double lambda, bool use_svd_solver);
+class WrenchSolver
+{
+public:
+  using Jacobian = Eigen::Matrix<double, 6, Eigen::Dynamic>;
+  using Wrench = Eigen::Matrix<double, 6, 1>;
+
+  WrenchSolver() = default;
+  /// @brief Preallocates the workspace for a model with nv velocity dimensions.
+  explicit WrenchSolver(Eigen::Index nv);
+
+  /**
+   * @brief Solves J^T * wrench = tau_ext for the wrench, regularised by lambda.
+   * @return False, leaving wrench unchanged, if J or tau_ext holds a non-finite value.
+   */
+  bool solve(const Jacobian& J, const Eigen::VectorXd& tau_ext, double lambda, bool use_svd_solver, Wrench& wrench);
+
+private:
+  Eigen::MatrixXd J_reg_;
+  Eigen::JacobiSVD<Eigen::MatrixXd> svd_;
+};
 
 class ForceTorqueBroadcaster : public controller_interface::ControllerInterface
 {
@@ -102,9 +120,20 @@ private:
   WrenchStamped wrench_msg_;
   WrenchStamped wrench_raw_msg_;
   WrenchStamped wrench_offset_;
+  MeasuredTorques torques_msg_;
 
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr zero_service_;
 
   std::vector<pinocchio::JointIndex> joint_indices_;
+
+  // Sized in on_configure so that update() does not allocate
+  Eigen::VectorXd q_;
+  Eigen::VectorXd v_;
+  Eigen::VectorXd a_;
+  Eigen::VectorXd torque_meas_;
+  Eigen::VectorXd tau_ext_;
+  WrenchSolver::Jacobian J_;
+  WrenchSolver::Wrench wrench_;
+  WrenchSolver wrench_solver_;
 };
 }  // namespace duatic::controllers
