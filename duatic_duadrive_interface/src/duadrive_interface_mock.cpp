@@ -25,12 +25,13 @@
 
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace duatic::duadrive_interface
 {
 DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
   : DuaDriveInterfaceBase(logger)
-  , min_velocity_(-default_abs_velocity_limit)
-  , max_velocity_(default_abs_velocity_limit)
   , mock_acceleration_callback_([]() { return 0.0; })  // default: NO ACCELERATION
 {
 }
@@ -53,6 +54,27 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::activate()
   drive_info_.drive_name = "mock";
   drive_info_.drive_model = "DuaDrive_mock";
   drive_info_.drive_build_tag = "none";
+  error_latched_ = false;
+
+  // Same limits as configured on the real drive
+  max_joint_velocity_ = params_.maximum_joint_velocity * hw_limits_gain;
+  if (max_joint_velocity_ <= 0.0) {
+    RCLCPP_FATAL_STREAM(logger_, "Implausible maximum joint velocity of " << max_joint_velocity_
+                                                                         << " for drive: " << get_name());
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
+                                                         << " mock limit: " << max_joint_velocity_ << " rad/s");
+
+  max_joint_torque_ = params_.maximum_joint_effort * hw_limits_gain;
+  if (max_joint_torque_ <= 0.0) {
+    RCLCPP_FATAL_STREAM(logger_, "Implausible maximum joint torque of " << max_joint_torque_
+                                                                       << " for drive: " << get_name());
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint effort: " << params_.maximum_joint_effort << " Nm "
+                                                       << " mock limit: " << max_joint_torque_ << " Nm");
+
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -82,9 +104,13 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
   state_.joint_torque_commanded = command_.joint_torque;
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
-  state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
+  state_.current_drive_state =
+      error_latched_ ? rsl_drive_sdk::fsm::StateEnum::Error : rsl_drive_sdk::fsm::StateEnum::ControlOp;
 
-  if (command_.joint_freeze_mode) {  // enforce freeze if commanded
+  // Saturate the commanded torque as the real drive does
+  const double joint_torque = get_saturated_joint_torque();
+
+  if (error_latched_ || command_.joint_freeze_mode) {  // enforce freeze on error or if commanded
     state_.joint_velocity = 0.0;
     state_.joint_acceleration = 0.0;
   } else {
@@ -110,18 +136,23 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
                                  dt;  // 0.5 a t^2 + v t  <- using PREVIOUS velocity
         state_.joint_velocity += mock_acceleration * dt;
         state_.joint_acceleration = mock_acceleration;
-        state_.joint_torque = command_.joint_torque;
+        state_.joint_torque = joint_torque;
       } break;
       default:
-        state_.joint_torque = command_.joint_torque;
+        state_.joint_torque = joint_torque;
         state_.joint_acceleration = command_.joint_acceleration;
         state_.joint_velocity = command_.joint_velocity;
         state_.joint_position = command_.joint_position;
     }
-    // LIMIT MOCK SIMULATION
-    state_.joint_velocity = std::max(
-        min_velocity_, std::min(max_velocity_, state_.joint_velocity));  // limit velocity to some reasonable value to
-                                                                         // avoid numeric instabilities
+    // Mimic the real drive: freeze + error. The hardware interface then freezes the whole robot in the next cycle
+    if (std::abs(state_.joint_velocity) > max_joint_velocity_) {
+      RCLCPP_ERROR_STREAM(logger_, "Maximum velocity exceeded on joint: " << get_name() << " ("
+                                                                         << state_.joint_velocity << " rad/s)");
+      error_latched_ = true;
+      state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::Error;
+      state_.joint_velocity = 0.0;
+      state_.joint_acceleration = 0.0;
+    }
   }
 
   return hardware_interface::return_type::OK;
@@ -136,12 +167,6 @@ void DuaDriveInterfaceMock::enforce_position(const double position)
   state_.joint_velocity = 0;
   state_.joint_velocity_commanded = 0;
   command_.joint_velocity = 0;
-}
-
-void DuaDriveInterfaceMock::limit_velocity(const double max_velocity, const double min_velocity)
-{
-  min_velocity_ = min_velocity;
-  max_velocity_ = max_velocity;
 }
 
 }  // namespace duatic::duadrive_interface

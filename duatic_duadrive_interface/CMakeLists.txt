@@ -33,22 +33,15 @@ target_include_directories(duatic_duadrive_interface PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
-# Support ros distros older than lyrical
-if(COMMAND ament_target_dependencies)
-  ament_target_dependencies(${PROJECT_NAME}  ${PACKAGE_DEPENDENCIES})
-else()
-  target_link_libraries(${PROJECT_NAME}
-    rclcpp::rclcpp
-    pluginlib::pluginlib
-    hardware_interface::hardware_interface
-    urdf::urdf
-    rsl_drive_sdk::rsl_drive_sdk
-    Eigen3::Eigen
-  )
-endif()
-
-target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES}
+target_link_libraries(${PROJECT_NAME}
+  rclcpp::rclcpp
+  pluginlib::pluginlib
+  hardware_interface::hardware_interface
+  urdf::urdf
+  rsl_drive_sdk::rsl_drive_sdk
   pinocchio::pinocchio
+  Eigen3::Eigen
+  ${YAML_CPP_LIBRARIES}
 )
 
 # enable additional warnings

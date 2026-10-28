@@ -5,21 +5,20 @@ project(duatic_controllers)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(duatic_controller_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(pinocchio REQUIRED)
+find_package(proxsuite REQUIRED)
 # Generate code from parameter description yaml files
-generate_parameter_library(
-    safety_scaling_controller_parameters
-    src/safety_scaling_controller_parameters.yaml
-)
 generate_parameter_library(
     duadrive_status_broadcaster_parameters
     src/duadrive_status_broadcaster_parameters.yaml
@@ -56,7 +55,6 @@ generate_parameter_library(
 
 # The actual controller library
 add_library(${PROJECT_NAME} SHARED
-    src/safety_scaling_controller.cpp
     src/duadrive_status_broadcaster.cpp
     src/force_torque_broadcaster.cpp
     src/freedrive_controller.cpp
@@ -89,41 +87,32 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 # Link against the controller parameter targets
 target_link_libraries(${PROJECT_NAME}
-    safety_scaling_controller_parameters
     duadrive_status_broadcaster_parameters
     force_torque_broadcaster_parameters
     freedrive_controller_parameters
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    cartesian_pose_controller_parameters
     brake_release_controller_parameters
     pinocchio::pinocchio
+    proxsuite::proxsuite
 )
 
-# Support ros distros older than lyrical
-if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME}
-      controller_interface
-      pluginlib
-      rclcpp
-      rclcpp_lifecycle
-      realtime_tools
-      duatic_controller_msgs
-      std_srvs
-      Eigen3
-    )
-else()
-    target_link_libraries(${PROJECT_NAME}
-      controller_interface::controller_interface
-      pluginlib::pluginlib
-      rclcpp::rclcpp
-      rclcpp_lifecycle::rclcpp_lifecycle
-      realtime_tools::realtime_tools
-      duatic_controller_msgs::duatic_controller_msgs
-      std_srvs::std_srvs
-      Eigen3::Eigen
-    )
-endif()
+target_link_libraries(${PROJECT_NAME}
+  controller_interface::controller_interface
+  hardware_interface::hardware_interface
+  pluginlib::pluginlib
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  realtime_tools::realtime_tools
+  duatic_controller_msgs::duatic_controller_msgs
+  geometry_msgs::geometry_msgs
+  std_srvs::std_srvs
+  Eigen3::Eigen
+  pinocchio::pinocchio
+  proxsuite::proxsuite
+)
 
 # prevent pluginlib from using boost
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
@@ -133,13 +122,13 @@ pluginlib_export_plugin_description_file(controller_interface controller_interfa
 install(
   TARGETS
     ${PROJECT_NAME}
-    safety_scaling_controller_parameters
     duadrive_status_broadcaster_parameters
     force_torque_broadcaster_parameters
     freedrive_controller_parameters
     duadrive_pid_tuner_parameters
     gravity_compensation_controller_parameters
     freeze_controller_parameters
+    cartesian_pose_controller_parameters
     brake_release_controller_parameters
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
@@ -160,6 +149,20 @@ ament_export_libraries(
 ament_export_targets(
   export_${PROJECT_NAME}
 )
-
-
+ament_export_dependencies(
+  generate_parameter_library
+  eigen3_cmake_module
+  controller_interface
+  hardware_interface
+  pluginlib
+  rclcpp
+  rclcpp_lifecycle
+  realtime_tools
+  duatic_controller_msgs
+  geometry_msgs
+  std_srvs
+  Eigen3
+  pinocchio
+  proxsuite
+)
 ament_package()

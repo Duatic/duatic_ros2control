@@ -26,6 +26,7 @@
 #pragma once
 
 // System
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <string>
@@ -55,8 +56,6 @@ namespace duatic::duadrive_interface
 class DuaDriveInterfaceMock : public DuaDriveInterfaceBase
 {
 public:
-  static constexpr double default_abs_velocity_limit = 2.0 * M_2_PI;  // i.e. 2 rotations per second
-
   explicit DuaDriveInterfaceMock(rclcpp::Logger logger);
   virtual ~DuaDriveInterfaceMock();
   using UniquePtr = std::unique_ptr<DuaDriveInterfaceMock>;
@@ -93,16 +92,11 @@ public:
    */
   void enforce_position(const double position);
   /**
-   * @brief Allow in the mocked hardware to explicitly enforce positive and negative velocity limits (e.g. during
-   * dynamic simulation)
+   * @brief Commanded joint torque, saturated to the configured limit
    */
-  void limit_velocity(const double max_velocity, const double min_velocity);
-  /**
-   * @brief Allow in the mocked hardware to explicitly enforce equal velocity limits (e.g. during dynamic simulation)
-   */
-  void limit_velocity(const double max_abs_velocity)
+  double get_saturated_joint_torque() const
   {
-    limit_velocity(max_abs_velocity, -max_abs_velocity);
+    return std::clamp(command_.joint_torque, -max_joint_torque_, max_joint_torque_);
   }
   /**
    * @brief Register a mock dynamics model with the mock hardware
@@ -113,8 +107,9 @@ public:
   }
 
 private:
-  double min_velocity_;
-  double max_velocity_;
+  double max_joint_velocity_{ 0.0 };
+  double max_joint_torque_{ 0.0 };
+  bool error_latched_{ false };
   std::function<double()> mock_acceleration_callback_;
 };
 
