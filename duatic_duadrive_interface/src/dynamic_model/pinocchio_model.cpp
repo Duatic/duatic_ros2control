@@ -42,7 +42,7 @@ void PinocchioModel::init(const hardware_interface::HardwareComponentInterfacePa
   data_ = pinocchio::Data(model_);
 
   // init data storages
-  q_ = Eigen::VectorXd::Zero(model_.nq);
+  q_ = pinocchio::neutral(model_);
   v_ = Eigen::VectorXd::Zero(model_.nv);
   tau_ = Eigen::VectorXd::Zero(model_.nv);
 
