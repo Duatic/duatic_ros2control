@@ -66,8 +66,9 @@ namespace duatic::duadrive_interface
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
           bool enable_advanced_command_limit = false,
           dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>>
-  requires(!is_dua_drive_interface_mock_v<DriveTypeT>) || dynamic_model::MockDynamicModel<DynamicModelT>
-class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
+requires(!is_dua_drive_interface_mock_v<DriveTypeT>) ||
+    dynamic_model::MockDynamicModel<DynamicModelT> class CoupledKinematicsHardwareInterfaceBase
+  : public hardware_interface::SystemInterface
 {
 public:
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;

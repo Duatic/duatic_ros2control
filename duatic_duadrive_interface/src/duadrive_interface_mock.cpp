@@ -31,8 +31,7 @@
 namespace duatic::duadrive_interface
 {
 DuaDriveInterfaceMock::DuaDriveInterfaceMock(rclcpp::Logger logger)
-  : DuaDriveInterfaceBase(logger)
-  , mock_acceleration_callback_([]() { return 0.0; })  // default: NO ACCELERATION
+  : DuaDriveInterfaceBase(logger), mock_acceleration_callback_([]() { return 0.0; })  // default: NO ACCELERATION
 {
 }
 
@@ -60,7 +59,7 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::activate()
   max_joint_velocity_ = params_.maximum_joint_velocity * hw_limits_gain;
   if (max_joint_velocity_ <= 0.0) {
     RCLCPP_FATAL_STREAM(logger_, "Implausible maximum joint velocity of " << max_joint_velocity_
-                                                                         << " for drive: " << get_name());
+                                                                          << " for drive: " << get_name());
     return hardware_interface::CallbackReturn::FAILURE;
   }
   RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
@@ -68,8 +67,8 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::activate()
 
   max_joint_torque_ = params_.maximum_joint_effort * hw_limits_gain;
   if (max_joint_torque_ <= 0.0) {
-    RCLCPP_FATAL_STREAM(logger_, "Implausible maximum joint torque of " << max_joint_torque_
-                                                                       << " for drive: " << get_name());
+    RCLCPP_FATAL_STREAM(logger_,
+                        "Implausible maximum joint torque of " << max_joint_torque_ << " for drive: " << get_name());
     return hardware_interface::CallbackReturn::FAILURE;
   }
   RCLCPP_INFO_STREAM(logger_, "Maximum joint effort: " << params_.maximum_joint_effort << " Nm "
@@ -146,8 +145,8 @@ hardware_interface::return_type DuaDriveInterfaceMock::write([[maybe_unused]] co
     }
     // Mimic the real drive: freeze + error. The hardware interface then freezes the whole robot in the next cycle
     if (std::abs(state_.joint_velocity) > max_joint_velocity_) {
-      RCLCPP_ERROR_STREAM(logger_, "Maximum velocity exceeded on joint: " << get_name() << " ("
-                                                                         << state_.joint_velocity << " rad/s)");
+      RCLCPP_ERROR_STREAM(logger_, "Maximum velocity exceeded on joint: " << get_name() << " (" << state_.joint_velocity
+                                                                          << " rad/s)");
       error_latched_ = true;
       state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::Error;
       state_.joint_velocity = 0.0;
