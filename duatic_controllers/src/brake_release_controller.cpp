@@ -186,6 +186,13 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::ERROR;
   }
   RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial setup done");
+
+  joint_position_command_interfaces_.reserve(params_.joints.size());
+  brake_target_command_interfaces_.reserve(params_.joints.size());
+  joint_position_state_interfaces_.reserve(params_.joints.size());
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
+  joint_acceleration_state_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 

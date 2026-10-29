@@ -197,6 +197,11 @@ ForceTorqueBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
       [&]([[maybe_unused]] std_srvs::srv::Trigger::Request::SharedPtr req,
           [[maybe_unused]] std_srvs::srv::Trigger::Response::SharedPtr res) { wrench_offset_ = wrench_raw_msg_; });
 
+  joint_effort_state_interfaces_.reserve(params_.joints.size());
+  joint_position_state_interfaces_.reserve(params_.joints.size());
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
+  joint_acceleration_state_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 

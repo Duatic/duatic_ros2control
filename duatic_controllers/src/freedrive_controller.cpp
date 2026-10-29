@@ -92,6 +92,14 @@ FreeDriveController::on_configure([[maybe_unused]] const rclcpp_lifecycle::State
     RCLCPP_ERROR(get_node()->get_logger(), "'joints' parameter is empty.");
     return controller_interface::CallbackReturn::FAILURE;
   }
+
+  joint_position_command_interfaces_.reserve(params_.joints.size());
+  joint_velocity_command_interfaces_.reserve(params_.joints.size());
+  joint_position_state_interfaces_.reserve(params_.joints.size());
+  joint_p_gain_command_interfaces_.reserve(params_.joints.size());
+  joint_i_gain_command_interfaces_.reserve(params_.joints.size());
+  joint_d_gain_command_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 };
 

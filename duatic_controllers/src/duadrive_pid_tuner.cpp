@@ -103,6 +103,10 @@ PIDTuner::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_
         }));
   }
 
+  joint_p_gain_command_interfaces_.reserve(params_.joints.size());
+  joint_i_gain_command_interfaces_.reserve(params_.joints.size());
+  joint_d_gain_command_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 

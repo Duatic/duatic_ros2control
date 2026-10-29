@@ -146,6 +146,10 @@ GravityCompensationController::on_configure([[maybe_unused]] const rclcpp_lifecy
     }
   }
 
+  joint_effort_command_interfaces_.reserve(params_.joints.size());
+  joint_position_state_interfaces_.reserve(params_.joints.size());
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 

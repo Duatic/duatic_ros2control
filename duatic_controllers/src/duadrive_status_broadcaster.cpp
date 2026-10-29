@@ -114,6 +114,27 @@ StatusBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& 
       get_node()->create_publisher<DriveStateCollection>("~/state", 10);  // TODO(firesurfer) what is the right qos ?
   collection_state_pub_rt_ = std::make_unique<DriveStateCollectionPublisher>(collection_state_pub_);
 
+  joint_position_interfaces_.reserve(params_.joints.size());
+  joint_velocity_interfaces_.reserve(params_.joints.size());
+  joint_effort_interfaces_.reserve(params_.joints.size());
+  joint_position_commanded_interfaces_.reserve(params_.joints.size());
+  joint_velocity_commanded_interfaces_.reserve(params_.joints.size());
+  joint_effort_commanded_interfaces_.reserve(params_.joints.size());
+  motor_current_commanded_interfaces_.reserve(params_.joints.size());
+  joint_temperature_system_interfaces_.reserve(params_.joints.size());
+  joint_temperature_phase_a_interfaces_.reserve(params_.joints.size());
+  joint_temperature_phase_b_interfaces_.reserve(params_.joints.size());
+  joint_temperature_phase_c_interfaces_.reserve(params_.joints.size());
+  joint_bus_voltage_interfaces_.reserve(params_.joints.size());
+  joint_current_q_interfaces_.reserve(params_.joints.size());
+  joint_current_d_interfaces_.reserve(params_.joints.size());
+  joint_current_phase_a_interfaces_.reserve(params_.joints.size());
+  joint_current_phase_b_interfaces_.reserve(params_.joints.size());
+  joint_current_phase_c_interfaces_.reserve(params_.joints.size());
+  joint_voltage_phase_a_interfaces_.reserve(params_.joints.size());
+  joint_voltage_phase_b_interfaces_.reserve(params_.joints.size());
+  joint_voltage_phase_c_interfaces_.reserve(params_.joints.size());
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
