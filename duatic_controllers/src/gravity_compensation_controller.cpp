@@ -170,8 +170,11 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
 {
   // clear out vectors in case of restart
   joint_effort_command_interfaces_.clear();
+  joint_effort_command_interfaces_.reserve(params_.joints.size());
   joint_position_state_interfaces_.clear();
+  joint_position_state_interfaces_.reserve(params_.joints.size());
   joint_velocity_state_interfaces_.clear();
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
   initial_joint_positions_.clear();
 
   // Do allocation one but clear it in the activate function to to be sure

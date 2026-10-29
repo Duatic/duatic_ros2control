@@ -102,12 +102,18 @@ FreeDriveController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State&
 
   // clear out vectors in case of restart
   joint_position_command_interfaces_.clear();
+  joint_position_command_interfaces_.reserve(params_.joints.size());
   joint_velocity_command_interfaces_.clear();
+  joint_velocity_command_interfaces_.reserve(params_.joints.size());
   joint_position_state_interfaces_.clear();
+  joint_position_state_interfaces_.reserve(params_.joints.size());
 
   joint_p_gain_command_interfaces_.clear();
+  joint_p_gain_command_interfaces_.reserve(params_.joints.size());
   joint_i_gain_command_interfaces_.clear();
+  joint_i_gain_command_interfaces_.reserve(params_.joints.size());
   joint_d_gain_command_interfaces_.clear();
+  joint_d_gain_command_interfaces_.reserve(params_.joints.size());
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints,

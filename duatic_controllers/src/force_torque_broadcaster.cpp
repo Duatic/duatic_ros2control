@@ -205,9 +205,13 @@ ForceTorqueBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 {
   // clear out vectors in case of restart
   joint_effort_state_interfaces_.clear();
+  joint_effort_state_interfaces_.reserve(params_.joints.size());
   joint_position_state_interfaces_.clear();
+  joint_position_state_interfaces_.reserve(params_.joints.size());
   joint_velocity_state_interfaces_.clear();
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
   joint_acceleration_state_interfaces_.clear();
+  joint_acceleration_state_interfaces_.reserve(params_.joints.size());
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(
