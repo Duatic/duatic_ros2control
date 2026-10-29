@@ -1,0 +1,112 @@
+<?xml version="1.0"?>
+<!-- Copyright 2026 Duatic AG -->
+<robot name="test_robot">
+  <link name="base_link"/>
+  <link name="link_1">
+    <inertial>
+      <origin xyz="0 0 0.1"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <link name="link_2">
+    <inertial>
+      <origin xyz="0.1 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <link name="flange"/>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link_1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="2"/>
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/>
+    <child link="link_2"/>
+    <origin xyz="0 0 0.2"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="2"/>
+  </joint>
+  <joint name="flange_joint" type="fixed">
+    <parent link="link_2"/>
+    <child link="flange"/>
+    <origin xyz="0.2 0 0"/>
+  </joint>
+
+  <ros2_control name="TestSystem" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <joint name="joint_1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <command_interface name="p_gain"/>
+      <command_interface name="i_gain"/>
+      <command_interface name="d_gain"/>
+      <command_interface name="target_brake_state" data_type="int32"/>
+      <state_interface name="position">
+        <param name="initial_value">0.1</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <state_interface name="position_commanded"/>
+      <state_interface name="velocity_commanded"/>
+      <state_interface name="acceleration_commanded"/>
+      <state_interface name="effort_commanded"/>
+      <state_interface name="current_commanded"/>
+      <state_interface name="temperature_system"/>
+      <state_interface name="temperature_coil_A"/>
+      <state_interface name="temperature_coil_B"/>
+      <state_interface name="temperature_coil_C"/>
+      <state_interface name="bus_voltage"/>
+      <state_interface name="current_d"/>
+      <state_interface name="current_q"/>
+      <state_interface name="current_coil_A"/>
+      <state_interface name="current_coil_B"/>
+      <state_interface name="current_coil_C"/>
+      <state_interface name="voltage_coil_A"/>
+      <state_interface name="voltage_coil_B"/>
+      <state_interface name="voltage_coil_C"/>
+    </joint>
+    <joint name="joint_2">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <command_interface name="effort"/>
+      <command_interface name="p_gain"/>
+      <command_interface name="i_gain"/>
+      <command_interface name="d_gain"/>
+      <command_interface name="target_brake_state" data_type="int32"/>
+      <state_interface name="position">
+        <param name="initial_value">0.2</param>
+      </state_interface>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <state_interface name="position_commanded"/>
+      <state_interface name="velocity_commanded"/>
+      <state_interface name="acceleration_commanded"/>
+      <state_interface name="effort_commanded"/>
+      <state_interface name="current_commanded"/>
+      <state_interface name="temperature_system"/>
+      <state_interface name="temperature_coil_A"/>
+      <state_interface name="temperature_coil_B"/>
+      <state_interface name="temperature_coil_C"/>
+      <state_interface name="bus_voltage"/>
+      <state_interface name="current_d"/>
+      <state_interface name="current_q"/>
+      <state_interface name="current_coil_A"/>
+      <state_interface name="current_coil_B"/>
+      <state_interface name="current_coil_C"/>
+      <state_interface name="voltage_coil_A"/>
+      <state_interface name="voltage_coil_B"/>
+      <state_interface name="voltage_coil_C"/>
+    </joint>
+    <gpio name="TestSystem">
+      <command_interface name="freeze_mode" data_type="bool"/>
+    </gpio>
+  </ros2_control>
+</robot>

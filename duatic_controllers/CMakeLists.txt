@@ -126,6 +126,13 @@ if(BUILD_TESTING)
   target_link_libraries(test_force_torque_broadcaster
     ${PROJECT_NAME}
   )
+
+  find_package(ament_cmake_ros REQUIRED)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_controller_lifecycle.py
+    RUNNER "${ament_cmake_ros_DIR}/run_test_isolated.py"
+    TIMEOUT 300
+  )
 endif()
 
 # Install the resulting library

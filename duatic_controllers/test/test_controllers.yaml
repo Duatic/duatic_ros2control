@@ -1,0 +1,55 @@
+/**:
+  controller_manager:
+    ros__parameters:
+      update_rate: 500  # Hz
+
+      brake_release_controller:
+        type: duatic_controllers/BrakeReleaseController
+      cartesian_pose_controller:
+        type: duatic_controllers/CartesianPoseController
+      duadrive_pid_tuner:
+        type: duatic_controllers/PIDTuner
+      duadrive_status_broadcaster:
+        type: duatic_controllers/StatusBroadcaster
+      force_torque_broadcaster:
+        type: duatic_controllers/ForceTorqueBroadcaster
+      freedrive_controller:
+        type: duatic_controllers/FreeDriveController
+      freeze_controller:
+        type: duatic_controllers/FreezeController
+      gravity_compensation_controller:
+        type: duatic_controllers/GravityCompensationController
+
+  brake_release_controller:
+    ros__parameters:
+      joints: [joint_1, joint_2]
+
+  cartesian_pose_controller:
+    ros__parameters:
+      base_frame: base_link
+      target_frame: flange
+
+  duadrive_pid_tuner:
+    ros__parameters:
+      joints: [joint_1, joint_2]
+
+  duadrive_status_broadcaster:
+    ros__parameters:
+      joints: [joint_1, joint_2]
+
+  force_torque_broadcaster:
+    ros__parameters:
+      joints: [joint_1, joint_2]
+      endeffector_frame: flange
+
+  freedrive_controller:
+    ros__parameters:
+      joints: [joint_1, joint_2]
+
+  freeze_controller:
+    ros__parameters:
+      names: [TestSystem]
+
+  gravity_compensation_controller:
+    ros__parameters:
+      joints: [joint_1, joint_2]
