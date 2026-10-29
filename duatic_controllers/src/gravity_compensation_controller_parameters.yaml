@@ -34,3 +34,8 @@ gravity_compensation_controller:
     type: bool
     default_value: false
     description: "Run the controller in simulation mode without claiming or sending actual commands to the hardware interfaces"
+
+  enable_runtime_mass_tuning:
+    type: bool
+    default_value: false
+    description: "Expose link masses as ros2 parameters and allow to adapt them via runtime"
