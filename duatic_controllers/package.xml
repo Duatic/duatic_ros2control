@@ -5,7 +5,7 @@
   <version>0.0.0</version>
   <description>Collection of ros2 controllers to be used with various Duatic products</description>
   <maintainer email="lnachtigall@duatic.de">Lennart Nachtigall</maintainer>
-  <license>BSD3-Clause</license>
+  <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -30,5 +30,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
+    <duatic_archive_root>public</duatic_archive_root>
   </export>
 </package>
