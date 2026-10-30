@@ -6,7 +6,9 @@
 
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
+#include <typeindex>
 #include <utility>
 #include <vector>
 
@@ -15,9 +17,11 @@
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
+#include <pluginlib/class_loader.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <duatic_controllers/brake_release_controller.hpp>
+#include <duatic_controllers/cartesian_pose_controller.hpp>
 #include <duatic_controllers/duadrive_pid_tuner.hpp>
 #include <duatic_controllers/duadrive_status_broadcaster.hpp>
 #include <duatic_controllers/force_torque_broadcaster.hpp>
@@ -28,6 +32,9 @@
 namespace
 {
 const std::vector<std::string> kJoints = { "joint1", "joint2" };
+
+// The Cartesian pose controller refuses to configure below this rate
+constexpr unsigned int kUpdateRate = duatic::controllers::CartesianPoseController::min_update_rate_hz;
 
 constexpr char kUrdf[] = R"(<?xml version="1.0"?>
 <robot name="two_link">
@@ -124,8 +131,8 @@ TEST_P(ControllerActivationTest, ActivatesWithAllClaimedInterfaces)
   controller_interface::ControllerInterfaceParams params;
   params.controller_name = test_case.name;
   params.robot_description = kUrdf;
-  params.update_rate = 100;
-  params.controller_manager_update_rate = 100;
+  params.update_rate = kUpdateRate;
+  params.controller_manager_update_rate = kUpdateRate;
   params.node_options = controller->define_custom_node_options().parameter_overrides(test_case.parameters);
   ASSERT_EQ(controller->init(params), controller_interface::return_type::OK);
 
@@ -136,13 +143,13 @@ TEST_P(ControllerActivationTest, ActivatesWithAllClaimedInterfaces)
   std::vector<hardware_interface::LoanedStateInterface> state_loans;
   for (const auto& description : describe(controller->state_interface_configuration().names)) {
     state_storage.push_back(std::make_shared<hardware_interface::StateInterface>(description));
-    state_loans.emplace_back(state_storage.back());
+    state_loans.emplace_back(state_storage.back(), nullptr);
   }
   std::vector<hardware_interface::CommandInterface::SharedPtr> command_storage;
   std::vector<hardware_interface::LoanedCommandInterface> command_loans;
   for (const auto& description : describe(controller->command_interface_configuration().names)) {
     command_storage.push_back(std::make_shared<hardware_interface::CommandInterface>(description));
-    command_loans.emplace_back(command_storage.back());
+    command_loans.emplace_back(command_storage.back(), nullptr);
   }
   controller->assign_interfaces(std::move(command_loans), std::move(state_loans));
 
@@ -155,17 +162,51 @@ TEST_P(ControllerActivationTest, ActivatesWithAllClaimedInterfaces)
   controller->release_interfaces();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Controllers, ControllerActivationTest,
-    testing::Values(
-        make_case<duatic::controllers::BrakeReleaseController>("brake_release_controller", { { "joints", kJoints } }),
-        make_case<duatic::controllers::PIDTuner>("duadrive_pid_tuner", { { "joints", kJoints } }),
-        make_case<duatic::controllers::StatusBroadcaster>("duadrive_status_broadcaster", { { "joints", kJoints } }),
-        make_case<duatic::controllers::ForceTorqueBroadcaster>(
-            "force_torque_broadcaster", { { "joints", kJoints }, { "endeffector_frame", "flange" } }),
-        make_case<duatic::controllers::FreeDriveController>("freedrive_controller", { { "joints", kJoints } }),
-        make_case<duatic::controllers::FreezeController>("freeze_controller",
-                                                         { { "names", std::vector<std::string>{ "arm" } } }),
-        make_case<duatic::controllers::GravityCompensationController>("gravity_compensation_controller",
-                                                                      { { "joints", kJoints } })),
-    [](const testing::TestParamInfo<ControllerCase>& info) { return info.param.name; });
+namespace
+{
+/// Every controller of this package must have a case here, see ControllerRegistryTest.
+std::vector<ControllerCase> controller_cases()
+{
+  return {
+    make_case<duatic::controllers::BrakeReleaseController>("brake_release_controller", { { "joints", kJoints } }),
+    make_case<duatic::controllers::CartesianPoseController>("cartesian_pose_controller", { { "target_frame", "flang"
+                                                                                                             "e" } }),
+    make_case<duatic::controllers::PIDTuner>("duadrive_pid_tuner", { { "joints", kJoints } }),
+    make_case<duatic::controllers::StatusBroadcaster>("duadrive_status_broadcaster", { { "joints", kJoints } }),
+    make_case<duatic::controllers::ForceTorqueBroadcaster>(
+        "force_torque_broadcaster", { { "joints", kJoints }, { "endeffector_frame", "flange" } }),
+    make_case<duatic::controllers::FreeDriveController>("freedrive_controller", { { "joints", kJoints } }),
+    make_case<duatic::controllers::FreezeController>("freeze_controller",
+                                                     { { "names", std::vector<std::string>{ "arm" } } }),
+    make_case<duatic::controllers::GravityCompensationController>("gravity_compensation_controller",
+                                                                  { { "joints", kJoints } })
+  };
+}
+}  // namespace
+
+INSTANTIATE_TEST_SUITE_P(Controllers, ControllerActivationTest, testing::ValuesIn(controller_cases()),
+                         [](const testing::TestParamInfo<ControllerCase>& info) { return info.param.name; });
+
+TEST(ControllerRegistryTest, EveryRegisteredControllerHasAnActivationCase)
+{
+  std::set<std::type_index> tested;
+  for (const auto& test_case : controller_cases()) {
+    const auto controller = test_case.make();
+    tested.emplace(typeid(*controller));
+  }
+
+  pluginlib::ClassLoader<controller_interface::ControllerInterface> loader("controller_interface", "controller_"
+                                                                                                   "interface::"
+                                                                                                   "ControllerInterfac"
+                                                                                                   "e");
+  std::size_t registered = 0;
+  for (const auto& lookup_name : loader.getDeclaredClasses()) {
+    if (lookup_name.rfind("duatic_controllers/", 0) != 0) {
+      continue;
+    }
+    ++registered;
+    const auto controller = loader.createUniqueInstance(lookup_name);
+    EXPECT_TRUE(tested.count(typeid(*controller)) == 1) << lookup_name << " has no case in controller_cases()";
+  }
+  EXPECT_GT(registered, 0u) << "no duatic_controllers plugins found, is the workspace sourced?";
+}
