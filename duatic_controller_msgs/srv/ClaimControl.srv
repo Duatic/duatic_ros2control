@@ -1,0 +1,8 @@
+# Claim groups of joints, each in one mode. All or nothing: either every group is switched or none.
+string owner
+string[] groups
+string[] modes  # one per group
+---
+bool success
+string message
+string lease_id

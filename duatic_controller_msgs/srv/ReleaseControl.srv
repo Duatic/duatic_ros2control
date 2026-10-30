@@ -1,0 +1,5 @@
+# Release a lease. Its groups return to their default modes.
+string lease_id
+---
+bool success
+string message
