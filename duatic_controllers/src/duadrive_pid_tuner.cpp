@@ -110,8 +110,11 @@ controller_interface::CallbackReturn
 PIDTuner::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
   joint_p_gain_command_interfaces_.clear();
+  joint_p_gain_command_interfaces_.reserve(params_.joints.size());
   joint_i_gain_command_interfaces_.clear();
+  joint_i_gain_command_interfaces_.reserve(params_.joints.size());
   joint_d_gain_command_interfaces_.clear();
+  joint_d_gain_command_interfaces_.reserve(params_.joints.size());
 
   if (!controller_interface::get_ordered_interfaces(command_interfaces_, params_.joints, "p_gain",
                                                     joint_p_gain_command_interfaces_)) {

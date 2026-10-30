@@ -205,9 +205,13 @@ ForceTorqueBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 {
   // clear out vectors in case of restart
   joint_effort_state_interfaces_.clear();
+  joint_effort_state_interfaces_.reserve(params_.joints.size());
   joint_position_state_interfaces_.clear();
+  joint_position_state_interfaces_.reserve(params_.joints.size());
   joint_velocity_state_interfaces_.clear();
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
   joint_acceleration_state_interfaces_.clear();
+  joint_acceleration_state_interfaces_.reserve(params_.joints.size());
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(
@@ -281,8 +285,7 @@ controller_interface::return_type ForceTorqueBroadcaster::update([[maybe_unused]
 
   pinocchio::computeJointJacobians(pinocchio_model_, pinocchio_data_, q_);
   pinocchio::updateFramePlacements(pinocchio_model_, pinocchio_data_);
-  pinocchio::getFrameJacobian(pinocchio_model_, pinocchio_data_, frame_index_, pinocchio::LOCAL,
-                              J_);
+  pinocchio::getFrameJacobian(pinocchio_model_, pinocchio_data_, frame_index_, pinocchio::LOCAL, J_);
 
   if (!wrench_solver_.solve(J_, tau_ext_, params_.lambda_regularization, params_.use_svd_solver, wrench_)) {
     RCLCPP_WARN_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000,
