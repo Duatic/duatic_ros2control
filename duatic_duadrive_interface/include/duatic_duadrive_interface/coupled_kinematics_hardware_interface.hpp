@@ -53,6 +53,7 @@
 #include <duatic_duadrive_interface/coupled_kinematics_translator.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_types.hpp>
 #include <duatic_duadrive_interface/coupled_kinematics_position_limiter.hpp>
+#include <duatic_duadrive_interface/dynamic_model/dynamic_model.hpp>
 
 namespace duatic::duadrive_interface
 {
@@ -63,10 +64,16 @@ namespace duatic::duadrive_interface
  * @tparam enable_advanced_command_limit - Enable the advanced position command limiting algorithm
  */
 template <typename DriveTypeT, kinematics::CoupledSerialMapping kinematics_mapping,
-          bool enable_advanced_command_limit = false>
-class CoupledKinematicsHardwareInterfaceBase : public hardware_interface::SystemInterface
+          bool enable_advanced_command_limit = false,
+          dynamic_model::DynamicModel DynamicModelT = dynamic_model::default_dynamic_model_t<DriveTypeT>>
+requires(!is_dua_drive_interface_mock_v<DriveTypeT>) ||
+    dynamic_model::MockDynamicModel<DynamicModelT> class CoupledKinematicsHardwareInterfaceBase
+  : public hardware_interface::SystemInterface
 {
+public:
   using kinematics_translator = kinematics::KinematicsTranslator<kinematics_mapping>;
+
+  static constexpr bool is_mock = is_dua_drive_interface_mock_v<DriveTypeT>;
 
 public:
   CoupledKinematicsHardwareInterfaceBase() : logger_(rclcpp::get_logger("CoupledKinematicsHardwareInterfaceBase"))
@@ -158,9 +165,18 @@ public:
     logger_ = rclcpp::get_logger(system_name + "_hardware_interface");
 
     // Parse the urdf (we need it for the joint types)
-    urdf::Model urdf_model;
-    if (!urdf_model.initString(system_info.hardware_info.original_xml)) {
+    std::shared_ptr<urdf::Model> urdf_model = std::make_shared<urdf::Model>();
+    if (!urdf_model->initString(system_info.hardware_info.original_xml)) {
       RCLCPP_FATAL_STREAM(logger_, "Failed to parse URDF");
+      return hardware_interface::CallbackReturn::FAILURE;
+    }
+
+    // Initialize embedded dynamic model
+    try {
+      dynamic_model_.init(system_info, urdf_model);
+    } catch (const std::exception& e) {
+      RCLCPP_FATAL(logger_, "Failed to initialize dynamic model for the hardware interface: %s\nAborting startup!",
+                   e.what());
       return hardware_interface::CallbackReturn::FAILURE;
     }
 
@@ -192,8 +208,8 @@ public:
       const auto ethercat_bus = joint.parameters.at("ethercat_bus");
       const auto joint_name = joint.name;
       const auto drive_parameter_file_path = joint.parameters.at("drive_parameter_file_path");
-      const auto urdf_joint = urdf_model.getJoint(joint_name);
-      const auto has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
+      const auto urdf_joint = urdf_model->getJoint(joint_name);
+      const bool has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
       const std::chrono::milliseconds communication_timeout{ std::stoi(joint.parameters.at("communication_timeout")) };
 
       if (!urdf_joint) {
@@ -270,23 +286,24 @@ public:
     // Initial positions are a mock-only coordinates parameters.
     // Limits are interval radii and use the limit mapping.
     std::vector<double> serial_initial_positions(drives_.size(), 0.0);
-    bool apply_initial_positions = false;
 
-    // In case there are predefined positions for mock operation we enforce them
-    // This is a pure compile time statement
-    if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
-      if (system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
-        const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
-                                                                                                        "positions"));
-        if (positions.size() == drives_.size()) {
-          serial_initial_positions = positions;
-          apply_initial_positions = true;
-        } else {
-          RCLCPP_WARN_STREAM(logger_, "Initial positions vector size ("
-                                          << positions.size() << ") does not match amount of drives (" << drives_.size()
-                                          << ") We do not apply the initial positions therefore");
-        }
+    // TODO(team-software): Probably better to add c-time information on whether to accept
+    // position/velocity/dynamics-model or not (independent of being mock or not, e.g. to maybe also include other
+    // simulations if necessary)
+    // Mock drives require predefined initial positions. This is a pure compile time statement
+    if constexpr (is_mock) {
+      if (!system_info.hardware_info.hardware_parameters.contains("initial_positions")) {
+        RCLCPP_FATAL_STREAM(logger_, "Missing initial positions for mock drives: Aborting startup!");
+        return hardware_interface::CallbackReturn::FAILURE;
       }
+      const auto positions = parse_initial_positions(system_info.hardware_info.hardware_parameters.at("initial_"
+                                                                                                      "positions"));
+      if (positions.size() != drives_.size()) {
+        RCLCPP_FATAL_STREAM(logger_, "Inconsistent number of initial positions for mock drives: Expected "
+                                         << drives_.size() << ", got " << positions.size() << ". Aborting startup!");
+        return hardware_interface::CallbackReturn::FAILURE;
+      }
+      serial_initial_positions = positions;
     }
 
     // Now convert serial to coupled
@@ -317,14 +334,14 @@ public:
       drives_[i]->init(drive_parameters[i]);
       current_active_drive_modes_.insert({ drives_[i]->get_name(), rsl_drive_sdk::mode::ModeEnum::Freeze });
 
-      // Only for mock enforce the starting position
-      if constexpr (std::is_same_v<DriveTypeT, DuaDriveInterfaceMock>) {
-        if (apply_initial_positions) {
-          drives_[i]->enforce_position(coupled_mock_init_states[i].position);
-          RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_parameters[i].joint_name
-                                                           << " serial: " << serial_initial_positions[i]
-                                                           << " coupled: " << coupled_mock_init_states[i].position);
-        }
+      // Only for mock: enforce the starting position and attach the dynamic model
+      if constexpr (is_mock) {
+        drives_[i]->enforce_position(coupled_mock_init_states[i].position);
+        RCLCPP_INFO_STREAM(logger_, "Initial position: " << drive_parameters[i].joint_name
+                                                         << " serial: " << serial_initial_positions[i]
+                                                         << " coupled: " << coupled_mock_init_states[i].position);
+        drives_[i]->register_mock_dynamics(
+            [i, this]() { return std::exchange(this->dynamic_model_.mocked_accelerations[i], 0.0); });
       }
     }
 
@@ -500,6 +517,20 @@ public:
       }
     }
 
+    // Mock only: simulate with the (saturated) torques the mock drives actually apply
+    if constexpr (is_mock) {
+      // NOTE: overwrites both command buffers - they must not be used in their original form after this point
+      // (refreshed from the command interfaces in the next cycle)
+      for (std::size_t i = 0; i < drives_.size(); i++) {
+        commands_coupled_kinematics_[i].torque = drives_[i]->get_saturated_joint_torque();
+      }
+      kinematics_translator::map_from_coupled_to_serial(commands_coupled_kinematics_, commands_serial_kinematics_);
+      dynamic_model_.mock_effort_accelerations(state_serial_kinematics_,
+                                               commands_serial_kinematics_);  // This also includes gravity simulation
+      dynamic_model_.mocked_accelerations = kinematics_mapping::map_from_serial_to_coupled_coordinates(
+          dynamic_model_.mocked_accelerations);  // convert into coupled kinematics
+    }
+
     // Perform actual write action
     // Note this is still asynchronous to the bus communication
     for (auto& drive : drives_) {
@@ -579,6 +610,8 @@ protected:
   std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   bool error_active_{ false };
+
+  [[no_unique_address]] DynamicModelT dynamic_model_;  // avoid memory overhead in the case of an empty model class
 
   // Internal methods
   std::vector<double> parse_initial_positions(std::string initial_positions_str)

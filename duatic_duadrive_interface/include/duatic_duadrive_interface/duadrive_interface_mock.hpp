@@ -26,11 +26,13 @@
 #pragma once
 
 // System
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 #include <thread>
+#include <type_traits>
 
 // ros2_control hardware_interface
 #include <rclcpp/rclcpp.hpp>
@@ -84,11 +86,37 @@ public:
    * @brief perform a single write on the drive component
    */
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
+
   /**
    * @brief Allow in the mocked hardware to explicitly enforce a specific position (e.g. at startup)
    */
   void enforce_position(const double position);
+  /**
+   * @brief Commanded joint torque, saturated to the configured limit
+   */
+  double get_saturated_joint_torque() const
+  {
+    return std::clamp(command_.joint_torque, -max_joint_torque_, max_joint_torque_);
+  }
+  /**
+   * @brief Register a mock dynamics model with the mock hardware
+   */
+  void register_mock_dynamics(const std::function<double()>& acceleration_callback)
+  {
+    mock_acceleration_callback_ = acceleration_callback;
+  }
 
 private:
+  double max_joint_velocity_{ 0.0 };
+  double max_joint_torque_{ 0.0 };
+  bool error_latched_{ false };
+  std::function<double()> mock_acceleration_callback_;
 };
+
+/*
+ * type trait to simplify duadrive mock interface request
+ */
+template <typename T>
+constexpr inline bool is_dua_drive_interface_mock_v = std::is_base_of_v<DuaDriveInterfaceMock, T>;
+
 }  // namespace duatic::duadrive_interface

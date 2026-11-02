@@ -17,6 +17,8 @@
   <depend>pluginlib</depend>
 
   <depend>hardware_interface</depend>
+  <depend>eigen</depend>
+  <depend>pinocchio</depend>
   <depend>rsl_drive_sdk</depend>
 
   <export>
