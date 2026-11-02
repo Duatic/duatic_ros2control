@@ -126,6 +126,13 @@ if(BUILD_TESTING)
   target_link_libraries(test_force_torque_broadcaster
     ${PROJECT_NAME}
   )
+
+  ament_add_gtest(test_controller_activation
+    test/test_controller_activation.cpp
+  )
+  target_link_libraries(test_controller_activation
+    ${PROJECT_NAME}
+  )
 endif()
 
 # Install the resulting library
