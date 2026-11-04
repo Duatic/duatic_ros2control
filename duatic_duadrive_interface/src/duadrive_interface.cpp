@@ -53,7 +53,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   generate_command_interface_desriptions();
   // configure ethercat bus and drives
   const auto ethercat_bus = params.ethercat_bus;
-  const ethercat_interface::EthercatBus::Parameters ecat_master_config = {
+  const ecat_interface::EthercatBus::Parameters ecat_master_config = {
     .interface = ethercat_bus, .dc_cycle_time = std::chrono::nanoseconds(1000000)
   };  // TODO(firesurfer) set timestep according to the update rate of ros2control (or spin asynchronously)
 
@@ -64,7 +64,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::init(const DuaDriveInterfa
   const auto joint_name = params.joint_name;
   logger_ = rclcpp::get_logger("DuaDriveHardwareInterface_" + joint_name);
 
-  const ethercat_interface::DeviceId address = static_cast<ethercat_interface::DeviceId>(params.device_address);
+  const ecat_interface::DeviceId address = static_cast<ecat_interface::DeviceId>(params.device_address);
   // Obtain the parameter file for the currently processed drive
   std::string device_file_path = params.drive_parameter_file_path;
   // If there is no configuration available for the current joint in the passed parameter folder we abort

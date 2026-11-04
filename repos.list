@@ -3,9 +3,9 @@ repositories:
     type: git
     url: https://github.com/Duatic/duatic_duadrive_sdk.git
     version: main
-  duatic_ethercat_interface:
+  duatic_ecat_interface:
     type: git
-    url: https://github.com/Duatic/duatic_ethercat_interface.git
+    url: https://github.com/Duatic/duatic_ecat_interface.git
     version: main
   duatic_message_logger:
     type: git

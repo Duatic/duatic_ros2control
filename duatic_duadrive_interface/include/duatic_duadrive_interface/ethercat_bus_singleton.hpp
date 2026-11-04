@@ -31,7 +31,7 @@
 #include <string>
 
 #include <duatic_duadrive_sdk/v1/duadrive.hpp>
-#include <duatic_ethercat_interface/executor.hpp>
+#include <duatic_ecat_interface/executor.hpp>
 #include <duatic_message_logger/log.hpp>
 
 namespace duatic::duadrive_interface
@@ -47,8 +47,8 @@ public:
   using StartupFinishedCb = std::function<void(void)>;
 
 private:
-  using EthercatBus = ethercat_interface::EthercatBus;
-  using SingleBusExecutor = ethercat_interface::SingleBusExecutor;
+  using EthercatBus = ecat_interface::EthercatBus;
+  using SingleBusExecutor = ecat_interface::SingleBusExecutor;
   // This represents and internal handle which contains all necessary information in order to manage multiple
   // EthercatMasterInstances
   struct InternalHandle
