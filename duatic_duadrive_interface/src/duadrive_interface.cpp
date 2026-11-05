@@ -27,7 +27,7 @@
 #include <filesystem>
 
 /*drive sdk*/
-#include "ethercat_sdk_master/EthercatMasterSingleton.hpp"
+#include "ecat_sdk_master/EthercatMasterSingleton.hpp"
 
 /*project*/
 #include "duatic_duadrive_interface/duadrive_interface.hpp"
