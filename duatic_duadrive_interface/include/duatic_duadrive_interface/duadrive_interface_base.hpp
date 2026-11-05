@@ -164,6 +164,12 @@ public:
    * @brief perform a single write on the drive component
    */
   virtual hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period);
+  /**
+   * @brief start measuring brake release motion from the current position
+   */
+  virtual void reset_brake_released()
+  {
+  }
 
   void stage_command(const DuaDriveInterfaceCommands command)
   {

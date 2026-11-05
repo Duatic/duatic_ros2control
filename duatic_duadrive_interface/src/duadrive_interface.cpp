@@ -332,6 +332,11 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
 
   return hardware_interface::return_type::OK;
 }
+void DuaDriveInterface::reset_brake_released()
+{
+  motor_travel_.reset();
+  state_.brake_released = params_.has_brake ? 0.0 : 1.0;
+}
 hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const rclcpp::Time& time,
                                                          [[maybe_unused]] const rclcpp::Duration& period)
 {

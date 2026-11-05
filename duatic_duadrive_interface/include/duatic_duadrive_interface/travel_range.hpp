@@ -45,6 +45,14 @@ public:
   }
 
   /**
+   * @brief forget all samples, as if no position had been seen yet
+   */
+  void reset()
+  {
+    *this = TravelRange{};
+  }
+
+  /**
    * @brief distance between the smallest and largest position seen, negative before the first sample
    */
   double span() const

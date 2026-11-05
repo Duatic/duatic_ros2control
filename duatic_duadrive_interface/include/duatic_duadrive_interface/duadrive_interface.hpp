@@ -88,6 +88,10 @@ public:
    * @brief perform a single write on the drive component
    */
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
+  /**
+   * @brief reset the brake release status and the motor travel seen so far
+   */
+  void reset_brake_released() final;
 
 private:
   ecat_master::EthercatMasterSingleton::Handle ecat_master_handle_;

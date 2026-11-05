@@ -556,6 +556,17 @@ public:
                                                             << " for drive: " << drive->get_name());
     }
 
+    // A claim of target_brake_state starts a brake release, which must measure motor travel from here on
+    for (const auto& interface : start_interfaces) {
+      for (auto& drive : drives_) {
+        if (interface == drive->get_name() + "/target_brake_state") {
+          drive->reset_brake_released();
+        }
+      }
+    }
+    // The controller's first update in this cycle reads brake_released, so publish the reset value now
+    update_state_interfaces(state_interface_mapping_, *this);
+
     return hardware_interface::return_type::OK;
   }
 
