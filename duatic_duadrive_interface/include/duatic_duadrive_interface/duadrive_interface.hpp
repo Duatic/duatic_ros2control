@@ -38,7 +38,7 @@
 #include "hardware_interface/system_interface.hpp"
 
 // sdk
-#include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
+#include <ecat_sdk_master/EthercatMasterSingleton.hpp>
 #include <rsl_drive_sdk/Drive.hpp>
 
 #include "duatic_duadrive_interface/duadrive_utils.hpp"

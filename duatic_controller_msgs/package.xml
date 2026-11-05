@@ -6,7 +6,7 @@
   <description>Message definition for the the duatic_controllers</description>
   <maintainer email="lnachtigall@duatic.com">Lennart Nachtigall</maintainer>
   <author email="lnachtigall@duatic.com">Lennart Nachtigall</author>
-  <license>BSD 3-Clause</license>
+  <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -21,5 +21,6 @@
   <member_of_group>rosidl_interface_packages</member_of_group>
   <export>
     <build_type>ament_cmake</build_type>
+    <duatic_archive_root>public</duatic_archive_root>
   </export>
 </package>
