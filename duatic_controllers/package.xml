@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>duatic_controllers</name>
-  <version>0.0.0</version>
+  <version>0.1.0</version>
   <description>Collection of ros2 controllers to be used with various Duatic products</description>
   <maintainer email="lnachtigall@duatic.de">Lennart Nachtigall</maintainer>
   <license>BSD-3-Clause</license>
