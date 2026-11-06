@@ -38,7 +38,7 @@
 #include "hardware_interface/system_interface.hpp"
 
 // sdk
-#include <ethercat_sdk_master/EthercatMasterSingleton.hpp>
+#include <ecat_sdk_master/EthercatMasterSingleton.hpp>
 #include <rsl_drive_sdk/Drive.hpp>
 
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
@@ -95,13 +95,7 @@ private:
   rsl_drive_sdk::Statusword last_status_word_;
   rsl_drive_sdk::BrakeState current_brake_state_{ rsl_drive_sdk::BrakeState::Engaged };
 
-  double configured_max_torque_{ 0.0 };
-  double configured_max_velocity_{ 0.0 };
   float configured_gear_ratio_{ 0.0 };
-
-  double current_max_torque_{ 0.0 };
-  double current_max_velocity_{ 0.0 };
-
   int current_target_brake_state{ 0 };
 
   // Gets called when the bus startup has been finished but before going into the RT loop

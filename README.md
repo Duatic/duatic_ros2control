@@ -1,9 +1,9 @@
 # duatic_ros2control
 
-[![Jazzy](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-jazzy.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
-[![Kilted](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-kilted.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
-[![Lyrical](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-lyrical.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
-[![Rolling](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/mbloechli/b16b5cf19442cb34aad418761be37a78/raw/duatic_ros2control-rolling.json)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Jazzy](https://github.com/Duatic/duatic_ros2control/raw/badges/jazzy.svg)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Kilted](https://github.com/Duatic/duatic_ros2control/raw/badges/kilted.svg)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Lyrical](https://github.com/Duatic/duatic_ros2control/raw/badges/lyrical.svg)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
+[![Rolling](https://github.com/Duatic/duatic_ros2control/raw/badges/rolling.svg)](https://github.com/Duatic/duatic_ros2control/actions/workflows/ci.yml)
 
 This repository contains implementations that helps to integrate any Duatic DuaDrive setup into [ros2_control](https://control.ros.org/).
 As well as a set of [ros2control controllers](./duatic_controllers/doc/controllers.md) that can be used with every Duatic product.
@@ -19,7 +19,7 @@ All dependencies with their corresponding version are listed in the [repos.list]
 
 | Name | Description | License
 | ---  | --- | --- |
-| [ethercat_sdk_master](https://github.com/Duatic/ethercat_sdk_master) | Object oriented wrapper around the soem_interface | BSD-3-Clause |
+| [ecat_sdk_master](https://github.com/Duatic/ecat_sdk_master) | Object oriented wrapper around the soem_interface | BSD-3-Clause |
 | [rsl_drive_sdk](https://github.com/leggedrobotics/rsl_drive_sdk) | Basic drive sdk for the DynaDrives | BSD-3-Clause |
 | [soem_interface](https://github.com/Duatic/soem_interface) | Ethercat wrapper library around SOME | GPL v3 |
 | [message_logger](https://github.com/leggedrobotics/message_logger) | Logging library which allows logging with and without ROS | BSD-3-Clause |

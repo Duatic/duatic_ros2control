@@ -25,9 +25,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
-#include <optional>
-#include <stdexcept>
 #include <string>
 
 #include "duatic_duadrive_interface/coupled_kinematics_types.hpp"
@@ -48,10 +47,22 @@ public:
   }
   constexpr void init_last_valid_position(const double position)
   {
-    if (last_valid_position_.has_value()) {
-      throw std::runtime_error("AdvancedPositionCommandLimiter already initialized");
-    }
+    assert(!initialized_ && "AdvancedPositionCommandLimiter already initialized");
     last_valid_position_ = position;
+#ifndef NDEBUG
+    initialized_ = true;
+#endif
+  }
+
+  /**
+   * @brief allow the limiter to be initialized again (e.g. on re-activation)
+   * @note the initialization state is only tracked in debug builds - in release builds this is a no-op
+   */
+  constexpr void reset()
+  {
+#ifndef NDEBUG
+    initialized_ = false;
+#endif
   }
 
   bool limit(SerialCommand& cmd, const SerialJointState& state)
@@ -88,7 +99,8 @@ public:
     } else {
       // Case 4: Current joint position is out of bounds and incoming command would move it further into the collision
       // zone. Action: Reject the new command and hold the last valid commanded position to prevent damage.
-      cmd = last_valid_position_.value();
+      assert(initialized_ && "AdvancedPositionCommandLimiter used before initialization");
+      cmd = last_valid_position_;
     }
     return cmd;
   }
@@ -102,6 +114,9 @@ private:
   const double limit_lower_;
   const double limit_upper_;
   const std::string joint_name_;
-  std::optional<double> last_valid_position_{};
+  double last_valid_position_{ 0.0 };
+#ifndef NDEBUG
+  bool initialized_{ false };
+#endif
 };
 }  // namespace duatic::duadrive_interface

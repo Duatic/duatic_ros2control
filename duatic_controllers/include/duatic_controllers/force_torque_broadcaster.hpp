@@ -39,6 +39,8 @@
 // ROS2
 #include <realtime_tools/realtime_publisher.hpp>
 
+#include <Eigen/SVD>  // NOLINT(build/include_order)
+
 // Pinocchio
 #include <pinocchio/algorithm/compute-all-terms.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
@@ -51,6 +53,30 @@
 
 namespace duatic::controllers
 {
+/**
+ * @brief Estimates a wrench from external joint torques, allocating memory only on construction.
+ */
+class WrenchSolver
+{
+public:
+  using Jacobian = Eigen::Matrix<double, 6, Eigen::Dynamic>;
+  using Wrench = Eigen::Matrix<double, 6, 1>;
+
+  WrenchSolver() = default;
+  /// @brief Preallocates the workspace for a model with nv velocity dimensions.
+  explicit WrenchSolver(Eigen::Index nv);
+
+  /**
+   * @brief Solves J^T * wrench = tau_ext for the wrench, regularised by lambda.
+   * @return False, leaving wrench unchanged, if J or tau_ext holds a non-finite value.
+   */
+  bool solve(const Jacobian& J, const Eigen::VectorXd& tau_ext, double lambda, bool use_svd_solver, Wrench& wrench);
+
+private:
+  Eigen::MatrixXd J_reg_;
+  Eigen::JacobiSVD<Eigen::MatrixXd> svd_;
+};
+
 class ForceTorqueBroadcaster : public controller_interface::ControllerInterface
 {
 public:
@@ -94,9 +120,20 @@ private:
   WrenchStamped wrench_msg_;
   WrenchStamped wrench_raw_msg_;
   WrenchStamped wrench_offset_;
+  MeasuredTorques torques_msg_;
 
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr zero_service_;
 
   std::vector<pinocchio::JointIndex> joint_indices_;
+
+  // Sized in on_configure so that update() does not allocate
+  Eigen::VectorXd q_;
+  Eigen::VectorXd v_;
+  Eigen::VectorXd a_;
+  Eigen::VectorXd torque_meas_;
+  Eigen::VectorXd tau_ext_;
+  WrenchSolver::Jacobian J_;
+  WrenchSolver::Wrench wrench_;
+  WrenchSolver wrench_solver_;
 };
 }  // namespace duatic::controllers

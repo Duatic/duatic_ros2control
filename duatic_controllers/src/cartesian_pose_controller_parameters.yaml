@@ -71,7 +71,7 @@ cartesian_pose_controller:
   motion_horizon:
     type: double
     default_value: 0.01
-    description: "Time horizon in seconds used to scale the IK QP's joint displacement variable for numerical conditioning. Does not affect the commanded motion."
+    description: "Time horizon in seconds used to scale the IK QP's joint displacement variable for numerical conditioning. Also bounds how far the internal joint state may run ahead of the measured one (velocity limit * motion_horizon per joint)."
     validation:
       bounds<>: [0.001, 1.0]
   ik_damping:

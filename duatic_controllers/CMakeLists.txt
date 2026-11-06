@@ -100,6 +100,26 @@ target_link_libraries(${PROJECT_NAME}
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 pluginlib_export_plugin_description_file(controller_interface controller_interface_plugin.xml)
 
+# ---- Tests ----------------------------------------------------------------
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_force_torque_broadcaster
+    test/test_force_torque_broadcaster.cpp
+  )
+  target_link_libraries(test_force_torque_broadcaster
+    ${PROJECT_NAME}
+  )
+
+  ament_add_gtest(test_controller_activation
+    test/test_controller_activation.cpp
+  )
+  target_link_libraries(test_controller_activation
+    ${PROJECT_NAME}
+    pluginlib::pluginlib
+    lifecycle_msgs::lifecycle_msgs
+  )
+endif()
+
 # ---- Install & export -----------------------------------------------------
 install(
   TARGETS ${PROJECT_NAME} ${PARAMETER_TARGETS}
