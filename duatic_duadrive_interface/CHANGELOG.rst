@@ -1,58 +1,33 @@
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Changelog for package duatic_duadrive_interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 1.0.0 (2026-11-06)
 ------------------
 * feat(control): read and apply joint limits from the URDF (#35)
-* fix: update get_package_share_directory -> get_package_share_path (#40)
-* fix(interface): incorrect mode conditions (#36)
-* fix: abort when attaching slave to master fails (#31)
-* Abort startup if drive is in Fatal State + Abort startup if errors could not be cleared (#33)
-* Hotfix - fix issue with mock hardware
-* Add communication timeout which freezes the system in the error case (#32)
-* enforce disable mode in case freeze was desired but the brake is active (#24)
-* added a hw description validation on startup to detect missalignments between code and model (#23)
-* Feature/brake safety support (#20)
-* add support for lyrical (#17)
-* explicitly add -fPIC
-* remove the part of the safety scaling which actually writes to the hardware as it created some
-  issues
-* fix unused variable warning
-* Feature/migrate controllers (#11)
-* enable position limit only for joints where it is appropriate (#6)
-* fix joint torque state field
-* extended the logging statement from the last commit
-* added raw statusword to the debug line
-* put the whole system into enforced freeze in case of a single component error (#9)
-* print the current state enum
-* Print drive status at startup (#7)
-* Feature/explain limiter better (#5)
-* Fix/improve limiter (#4)
-* wire in per drive freezemode (#3)
-* defer fsm setting at startup (#1)
-* fix interface handling
-* Added position command feedback for non position control modes, added state interface field for
-  current drive control mode,
-* please pre-commit
-* remove gain interfaces from mode selection
-* fix bug in joint limiter
-* fix some warnings
-* fix pid gain selection mode
-* added support for JointVelocity mode in mock
-* improve logger naming, added support for initial positions for mocked interfaces
-* rework advanced command limiter and handle freeze mode explicitly
-* fix advanced position command limiting logic
-* disable advanced position command limiter
-* wire in advanced joint command limiting algorithm
-* added comment
-* fix interface initialization bug at startup
-* fix several issues
-* wire in correct setup of initial position command
-* added debug printout
-* made pre-commit happy
-* added extract_interface_name method
-* correctly select the right drive mode
-* rework to new urdf structure
-* added duadrive_interface.urdf.xacro
-* remove cmake based standard tests
-* rework duadrive_interface to use a consisten namespace and provide a coupled kinematics hardware
-  interface
-* Update internal include paths
-* update package.xml
+* feat: brake safety support; with the brake active, a requested freeze enforces disable mode
+  instead (#20, #24)
+* feat: freeze the whole system when one component fails, with a freeze mode per drive, and on a
+  communication timeout (#3, #9, #32)
+* feat: abort startup when a drive is in the Fatal state or its errors cannot be cleared (#33)
+* feat: validate the hardware description against the code at startup (#23)
+* feat: an advanced joint command limiter, with position limits only on the joints they apply to
+  (#4, #5, #6)
+* feat: position command feedback in non-position control modes, and a state interface for the
+  current drive control mode
+* feat: a coupled kinematics hardware interface under one consistent namespace, with
+  duadrive_interface.urdf.xacro for the new URDF structure
+* feat(mock): JointVelocity mode and initial positions for mocked interfaces
+* feat: log the drive status and statusword at startup (#7)
+* feat: support ROS 2 lyrical (#17)
+* fix: abort when attaching a slave to the master fails (#31)
+* fix(interface): correct the mode conditions (#36)
+* fix: use get_package_share_path instead of get_package_share_directory (#40)
+* fix: the mock hardware
+* fix: select the right drive mode and PID gains, without the gain interfaces in mode selection
+* fix: the joint torque state field
+* fix: initialize the interfaces and the initial position command correctly at startup
+* fix: defer setting the drive state machine at startup (#1)
+* fix: stop the safety scaling from writing to the hardware
+* refactor: move the controllers into duatic_controllers (#11)
+* refactor: follow the rename to ecat_sdk_master (#66)
