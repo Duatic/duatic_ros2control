@@ -24,11 +24,12 @@ set(PRIVATE_DEPENDENCY_TARGETS
   fmt::fmt
 )
 # Build tools: found, never linked                              (package.xml: <buildtool_depend>)
+# generate_parameter_library is a <depend>: its generated targets are linked PUBLIC
 set(BUILD_DEPENDENCIES
   generate_parameter_library
-  eigen3_cmake_module
 )
 
+# Package name = target namespace; list exceptions via find_package() separately
 foreach(scope PUBLIC PRIVATE)
   list(TRANSFORM ${scope}_DEPENDENCY_TARGETS REPLACE "::.*$" "" OUTPUT_VARIABLE ${scope}_DEPENDENCIES)
   list(REMOVE_DUPLICATES ${scope}_DEPENDENCIES)
@@ -67,8 +68,8 @@ add_library(${PROJECT_NAME} SHARED
   src/brake_release_controller.cpp
 )
 
-# Require C99 and C++20
-target_compile_features(${PROJECT_NAME} PUBLIC c_std_99 cxx_std_20)
+# Require C++20
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 # enable additional warnings
 target_compile_options(${PROJECT_NAME} PRIVATE
   -Wall
