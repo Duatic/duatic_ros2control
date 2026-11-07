@@ -5,6 +5,7 @@ project(duatic_controllers)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -101,6 +102,7 @@ target_link_libraries(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
   controller_interface::controller_interface
+  controller_manager_msgs::controller_manager_msgs
   hardware_interface::hardware_interface
   pluginlib::pluginlib
   rclcpp::rclcpp
@@ -120,6 +122,7 @@ pluginlib_export_plugin_description_file(controller_interface controller_interfa
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   ament_add_gtest(test_force_torque_broadcaster
     test/test_force_torque_broadcaster.cpp
   )
@@ -127,10 +130,17 @@ if(BUILD_TESTING)
     ${PROJECT_NAME}
   )
 
-  ament_add_gtest(test_controller_activation
+  ament_add_ros_isolated_gtest(test_controller_activation
     test/test_controller_activation.cpp
   )
   target_link_libraries(test_controller_activation
+    ${PROJECT_NAME}
+  )
+
+  ament_add_ros_isolated_gtest(test_brake_release_controller
+    test/test_brake_release_controller.cpp
+  )
+  target_link_libraries(test_brake_release_controller
     ${PROJECT_NAME}
   )
 endif()
@@ -170,6 +180,7 @@ ament_export_dependencies(
   generate_parameter_library
   eigen3_cmake_module
   controller_interface
+  controller_manager_msgs
   hardware_interface
   pluginlib
   rclcpp

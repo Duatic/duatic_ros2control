@@ -8,6 +8,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <typeindex>
 #include <utility>
 #include <vector>
@@ -54,8 +55,16 @@ constexpr char kUrdf[] = R"(<?xml version="1.0"?>
     <parent link="link1"/><child link="flange"/><origin xyz="0 0 0.2"/><axis xyz="0 1 0"/>
     <limit lower="-3" upper="3" effort="100" velocity="10"/>
   </joint>
+  <ros2_control name="TwoLinkSystem" type="system">
+    <hardware><plugin>mock_components/GenericSystem</plugin></hardware>
+    <joint name="joint1"><state_interface name="position"/></joint>
+    <joint name="joint2"><state_interface name="position"/></joint>
+  </ros2_control>
 </robot>
 )";
+
+// The controller manager names a hardware node after its ros2_control tag in lower case
+constexpr char kHardwareNodeName[] = "twolinksystem";
 
 struct ControllerCase
 {
@@ -116,12 +125,25 @@ protected:
   static void SetUpTestSuite()
   {
     rclcpp::init(0, nullptr);
+    // Stands in for the hardware node whose parameters the brake release controller reads on configure
+    hardware_node_ = std::make_shared<rclcpp::Node>(kHardwareNodeName);
+    executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    executor_->add_node(hardware_node_);
+    spin_thread_ = std::thread([] { executor_->spin(); });
   }
 
   static void TearDownTestSuite()
   {
+    // Shutting down the context ends the spin even if the thread has not entered it yet
     rclcpp::shutdown();
+    spin_thread_.join();
+    executor_.reset();
+    hardware_node_.reset();
   }
+
+  static inline rclcpp::Node::SharedPtr hardware_node_;
+  static inline std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
+  static inline std::thread spin_thread_;
 };
 
 TEST_P(ControllerActivationTest, ActivatesWithAllClaimedInterfaces)

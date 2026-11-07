@@ -5,21 +5,32 @@ brake_release_controller:
     description: Names of joints used by the controller
     validation:
       unique<>: null
-  position_kick:
+  torque_rate:
     type: double
-    default_value: 0.005
-    description: "Distance to move the actuator in order to move the brake in [rad]"
+    default_value: 20.0
+    description: "Rate in 'auto' mode in [Nm/s] at which the torque offset changes"
     validation:
-      bounds<>: [0.0,0.2]
+      gt<>: [0.0]
+  max_drive_torque:
+    type: double
+    default_value: 12.0
+    description: "Largest torque offset in 'auto' mode in [Nm] per drive, added on top of the gravity compensation"
+    validation:
+      gt<>: [0.0]
+  stop_velocity:
+    type: double
+    default_value: 0.02
+    description: "Drive speed in 'auto' mode in [rad/s], below which a drive counts as stopped."
+    validation:
+      gt<>: [0.0]
+  gravity_compensation_controller_name:
+    type: string
+    default_value: "gravity_compensation_controller"
+    description: "Name of the GravityCompensationController whose effort references carry the torque offset in 'auto' mode"
   mode:
     type: string
     default_value: "auto"
-    description: "Select between 'auto', 'manual' mode for brake release. In manual the user has a certain amount of time to manually move all drives around."
+    description: "Select between 'auto', 'manual' mode for brake release."
+    read_only: true
     validation:
       one_of<>: [["auto", "manual"]]
-  timeout:
-    type: double
-    default_value: 50.0
-    description: "Timeout in 'manual' mode until the brakes are put into mode 'hold' in [s]"
-    validation:
-      gt_eq<>: [0.0]
