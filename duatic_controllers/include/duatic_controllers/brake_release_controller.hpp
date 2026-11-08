@@ -142,6 +142,10 @@ private:
    */
   double drive_velocity(std::size_t index) const;
   /**
+   * @brief largest torque offset in [Nm] of a drive, from the shared or its own max_drive_torque entry
+   */
+  double max_drive_torque(std::size_t index) const;
+  /**
    * @brief give a drive back to its position loop without a torque offset
    */
   void hand_back(std::size_t index);

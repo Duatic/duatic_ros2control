@@ -54,9 +54,10 @@ Activate, manually move all joints around until the controller reports all brake
 | `joints` | List of joint names as described in the URDF the controller shall handle | - | may not be empty |
 | `mode` | Select as an alternative manual mode | "auto" | "auto" or "manual" |
 | `torque_rate` | Rate in mode "auto" in [Nm/s] at which the torque offset changes | 20.0 | > 0.0 |
-| `max_drive_torque` | Largest torque offset in mode "auto" in [Nm] per drive, as drive torque: at the output of the drive, after its gearbox and before any coupling or transmission outside the drive. | 12.0 | > 0.0 |
+| `max_drive_torque` | Largest torque offset in mode "auto" in [Nm] per drive, as drive torque: at the output of the drive, after its gearbox and before any coupling or transmission outside the drive. One value applies to every drive, a list with one value per entry of `joints` sets each drive on its own. | [12.0] | 1 or one value per joint, each >= 0.0 |
 | `stop_velocity` | Drive speed in mode "auto" in [rad/s], in drive coordinates, below which a drive counts as stopped in the pushed direction, so the sweep moves on to its next level. | 0.02 | > 0.0 |
 | `gravity_compensation_controller_name` | Name of the GravityCompensationController whose effort references carry the offset in mode "auto" | "gravity_compensation_controller" | - |
+| `switch_controller_service` | Service of the controller manager the controller calls to deactivate itself, relative to the controller's namespace unless it starts with `/`. Read on configure. | "controller_manager/switch_controller" | may not be empty |
 
 ## Notes
 

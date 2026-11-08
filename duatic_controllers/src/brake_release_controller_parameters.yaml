@@ -12,11 +12,11 @@ brake_release_controller:
     validation:
       gt<>: [0.0]
   max_drive_torque:
-    type: double
-    default_value: 12.0
-    description: "Largest torque offset in 'auto' mode in [Nm] per drive, added on top of the gravity compensation"
+    type: double_array
+    default_value: [12.0]
+    description: "Largest torque offset in 'auto' mode in [Nm] per drive, added on top of the gravity compensation. One value for all drives, or one per joint."
     validation:
-      gt<>: [0.0]
+      lower_element_bounds<>: [0.0]
   stop_velocity:
     type: double
     default_value: 0.02
@@ -27,6 +27,12 @@ brake_release_controller:
     type: string
     default_value: "gravity_compensation_controller"
     description: "Name of the GravityCompensationController whose effort references carry the torque offset in 'auto' mode"
+  switch_controller_service:
+    type: string
+    default_value: "controller_manager/switch_controller"
+    description: "Service of the controller manager the controller calls to deactivate itself"
+    validation:
+      not_empty<>: null
   mode:
     type: string
     default_value: "auto"

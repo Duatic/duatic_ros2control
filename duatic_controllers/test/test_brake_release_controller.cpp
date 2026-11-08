@@ -3,14 +3,17 @@
  */
 
 #include <gtest/gtest.h>
+#include <rcutils/logging.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -18,13 +21,13 @@
 #include <utility>
 #include <vector>
 
+#include <controller_manager_msgs/srv/switch_controller.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/loaned_command_interface.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <rcutils/logging.h>
 
 #include <duatic_controllers/brake_release_controller.hpp>
 #include <duatic_controllers/ros2_control_compat.hpp>
@@ -82,6 +85,21 @@ hardware_interface::InterfaceDescription describe(const std::string& full_name)
   return { full_name.substr(0, slash), info };
 }
 
+/**
+ * @brief Values at which a recorded torque offset turned around, followed by its final value.
+ */
+std::vector<double> turning_points(const std::vector<double>& values)
+{
+  std::vector<double> points;
+  for (std::size_t t = 1; t + 1 < values.size(); t++) {
+    if ((values[t] - values[t - 1]) * (values[t + 1] - values[t]) < 0.0) {
+      points.push_back(values[t]);
+    }
+  }
+  points.push_back(values.back());
+  return points;
+}
+
 std::mutex g_errors_mutex;
 std::vector<std::string> g_errors;
 // Read on the executor thread when the hardware node logs
@@ -106,7 +124,7 @@ void record_errors(const rcutils_log_location_t* location, int severity, const c
 }
 }  // namespace
 
-class BrakeReleaseCouplingTest : public testing::Test
+class BrakeReleaseControllerTest : public testing::Test
 {
 protected:
   static void SetUpTestSuite()
@@ -177,16 +195,18 @@ protected:
    * @brief Initialize and configure a controller for kJoints against the given robot description.
    *
    * @param urdf Robot description handed to the controller.
+   * @param overrides Controller parameters set on top of `joints`.
    * @return The lifecycle state id the controller ends up in after configure.
    */
-  uint8_t configure(const std::string& urdf)
+  uint8_t configure(const std::string& urdf, std::vector<rclcpp::Parameter> overrides = {})
   {
     controller_interface::ControllerInterfaceParams params;
     params.controller_name = "brake_release_controller";
     params.robot_description = urdf;
     params.update_rate = kUpdateRate;
     params.controller_manager_update_rate = kUpdateRate;
-    params.node_options = controller_.define_custom_node_options().parameter_overrides({ { "joints", kJoints } });
+    overrides.emplace_back("joints", kJoints);
+    params.node_options = controller_.define_custom_node_options().parameter_overrides(overrides);
     EXPECT_EQ(controller_.init(params), controller_interface::return_type::OK);
     return controller_.get_node()->configure().id();
   }
@@ -220,12 +240,72 @@ protected:
    */
   double command(const std::string& full_name) const
   {
-    for (const auto& interface : command_storage_) {
-      if (interface->get_name() == full_name) {
-        return duatic::controllers::compat::try_get_value(*interface).value_or(std::nan(""));
-      }
+    const auto interface = find(command_storage_, full_name);
+    return interface ? duatic::controllers::compat::try_get_value(*interface).value_or(std::nan("")) : std::nan("");
+  }
+
+  /**
+   * @brief Brake state the controller last commanded for a joint, -1 if it does not claim the interface.
+   */
+  int brake_target(const std::string& joint) const
+  {
+    const auto interface = find(command_storage_, joint + "/target_brake_state");
+    return interface ? interface->get_optional<int>().value_or(-1) : -1;
+  }
+
+  /**
+   * @brief Set the value the hardware reports on a claimed state interface.
+   *
+   * @param full_name Full interface name, `<prefix>/<interface>`.
+   * @param value Value to report.
+   */
+  void set_state(const std::string& full_name, double value)
+  {
+    const auto interface = find(state_storage_, full_name);
+    ASSERT_TRUE(interface) << "State interface not claimed: " << full_name;
+    ASSERT_TRUE(interface->set_value(value));
+  }
+
+  /**
+   * @brief Interface with the given full name in the storage, nullptr if the controller does not claim it.
+   */
+  template <typename InterfacePtr>
+  static InterfacePtr find(const std::vector<InterfacePtr>& storage, const std::string& full_name)
+  {
+    const auto it = std::find_if(storage.begin(), storage.end(),
+                                 [&full_name](const auto& interface) { return interface->get_name() == full_name; });
+    return it == storage.end() ? nullptr : *it;
+  }
+
+  /**
+   * @brief Run the given number of controller updates of 50 ms, each ramping an offset by 1 Nm at the default rate.
+   */
+  void step(int count = 1)
+  {
+    for (int i = 0; i < count; i++) {
+      ASSERT_EQ(controller_.update(controller_.get_node()->now(), rclcpp::Duration::from_seconds(0.05)),
+                controller_interface::return_type::OK);
     }
-    return std::nan("");
+  }
+
+  /**
+   * @brief Torque offset the controller adds to the gravity compensation of a joint.
+   */
+  double offset(const std::string& joint) const
+  {
+    return command(std::string(kGravityCompensation) + "/" + joint + "/effort");
+  }
+
+  /**
+   * @brief Configure and activate a controller in mode "auto" for kJoints, each driven by its own drive.
+   *
+   * @param overrides Controller parameters set on top of `joints`.
+   */
+  void start_auto(const std::vector<rclcpp::Parameter>& overrides = {})
+  {
+    serve_coupling("System", kJoints, { 1.0, 0.0, 0.0, 1.0 });
+    ASSERT_EQ(configure(make_urdf("System", kJoints), overrides), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+    ASSERT_TRUE(activate());
   }
 
   static inline std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
@@ -237,7 +317,7 @@ protected:
   duatic::controllers::BrakeReleaseController controller_;
 };
 
-TEST_F(BrakeReleaseCouplingTest, SpreadsDriveOffsetsOverCoupledJoints)
+TEST_F(BrakeReleaseControllerTest, SpreadsDriveOffsetsOverCoupledJoints)
 {
   // In hardware order joint2, joint1: the drive of joint1 also turns joint2 by half its torque
   serve_coupling("CoupledSystem", { "joint2", "joint1" }, { 1.0, 0.5, 0.0, 1.0 });
@@ -253,7 +333,7 @@ TEST_F(BrakeReleaseCouplingTest, SpreadsDriveOffsetsOverCoupledJoints)
   EXPECT_DOUBLE_EQ(command(prefix + "joint2/effort"), 2.0 + 0.5 * 2.0);
 }
 
-TEST_F(BrakeReleaseCouplingTest, RejectsDriveTurningJointOutsideJoints)
+TEST_F(BrakeReleaseControllerTest, RejectsDriveTurningJointOutsideJoints)
 {
   // The drive of joint2 also turns joint3, which the controller does not sweep
   serve_coupling("LeakingSystem", { "joint1", "joint2", "joint3" },
@@ -265,9 +345,134 @@ TEST_F(BrakeReleaseCouplingTest, RejectsDriveTurningJointOutsideJoints)
   EXPECT_TRUE(logged_error("Drive 'joint2' also turns joint 'joint3'"));
 }
 
-TEST_F(BrakeReleaseCouplingTest, RejectsMatrixNotMatchingJoints)
+TEST_F(BrakeReleaseControllerTest, RejectsMatrixNotMatchingJoints)
 {
   serve_coupling("MalformedSystem", kJoints, { 1.0, 0.0, 1.0 });
   EXPECT_EQ(configure(make_urdf("MalformedSystem", kJoints)), lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED);
   EXPECT_TRUE(logged_error("has 3 entries for 2 joints"));
+}
+
+TEST_F(BrakeReleaseControllerTest, RejectsMaxDriveTorqueNotMatchingJoints)
+{
+  EXPECT_EQ(configure(make_urdf("System", kJoints), { { "max_drive_torque", std::vector<double>{ 1.0, 2.0, 3.0 } } }),
+            lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED);
+  EXPECT_TRUE(logged_error("'max_drive_torque' has 3 values"));
+}
+
+TEST_F(BrakeReleaseControllerTest, SweepsGrowingLevelsInBothDirectionsUpToEachDriveLimit)
+{
+  start_auto({ { "max_drive_torque", std::vector<double>{ 12.0, 4.0 } } });
+  // Stopped drives move on to the next level as soon as they reach one
+  set_state("joint1/velocity", 0.0);
+  set_state("joint2/velocity", 0.0);
+
+  // The sweep starts from no offset
+  std::vector<double> joint1{ 0.0 };
+  std::vector<double> joint2{ 0.0 };
+  for (int i = 0; i < 100; i++) {
+    step();
+    joint1.push_back(offset("joint1"));
+    joint2.push_back(offset("joint2"));
+  }
+
+  EXPECT_EQ(turning_points(joint1), (std::vector<double>{ 3.0, -3.0, 6.0, -6.0, 12.0, -12.0, 0.0 }));
+  EXPECT_EQ(turning_points(joint2), (std::vector<double>{ 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 0.0 }));
+  // Without a release every drive ends handed back with its brake in hold, and the controller stays active
+  for (const auto& joint : kJoints) {
+    EXPECT_EQ(brake_target(joint), 2) << joint;
+    EXPECT_DOUBLE_EQ(command(joint + "/p_gain"), 1.0) << joint;
+  }
+  EXPECT_FALSE(logged_error("Cannot deactivate"));
+}
+
+TEST_F(BrakeReleaseControllerTest, HoldsLevelWhileDriveMoves)
+{
+  start_auto();
+  set_state("joint1/velocity", 1.0);
+  step(10);
+  EXPECT_DOUBLE_EQ(offset("joint1"), 3.0);
+
+  set_state("joint1/velocity", 0.0);
+  step(2);
+  EXPECT_DOUBLE_EQ(offset("joint1"), 2.0);
+}
+
+TEST_F(BrakeReleaseControllerTest, ReleaseMidSweepHoldsAndHandsBackThatDrive)
+{
+  start_auto();
+  step();
+  EXPECT_EQ(brake_target("joint1"), 1);
+  EXPECT_DOUBLE_EQ(command("joint1/p_gain"), 0.0);
+
+  set_state("joint1/brake_released", 1.0);
+  step();
+  EXPECT_EQ(brake_target("joint1"), 2);
+  EXPECT_DOUBLE_EQ(offset("joint1"), 0.0);
+  EXPECT_DOUBLE_EQ(command("joint1/p_gain"), 1.0);
+  EXPECT_EQ(brake_target("joint2"), 1);
+  EXPECT_DOUBLE_EQ(offset("joint2"), 2.0);
+  EXPECT_DOUBLE_EQ(command("joint2/p_gain"), 0.0);
+}
+
+TEST_F(BrakeReleaseControllerTest, DeactivationMidSweepHandsBackEveryDrive)
+{
+  start_auto();
+  step();
+  ASSERT_EQ(controller_.get_node()->deactivate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+
+  for (const auto& joint : kJoints) {
+    EXPECT_EQ(brake_target(joint), 2) << joint;
+    EXPECT_DOUBLE_EQ(command(joint + "/p_gain"), 1.0) << joint;
+    EXPECT_DOUBLE_EQ(command(joint + "/i_gain"), 1.0) << joint;
+    EXPECT_TRUE(std::isnan(offset(joint))) << joint;
+  }
+}
+
+TEST_F(BrakeReleaseControllerTest, RequestsDeactivationOnConfiguredServiceOnceAllReleased)
+{
+  const std::string service = "/test_controller_manager/switch_controller";
+  start_auto({ { "switch_controller_service", service } });
+  std::promise<std::vector<std::string>> deactivated;
+  const auto server = hardware_node_->create_service<controller_manager_msgs::srv::SwitchController>(
+      service, [&deactivated](const controller_manager_msgs::srv::SwitchController::Request::SharedPtr request,
+                              controller_manager_msgs::srv::SwitchController::Response::SharedPtr response) {
+        deactivated.set_value(request->deactivate_controllers);
+        response->ok = true;
+      });
+  ASSERT_TRUE(hardware_node_->create_client<controller_manager_msgs::srv::SwitchController>(service)->wait_for_service(
+      std::chrono::seconds(2)));
+
+  step();
+  set_state("joint1/brake_released", 1.0);
+  set_state("joint2/brake_released", 1.0);
+  step();
+
+  auto request = deactivated.get_future();
+  ASSERT_EQ(request.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  EXPECT_EQ(request.get(), std::vector<std::string>{ "brake_release_controller" });
+}
+
+TEST_F(BrakeReleaseControllerTest, ManualModeHoldsEachReleasedBrakeAndWaitsForAll)
+{
+  ASSERT_EQ(configure(make_urdf("System", kJoints), { { "mode", "manual" } }),
+            lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  ASSERT_TRUE(activate());
+  EXPECT_EQ(controller_.command_interface_configuration().names,
+            (std::vector<std::string>{ "joint1/target_brake_state", "joint2/target_brake_state" }));
+
+  step();
+  EXPECT_EQ(brake_target("joint1"), 1);
+  EXPECT_EQ(brake_target("joint2"), 1);
+
+  set_state("joint1/brake_released", 1.0);
+  step();
+  EXPECT_EQ(brake_target("joint1"), 2);
+  EXPECT_EQ(brake_target("joint2"), 1);
+  EXPECT_FALSE(logged_error("Cannot deactivate"));
+
+  // No controller manager runs in the test, so the deactivation request ends at the default service
+  set_state("joint2/brake_released", 1.0);
+  step();
+  EXPECT_EQ(brake_target("joint2"), 2);
+  EXPECT_TRUE(logged_error("Cannot deactivate, service not available: /controller_manager/switch_controller"));
 }

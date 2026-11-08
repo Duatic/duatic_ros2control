@@ -147,12 +147,17 @@ BrakeReleaseController::on_configure([[maybe_unused]] const rclcpp_lifecycle::St
     return controller_interface::CallbackReturn::ERROR;
   }
 
+  if (mode_ == Mode::Auto && params_.max_drive_torque.size() != 1 &&
+      params_.max_drive_torque.size() != params_.joints.size()) {
+    RCLCPP_ERROR(get_node()->get_logger(), "'max_drive_torque' has %zu values, needs 1 or one per joint (%zu)",
+                 params_.max_drive_torque.size(), params_.joints.size());
+    return controller_interface::CallbackReturn::FAILURE;
+  }
   if (mode_ == Mode::Auto && !read_torque_coupling()) {
     return controller_interface::CallbackReturn::FAILURE;
   }
-  const std::string switch_controller_service = "controller_manager/switch_controller";
   switch_controller_client_ =
-      get_node()->create_client<controller_manager_msgs::srv::SwitchController>(switch_controller_service);
+      get_node()->create_client<controller_manager_msgs::srv::SwitchController>(params_.switch_controller_service);
   RCLCPP_INFO_STREAM(get_node()->get_logger(), "Initial setup done");
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -332,7 +337,7 @@ controller_interface::return_type BrakeReleaseController::update([[maybe_unused]
         probe.level = sweep_levels.size();
         hold_brake(i);
       } else {
-        const double level = sweep_levels[probe.level] * params_.max_drive_torque;
+        const double level = sweep_levels[probe.level] * max_drive_torque(i);
         probe.offset = std::clamp(level, probe.offset - step, probe.offset + step);
         if (probe.offset == level) {
           // A level is held while the drive moves in the pushed direction
@@ -451,6 +456,11 @@ double BrakeReleaseController::drive_velocity(std::size_t index) const
     velocity += coupling_[i * joint_count + index] * joint_velocities_[i];
   }
   return velocity;
+}
+
+double BrakeReleaseController::max_drive_torque(std::size_t index) const
+{
+  return params_.max_drive_torque.size() == 1 ? params_.max_drive_torque.front() : params_.max_drive_torque.at(index);
 }
 
 void BrakeReleaseController::hand_back(std::size_t index)
