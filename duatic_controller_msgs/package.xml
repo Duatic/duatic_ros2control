@@ -5,17 +5,14 @@
   <version>1.1.0</version>
   <description>Message definition for the the duatic_controllers</description>
   <maintainer email="lnachtigall@duatic.com">Lennart Nachtigall</maintainer>
-  <author email="lnachtigall@duatic.com">Lennart Nachtigall</author>
   <license>BSD-3-Clause</license>
+  <author email="lnachtigall@duatic.com">Lennart Nachtigall</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
-
-  <build_depend>rosidl_default_generators</build_depend>
-  <build_depend>std_msgs</build_depend>
-  <build_depend>geometry_msgs</build_depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
 
   <member_of_group>rosidl_interface_packages</member_of_group>
