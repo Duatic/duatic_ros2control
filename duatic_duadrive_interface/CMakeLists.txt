@@ -1,52 +1,40 @@
 cmake_minimum_required(VERSION 3.22)
 project(duatic_duadrive_interface)
 
-# find dependencies
-find_package(ament_cmake REQUIRED)
-find_package(ament_cmake_ros REQUIRED)
-find_package(yaml-cpp REQUIRED) # We need to use yaml-cpp from the system otherwise the rsl_drive_sdk will be unhappy
-
-set(PACKAGE_DEPENDENCIES
-  rclcpp
-  pluginlib
-  hardware_interface
-  urdf
-  rsl_drive_sdk
+# ---- Dependencies ---------------------------------------------------------
+# Targets used in public headers: linked PUBLIC, exported      (package.xml: <depend>)
+set(PUBLIC_DEPENDENCY_TARGETS
+  hardware_interface::hardware_interface
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  urdf::urdf
+  ament_index_cpp::ament_index_cpp
+  Eigen3::Eigen
+  rsl_drive_sdk::rsl_drive_sdk
+  ecat_sdk_master::ecat_sdk_master
 )
 
-foreach(Dependency IN ITEMS ${PACKAGE_DEPENDENCIES})
-  find_package(${Dependency} REQUIRED)
+# Package name = target namespace; list exceptions via find_package() separately
+list(TRANSFORM PUBLIC_DEPENDENCY_TARGETS REPLACE "::.*$" "" OUTPUT_VARIABLE PUBLIC_DEPENDENCIES)
+list(REMOVE_DUPLICATES PUBLIC_DEPENDENCIES)
+
+find_package(ament_cmake REQUIRED)
+foreach(dep IN LISTS PUBLIC_DEPENDENCIES)
+  find_package(${dep} REQUIRED)
 endforeach()
 
-
-add_library(duatic_duadrive_interface
+# ---- Targets --------------------------------------------------------------
+add_library(${PROJECT_NAME} SHARED
   src/duadrive_interface.cpp
   src/duadrive_interface_base.cpp
   src/duadrive_interface_mock.cpp
   src/coupled_kinematics_hardware_interface.cpp
 )
-add_library(duatic_duadrive_interface::duatic_duadrive_interface ALIAS duatic_duadrive_interface)
-target_compile_features(duatic_duadrive_interface PUBLIC c_std_99 cxx_std_20)  # Require C99 and C++20
-target_include_directories(duatic_duadrive_interface PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>)
 
-
-# Support ros distros older than lyrical
-if(COMMAND ament_target_dependencies)
-    ament_target_dependencies(${PROJECT_NAME}  ${PACKAGE_DEPENDENCIES})
-else()
-    target_link_libraries(${PROJECT_NAME}
-    rclcpp::rclcpp
-    pluginlib::pluginlib
-    hardware_interface::hardware_interface
-    urdf::urdf
-    rsl_drive_sdk::rsl_drive_sdk)
-endif()
-
-target_link_libraries(duatic_duadrive_interface ${YAML_CPP_LIBRARIES})
+# Require C++20
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 # enable additional warnings
-target_compile_options(duatic_duadrive_interface PRIVATE
+target_compile_options(${PROJECT_NAME} PRIVATE
   -Wall
   -Wextra
   -Wpedantic
@@ -58,13 +46,42 @@ target_compile_options(duatic_duadrive_interface PRIVATE
   -Wsign-conversion
   -Wnull-dereference
   -Werror=return-type
-  -fPIC
 )
 
-# Causes the visibility macros to use dllexport rather than dllimport,
-# which is appropriate when building the dll but not consuming it.
-target_compile_definitions(duatic_duadrive_interface PRIVATE "duatic_duadrive_interface_BUILDING_LIBRARY")
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
+target_link_libraries(${PROJECT_NAME}
+  PUBLIC
+    ${PUBLIC_DEPENDENCY_TARGETS}
+)
 
+# ---- Tests ----------------------------------------------------------------
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_coupled_kinematics_position_limiter
+    test/test_coupled_kinematics_position_limiter.cpp
+  )
+  target_link_libraries(test_coupled_kinematics_position_limiter
+    ${PROJECT_NAME}
+  )
+  ament_add_gtest(test_travel_range
+    test/test_travel_range.cpp
+  )
+  target_link_libraries(test_travel_range
+    ${PROJECT_NAME}
+  )
+endif()
+
+# ---- Install & export -----------------------------------------------------
+install(
+  TARGETS ${PROJECT_NAME}
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 install(
   DIRECTORY include/
   DESTINATION include/${PROJECT_NAME}
@@ -73,40 +90,7 @@ install(
   DIRECTORY urdf
   DESTINATION share/${PROJECT_NAME}
 )
-install(
-  TARGETS duatic_duadrive_interface
-  EXPORT export_${PROJECT_NAME}
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
-
-if(BUILD_TESTING)
-  find_package(ament_cmake_gtest REQUIRED)
-  ament_add_gtest(test_coupled_kinematics_position_limiter
-    test/test_coupled_kinematics_position_limiter.cpp
-  )
-  target_link_libraries(test_coupled_kinematics_position_limiter
-    duatic_duadrive_interface
-  )
-  ament_add_gtest(test_travel_range
-    test/test_travel_range.cpp
-  )
-  target_link_libraries(test_travel_range
-    duatic_duadrive_interface
-  )
-endif()
-
-ament_export_include_directories(
-  "include/${PROJECT_NAME}"
-)
-ament_export_libraries(
-  duatic_duadrive_interface
-)
-ament_export_targets(
-  export_${PROJECT_NAME}
-)
-
-ament_export_dependencies(${PACKAGE_DEPENDENCIES} yaml-cpp)
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(${PUBLIC_DEPENDENCIES})
 
 ament_package()
