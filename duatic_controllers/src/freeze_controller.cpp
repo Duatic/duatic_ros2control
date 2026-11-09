@@ -88,6 +88,7 @@ FreezeController::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& pr
 
   for (const auto& name : params_.names) {
     CommandInterfaceReferences freeze_interface_ref;
+    freeze_interface_ref.reserve(1);
     if (!controller_interface::get_ordered_interfaces(command_interfaces_, std::vector<std::string>{ name },
                                                       "freeze_mode", freeze_interface_ref)) {
       RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered command interface - freeze_mode for: %s",

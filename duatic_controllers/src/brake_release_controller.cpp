@@ -194,10 +194,15 @@ BrakeReleaseController::on_activate([[maybe_unused]] const rclcpp_lifecycle::Sta
 {
   // clear out vectors in case of restart (reactivation to be precise)
   joint_position_command_interfaces_.clear();
+  joint_position_command_interfaces_.reserve(params_.joints.size());
   brake_target_command_interfaces_.clear();
+  brake_target_command_interfaces_.reserve(params_.joints.size());
   joint_position_state_interfaces_.clear();
+  joint_position_state_interfaces_.reserve(params_.joints.size());
   joint_velocity_state_interfaces_.clear();
+  joint_velocity_state_interfaces_.reserve(params_.joints.size());
   joint_acceleration_state_interfaces_.clear();
+  joint_acceleration_state_interfaces_.reserve(params_.joints.size());
   last_state_change_time_ = std::nullopt;
   current_state_ = State::Init;
 

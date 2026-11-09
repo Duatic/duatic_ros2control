@@ -123,27 +123,47 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   // first step is always clearing the interface lists
   // otherwise one gets interesting errors during reactivation
   joint_position_interfaces_.clear();
+  joint_position_interfaces_.reserve(params_.joints.size());
   joint_velocity_interfaces_.clear();
+  joint_velocity_interfaces_.reserve(params_.joints.size());
   joint_effort_interfaces_.clear();
+  joint_effort_interfaces_.reserve(params_.joints.size());
   joint_position_commanded_interfaces_.clear();
+  joint_position_commanded_interfaces_.reserve(params_.joints.size());
   joint_velocity_commanded_interfaces_.clear();
+  joint_velocity_commanded_interfaces_.reserve(params_.joints.size());
   joint_effort_commanded_interfaces_.clear();
+  joint_effort_commanded_interfaces_.reserve(params_.joints.size());
   motor_current_commanded_interfaces_.clear();
+  motor_current_commanded_interfaces_.reserve(params_.joints.size());
   joint_temperature_system_interfaces_.clear();
+  joint_temperature_system_interfaces_.reserve(params_.joints.size());
   joint_temperature_phase_a_interfaces_.clear();
+  joint_temperature_phase_a_interfaces_.reserve(params_.joints.size());
   joint_temperature_phase_b_interfaces_.clear();
+  joint_temperature_phase_b_interfaces_.reserve(params_.joints.size());
   joint_temperature_phase_c_interfaces_.clear();
+  joint_temperature_phase_c_interfaces_.reserve(params_.joints.size());
   joint_bus_voltage_interfaces_.clear();
+  joint_bus_voltage_interfaces_.reserve(params_.joints.size());
 
   joint_current_q_interfaces_.clear();
+  joint_current_q_interfaces_.reserve(params_.joints.size());
   joint_current_d_interfaces_.clear();
+  joint_current_d_interfaces_.reserve(params_.joints.size());
 
   joint_current_phase_a_interfaces_.clear();
+  joint_current_phase_a_interfaces_.reserve(params_.joints.size());
   joint_current_phase_b_interfaces_.clear();
+  joint_current_phase_b_interfaces_.reserve(params_.joints.size());
   joint_current_phase_c_interfaces_.clear();
+  joint_current_phase_c_interfaces_.reserve(params_.joints.size());
   joint_voltage_phase_a_interfaces_.clear();
+  joint_voltage_phase_a_interfaces_.reserve(params_.joints.size());
   joint_voltage_phase_b_interfaces_.clear();
+  joint_voltage_phase_b_interfaces_.reserve(params_.joints.size());
   joint_voltage_phase_c_interfaces_.clear();
+  joint_voltage_phase_c_interfaces_.reserve(params_.joints.size());
 
   state_msg.states.clear();
   state_msg.states.resize(params_.joints.size());
