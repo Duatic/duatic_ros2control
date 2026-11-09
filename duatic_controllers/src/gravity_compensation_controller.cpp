@@ -27,6 +27,7 @@
 #include <duatic_controllers/gravity_compensation_controller.hpp>
 
 #include <cmath>
+#include <limits>
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <hardware_interface/introspection.hpp>
@@ -179,13 +180,9 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
   joint_velocity_state_interfaces_.reserve(params_.joints.size());
   initial_joint_positions_.clear();
 
-  // Do allocation one but clear it in the activate function to to be sure
-  state_msg_.joints.clear();
-  for (std::size_t i = 0; i < params_.joints.size(); i++) {
-    const std::string& joint_name = params_.joints[i];
-    state_msg_.joints.push_back(joint_name);
-    state_msg_.commanded_torque.push_back(0.0);
-  }
+  // Size the status message here because activation repeats on every chained mode switch
+  state_msg_.joints = params_.joints;
+  state_msg_.commanded_torque.assign(params_.joints.size(), 0.0);
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(
@@ -217,6 +214,11 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
                    params_.joints[i].c_str(), e.what());
       return controller_interface::CallbackReturn::ERROR;
     }
+  }
+
+  // Nothing overwrites a torque left behind by a preceding controller once this controller is out of chained mode
+  for (const auto& reference : ordered_exported_reference_interfaces_) {
+    (void)reference->set_value(std::numeric_limits<double>::quiet_NaN());
   }
 
   // The controller manager restarts this controller to switch its chained mode and writes to the hardware right

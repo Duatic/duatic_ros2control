@@ -4,8 +4,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <functional>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -30,6 +33,7 @@
 #include <duatic_controllers/freedrive_controller.hpp>
 #include <duatic_controllers/freeze_controller.hpp>
 #include <duatic_controllers/gravity_compensation_controller.hpp>
+#include <duatic_controllers/ros2_control_compat.hpp>
 
 namespace
 {
@@ -211,6 +215,120 @@ std::vector<ControllerCase> controller_cases()
 
 INSTANTIATE_TEST_SUITE_P(Controllers, ControllerActivationTest, testing::ValuesIn(controller_cases()),
                          [](const testing::TestParamInfo<ControllerCase>& info) { return info.param.name; });
+
+class GravityCompensationRestartTest : public testing::Test
+{
+protected:
+  static void SetUpTestSuite()
+  /// Start the ROS context shared by the tests of this suite.
+  {
+    rclcpp::init(0, nullptr);
+  }
+
+  static void TearDownTestSuite()
+  /// Stop the ROS context shared by the tests of this suite.
+  {
+    rclcpp::shutdown();
+  }
+
+  void SetUp() override
+  /// Bring up an active controller that publishes its status, with every claimed interface loaned to it.
+  {
+    controller_interface::ControllerInterfaceParams params;
+    params.controller_name = "gravity_compensation_controller";
+    params.robot_description = kUrdf;
+    params.update_rate = kUpdateRate;
+    params.controller_manager_update_rate = kUpdateRate;
+    params.node_options = controller_.define_custom_node_options().parameter_overrides(
+        std::vector<rclcpp::Parameter>{ { "joints", kJoints }, { "enable_state_topic", true } });
+    ASSERT_EQ(controller_.init(params), controller_interface::return_type::OK);
+
+    ASSERT_EQ(controller_.get_node()->configure().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+    references_ = controller_.export_reference_interfaces();
+
+    std::vector<hardware_interface::LoanedStateInterface> state_loans;
+    for (const auto& description : describe(controller_.state_interface_configuration().names)) {
+      state_storage_.push_back(std::make_shared<hardware_interface::StateInterface>(description));
+      state_loans.emplace_back(state_storage_.back(), nullptr);
+    }
+    std::vector<hardware_interface::LoanedCommandInterface> command_loans;
+    for (const auto& description : describe(controller_.command_interface_configuration().names)) {
+      command_storage_.push_back(std::make_shared<hardware_interface::CommandInterface>(description));
+      command_loans.emplace_back(command_storage_.back(), nullptr);
+    }
+    controller_.assign_interfaces(std::move(command_loans), std::move(state_loans));
+
+    ASSERT_EQ(controller_.get_node()->activate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+  }
+
+  void TearDown() override
+  /// Return the loaned interfaces before the storage backing them goes away.
+  {
+    controller_.release_interfaces();
+  }
+
+  controller_interface::return_type update()
+  /// Run one control cycle.
+  {
+    return controller_.update(controller_.get_node()->now(), rclcpp::Duration::from_seconds(1.0 / kUpdateRate));
+  }
+
+  void restart()
+  /// Deactivate and reactivate, as the controller manager does to switch the chained mode.
+  {
+    ASSERT_EQ(controller_.get_node()->deactivate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+    ASSERT_EQ(controller_.get_node()->activate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
+  }
+
+  double commanded_effort() const
+  /// Read the effort currently commanded to the first joint.
+  {
+    return duatic::controllers::compat::try_get_value(*command_storage_.at(0))
+        .value_or(std::numeric_limits<double>::quiet_NaN());
+  }
+
+  duatic::controllers::GravityCompensationController controller_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> references_;
+  std::vector<hardware_interface::StateInterface::SharedPtr> state_storage_;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> command_storage_;
+};
+
+TEST_F(GravityCompensationRestartTest, DropsReferenceLeftBehindByPrecedingController)
+{
+  const double compensation = commanded_effort();
+
+  ASSERT_TRUE(references_.at(0)->set_value(5.0));
+  ASSERT_EQ(update(), controller_interface::return_type::OK);
+  ASSERT_DOUBLE_EQ(commanded_effort(), compensation + 5.0);
+
+  restart();
+
+  EXPECT_DOUBLE_EQ(commanded_effort(), compensation);
+}
+
+TEST_F(GravityCompensationRestartTest, PublishesOneTorquePerJointAfterRestart)
+{
+  using StatusMsg = duatic_controller_msgs::msg::GravityCompensationControllerStatus;
+
+  restart();
+
+  auto listener = std::make_shared<rclcpp::Node>("status_listener");
+  std::optional<StatusMsg> status;
+  const auto subscription =
+      listener->create_subscription<StatusMsg>(std::string(controller_.get_node()->get_fully_qualified_name()) + "/stat"
+                                                                                                                 "e",
+                                               10, [&status](const StatusMsg& msg) { status = msg; });
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!status.has_value() && std::chrono::steady_clock::now() < deadline) {
+    ASSERT_EQ(update(), controller_interface::return_type::OK);
+    rclcpp::spin_some(listener);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  ASSERT_TRUE(status.has_value()) << "no status message received";
+  EXPECT_EQ(status->commanded_torque.size(), kJoints.size());
+}
 
 TEST(ControllerRegistryTest, EveryRegisteredControllerHasAnActivationCase)
 {
