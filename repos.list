@@ -6,4 +6,4 @@ repositories:
   proxsuite:
     type: git
     url: https://github.com/Simple-Robotics/proxsuite.git
-    version: v0.8.0
+    version: v0.8.2
