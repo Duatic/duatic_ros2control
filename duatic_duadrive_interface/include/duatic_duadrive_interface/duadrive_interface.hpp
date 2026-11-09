@@ -41,6 +41,7 @@
 #include <duatic_duadrive_sdk/v1/duadrive.hpp>
 
 #include "duatic_duadrive_interface/ethercat_bus_singleton.hpp"
+#include "duatic_duadrive_interface/travel_range.hpp"
 #include "duatic_duadrive_interface/duadrive_utils.hpp"
 #include "duatic_duadrive_interface/duadrive_interface_base.hpp"
 
@@ -87,6 +88,10 @@ public:
    * @brief perform a single write on the drive component
    */
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) final;
+  /**
+   * @brief reset the brake release status and the motor travel seen so far
+   */
+  void reset_brake_released() final;
 
 private:
   EthercatBusSingleton::Handle ecat_bus_handle_;
@@ -94,6 +99,7 @@ private:
 
   std::optional<duadrive_sdk::v1::Statusword> last_status_word_;
   duadrive_sdk::v1::BrakeState current_brake_state_{ duadrive_sdk::v1::BrakeState::Engaged };
+  TravelRange motor_travel_;
 
   float configured_gear_ratio_{ 0.0 };
   int current_target_brake_state{ 0 };

@@ -26,6 +26,9 @@
 
 #include <duatic_controllers/gravity_compensation_controller.hpp>
 
+#include <cmath>
+#include <limits>
+
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <hardware_interface/introspection.hpp>
 #include <controller_interface/helpers.hpp>
@@ -35,7 +38,7 @@
 namespace duatic::controllers
 {
 
-GravityCompensationController::GravityCompensationController() : controller_interface::ControllerInterface()
+GravityCompensationController::GravityCompensationController() : controller_interface::ChainableControllerInterface()
 {
 }
 
@@ -177,13 +180,9 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
   joint_velocity_state_interfaces_.reserve(params_.joints.size());
   initial_joint_positions_.clear();
 
-  // Do allocation one but clear it in the activate function to to be sure
-  state_msg_.joints.clear();
-  for (std::size_t i = 0; i < params_.joints.size(); i++) {
-    const std::string& joint_name = params_.joints[i];
-    state_msg_.joints.push_back(joint_name);
-    state_msg_.commanded_torque.push_back(0.0);
-  }
+  // Size the status message here because activation repeats on every chained mode switch
+  state_msg_.joints = params_.joints;
+  state_msg_.commanded_torque.assign(params_.joints.size(), 0.0);
 
   // get the actual interface in an ordered way (same order as the joints parameter)
   if (!controller_interface::get_ordered_interfaces(
@@ -217,6 +216,17 @@ GravityCompensationController::on_activate([[maybe_unused]] const rclcpp_lifecyc
     }
   }
 
+  // Nothing overwrites a torque left behind by a preceding controller once this controller is out of chained mode
+  for (const auto& reference : ordered_exported_reference_interfaces_) {
+    (void)reference->set_value(std::numeric_limits<double>::quiet_NaN());
+  }
+
+  // The controller manager restarts this controller to switch its chained mode and writes to the hardware right
+  // after, so the torque zeroed in on_deactivate must be replaced before that
+  if (!command_efforts()) {
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -230,8 +240,28 @@ GravityCompensationController::on_deactivate([[maybe_unused]] const rclcpp_lifec
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
-controller_interface::return_type GravityCompensationController::update([[maybe_unused]] const rclcpp::Time& time,
-                                                                        [[maybe_unused]] const rclcpp::Duration& period)
+std::vector<hardware_interface::CommandInterface::SharedPtr>
+GravityCompensationController::on_export_reference_interfaces_list()
+{
+  // Each joint accepts an effort in [Nm] from a preceding controller which is added to the commanded effort
+  std::vector<hardware_interface::CommandInterface::SharedPtr> reference_interfaces;
+  for (const auto& joint : params_.joints) {
+    hardware_interface::InterfaceInfo info;
+    info.name = hardware_interface::HW_IF_EFFORT;
+    reference_interfaces.push_back(std::make_shared<hardware_interface::CommandInterface>(
+        hardware_interface::InterfaceDescription(std::string(get_node()->get_name()) + "/" + joint, info)));
+  }
+  return reference_interfaces;
+}
+
+controller_interface::return_type GravityCompensationController::update_reference_from_subscribers(
+    [[maybe_unused]] const rclcpp::Time& time, [[maybe_unused]] const rclcpp::Duration& period)
+{
+  return controller_interface::return_type::OK;
+}
+
+controller_interface::return_type GravityCompensationController::update_and_write_commands(
+    const rclcpp::Time& time, [[maybe_unused]] const rclcpp::Duration& period)
 {
   // Set activation_time_ only once, using the same time source as 'time'
   if (!activation_time_set_) {
@@ -240,17 +270,6 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   }
 
   const std::size_t joint_count = joint_position_state_interfaces_.size();
-  assert(joint_count == joint_velocity_state_interfaces_.size());
-  // Map: Pinocchio joint name -> index in q/v
-  try {
-    for (std::size_t i = 0; i < joint_count; i++) {
-      q_[joint_q_idx_[i]] = duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
-      v_[joint_v_idx_[i]] = duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
-    }
-  } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
-    RCLCPP_ERROR(get_node()->get_logger(), "Failed to read joint state values: %s", e.what());
-    return controller_interface::return_type::ERROR;
-  }
 
   // Perform startup jump check if enabled
   // A jump might happen if the configured urdf does not match the hardware
@@ -276,27 +295,8 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
     }
   }
 
-  // Gravity Compensation
-  tau_gravity_ = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q_);
-
-  // Coriolis Compensation
-  if (params_.enable_coriolis_compensation) {  // else: stays zero as initialized in on_configure
-    tau_coriolis_ = pinocchio::computeCoriolisMatrix(pinocchio_model_, pinocchio_data_, q_, v_) * v_;
-  }
-
-  // combine into joint_effort command
-  for (std::size_t i = 0; i < joint_count; i++) {
-    joint_effort_[i] = tau_gravity_[joint_v_idx_[i]] + tau_coriolis_[joint_v_idx_[i]];
-  }
-
-  // command to hw
-  if (!params_.dry_run) {
-    for (std::size_t i = 0; i < joint_count; i++) {
-      if (!joint_effort_command_interfaces_.at(i).get().set_value(joint_effort_[i])) {
-        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);
-        return controller_interface::return_type::ERROR;
-      }
-    }
+  if (!command_efforts()) {
+    return controller_interface::return_type::ERROR;
   }
 
   // publish state topic
@@ -311,8 +311,53 @@ controller_interface::return_type GravityCompensationController::update([[maybe_
   return controller_interface::return_type::OK;
 }
 
+bool GravityCompensationController::command_efforts()
+{
+  const std::size_t joint_count = joint_position_state_interfaces_.size();
+  assert(joint_count == joint_velocity_state_interfaces_.size());
+  // Map: Joint name -> index in q/v
+  try {
+    for (std::size_t i = 0; i < joint_count; i++) {
+      q_[joint_q_idx_[i]] = duatic::controllers::compat::require_value(joint_position_state_interfaces_.at(i).get());
+      v_[joint_v_idx_[i]] = duatic::controllers::compat::require_value(joint_velocity_state_interfaces_.at(i).get());
+    }
+  } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
+    RCLCPP_ERROR(get_node()->get_logger(), "Failed to read joint state values: %s", e.what());
+    return false;
+  }
+
+  // Gravity Compensation
+  tau_gravity_ = pinocchio::computeGeneralizedGravity(pinocchio_model_, pinocchio_data_, q_);
+
+  // Coriolis Compensation
+  if (params_.enable_coriolis_compensation) {  // else: stays zero as initialized in on_configure
+    tau_coriolis_ = pinocchio::computeCoriolisMatrix(pinocchio_model_, pinocchio_data_, q_, v_) * v_;
+  }
+
+  // combine into joint_effort command, an unset (NaN) reference adds nothing
+  for (std::size_t i = 0; i < joint_count; i++) {
+    const double reference =
+        duatic::controllers::compat::try_get_value(*ordered_exported_reference_interfaces_.at(i)).value_or(0.0);
+    joint_effort_[i] =
+        tau_gravity_[joint_v_idx_[i]] + tau_coriolis_[joint_v_idx_[i]] + (std::isfinite(reference) ? reference : 0.0);
+  }
+
+  // command to hw
+  if (!params_.dry_run) {
+    for (std::size_t i = 0; i < joint_count; i++) {
+      if (!joint_effort_command_interfaces_.at(i).get().set_value(joint_effort_[i])) {
+        RCLCPP_ERROR(get_node()->get_logger(), "Failed to set new effort value for joint interface at index %zu.", i);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 }  // namespace duatic::controllers
 
 #include "pluginlib/class_list_macros.hpp"
 // NOLINTNEXTLINE
-PLUGINLIB_EXPORT_CLASS(duatic::controllers::GravityCompensationController, controller_interface::ControllerInterface)
+PLUGINLIB_EXPORT_CLASS(duatic::controllers::GravityCompensationController,
+                       controller_interface::ChainableControllerInterface)

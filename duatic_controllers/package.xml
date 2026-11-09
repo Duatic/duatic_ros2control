@@ -8,14 +8,14 @@
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <test_depend>ament_cmake_ros</test_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
 
   <!-- PUBLIC: used in public headers -->
   <depend>generate_parameter_library</depend>
   <depend>controller_interface</depend>
+  <depend>controller_manager_msgs</depend>
   <depend>hardware_interface</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>

@@ -49,3 +49,6 @@ float64 current_phase_c
 float64 voltage_phase_a
 float64 voltage_phase_b
 float64 voltage_phase_c
+
+# True once motor motion proved the brake pin is out. Always true for drives without a brake.
+bool brake_released

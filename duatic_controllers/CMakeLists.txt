@@ -5,6 +5,7 @@ project(duatic_controllers)
 # Targets used in public headers: linked PUBLIC, exported      (package.xml: <depend>)
 set(PUBLIC_DEPENDENCY_TARGETS
   controller_interface::controller_interface
+  controller_manager_msgs::controller_manager_msgs
   hardware_interface::hardware_interface
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
@@ -97,13 +98,12 @@ target_link_libraries(${PROJECT_NAME}
     ${PRIVATE_DEPENDENCY_TARGETS}
 )
 
-# prevent pluginlib from using boost
-target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 pluginlib_export_plugin_description_file(controller_interface controller_interface_plugin.xml)
 
 # ---- Tests ----------------------------------------------------------------
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_ros REQUIRED)
   ament_add_gtest(test_force_torque_broadcaster
     test/test_force_torque_broadcaster.cpp
   )
@@ -111,12 +111,20 @@ if(BUILD_TESTING)
     ${PROJECT_NAME}
   )
 
-  ament_add_gtest(test_controller_activation
+  ament_add_ros_isolated_gtest(test_controller_activation
     test/test_controller_activation.cpp
   )
   target_link_libraries(test_controller_activation
     ${PROJECT_NAME}
     pluginlib::pluginlib
+    lifecycle_msgs::lifecycle_msgs
+  )
+
+  ament_add_ros_isolated_gtest(test_brake_release_controller
+    test/test_brake_release_controller.cpp
+  )
+  target_link_libraries(test_brake_release_controller
+    ${PROJECT_NAME}
     lifecycle_msgs::lifecycle_msgs
   )
 endif()
