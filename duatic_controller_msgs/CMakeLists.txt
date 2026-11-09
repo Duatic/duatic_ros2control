@@ -5,12 +5,20 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
+# ---- Dependencies ---------------------------------------------------------
+# Message packages used in the definitions                     (package.xml: <depend>)
+set(MSG_DEPENDENCIES
+  std_msgs
+  geometry_msgs
+)
+
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
+foreach(dep IN LISTS MSG_DEPENDENCIES)
+  find_package(${dep} REQUIRED)
+endforeach()
 
+# ---- Targets --------------------------------------------------------------
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DriveState.msg"
   "msg/DriveStateCollection.msg"
@@ -19,7 +27,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GravityCompensationControllerStatus.msg"
   "msg/PoseTarget.msg"
   "msg/MultiPoseTarget.msg"
-  DEPENDENCIES std_msgs geometry_msgs
+  DEPENDENCIES ${MSG_DEPENDENCIES}
 )
+
+# ---- Install & export -----------------------------------------------------
+ament_export_dependencies(rosidl_default_runtime)
 
 ament_package()
