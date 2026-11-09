@@ -70,7 +70,7 @@ if(BUILD_TESTING)
     test/test_travel_range.cpp
   )
   target_link_libraries(test_travel_range
-    duatic_duadrive_interface
+    ${PROJECT_NAME}
   )
 endif()
 

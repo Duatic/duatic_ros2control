@@ -31,3 +31,15 @@ TEST(TravelRangeTest, KeepsSpanWhenPositionReturns)
   range.update(10.5);
   EXPECT_NEAR(range.span(), 2.0, 1e-9);
 }
+
+TEST(TravelRangeTest, ResetForgetsEarlierSamples)
+{
+  TravelRange range;
+  range.update(-7.17);
+  range.update(7.17);
+  range.reset();
+  EXPECT_LT(range.span(), 0.0);
+  range.update(7.17);
+  range.update(7.2);
+  EXPECT_NEAR(range.span(), 0.03, 1e-9);
+}
