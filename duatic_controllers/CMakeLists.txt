@@ -97,8 +97,6 @@ target_link_libraries(${PROJECT_NAME}
     ${PRIVATE_DEPENDENCY_TARGETS}
 )
 
-# prevent pluginlib from using boost
-target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 pluginlib_export_plugin_description_file(controller_interface controller_interface_plugin.xml)
 
 # ---- Tests ----------------------------------------------------------------
