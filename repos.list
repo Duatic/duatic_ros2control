@@ -1,7 +1,19 @@
 repositories:
-  rsl_drive_sdk:
+  duatic_duadrive_sdk:
     type: git
-    url: https://github.com/Duatic/rsl_drive_sdk.git
+    url: https://github.com/Duatic/duatic_duadrive_sdk.git
+    version: main
+  duatic_ecat_interface:
+    type: git
+    url: https://github.com/Duatic/duatic_ecat_interface.git
+    version: main
+  duatic_message_logger:
+    type: git
+    url: https://github.com/Duatic/duatic_message_logger.git
+    version: main
+  soem_vendor:
+    type: git
+    url: https://github.com/Duatic/soem_vendor.git
     version: main
   proxsuite:
     type: git
