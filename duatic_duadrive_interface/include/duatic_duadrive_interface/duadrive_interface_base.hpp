@@ -75,6 +75,9 @@ struct DuaDriveInterfaceState
   double joint_acceleration{};
   double joint_torque{};
 
+  double motor_position{};
+  double motor_velocity{};
+
   double current_q{};
   double current_d{};
   double current_coil_A{};
@@ -95,6 +98,8 @@ struct DuaDriveInterfaceState
   double bus_voltage{};
   // 1.0 once motor motion proved the brake pin is out, 0.0 otherwise
   double brake_released{};
+  // Raw drive status word
+  double statusword{};
 
   // These 2 fields are not exported to the outside but are just intended to be used within the coupled kinematics
   // hardware interface
@@ -108,6 +113,7 @@ struct DuaDriveInterfaceState
   double joint_torque_commanded{};
   double joint_freeze_mode_commanded{};
   double current_q_commanded{};
+  double current_d_commanded{};
 };
 struct DuaDriveInterfaceCommands
 {

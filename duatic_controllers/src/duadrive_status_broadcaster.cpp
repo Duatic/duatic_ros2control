@@ -56,6 +56,8 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_POSITION);
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
     config.names.emplace_back(joint + "/" + hardware_interface::HW_IF_EFFORT);
+    config.names.emplace_back(joint + "/motor_position");
+    config.names.emplace_back(joint + "/motor_velocity");
     config.names.emplace_back(joint + "/temperature_system");
     config.names.emplace_back(joint + "/temperature_coil_A");
     config.names.emplace_back(joint + "/temperature_coil_B");
@@ -65,7 +67,8 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/position_commanded");
     config.names.emplace_back(joint + "/velocity_commanded");
     config.names.emplace_back(joint + "/effort_commanded");
-    config.names.emplace_back(joint + "/current_commanded");
+    config.names.emplace_back(joint + "/current_q_commanded");
+    config.names.emplace_back(joint + "/current_d_commanded");
 
     config.names.emplace_back(joint + "/current_d");
     config.names.emplace_back(joint + "/current_q");
@@ -77,6 +80,7 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/voltage_coil_C");
 
     config.names.emplace_back(joint + "/brake_released");
+    config.names.emplace_back(joint + "/statusword");
   }
   return config;
 }
@@ -130,14 +134,20 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_velocity_interfaces_.reserve(params_.joints.size());
   joint_effort_interfaces_.clear();
   joint_effort_interfaces_.reserve(params_.joints.size());
+  motor_position_interfaces_.clear();
+  motor_position_interfaces_.reserve(params_.joints.size());
+  motor_velocity_interfaces_.clear();
+  motor_velocity_interfaces_.reserve(params_.joints.size());
   joint_position_commanded_interfaces_.clear();
   joint_position_commanded_interfaces_.reserve(params_.joints.size());
   joint_velocity_commanded_interfaces_.clear();
   joint_velocity_commanded_interfaces_.reserve(params_.joints.size());
   joint_effort_commanded_interfaces_.clear();
   joint_effort_commanded_interfaces_.reserve(params_.joints.size());
-  motor_current_commanded_interfaces_.clear();
-  motor_current_commanded_interfaces_.reserve(params_.joints.size());
+  current_q_commanded_interfaces_.clear();
+  current_q_commanded_interfaces_.reserve(params_.joints.size());
+  current_d_commanded_interfaces_.clear();
+  current_d_commanded_interfaces_.reserve(params_.joints.size());
   joint_temperature_system_interfaces_.clear();
   joint_temperature_system_interfaces_.reserve(params_.joints.size());
   joint_temperature_phase_a_interfaces_.clear();
@@ -168,6 +178,8 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_voltage_phase_c_interfaces_.reserve(params_.joints.size());
   joint_brake_released_interfaces_.clear();
   joint_brake_released_interfaces_.reserve(params_.joints.size());
+  statusword_interfaces_.clear();
+  statusword_interfaces_.reserve(params_.joints.size());
 
   state_msg.states.clear();
   state_msg.states.resize(params_.joints.size());
@@ -188,6 +200,16 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - effort");
     return controller_interface::CallbackReturn::FAILURE;
   }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "motor_position",
+                                                    motor_position_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - motor_position");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "motor_velocity",
+                                                    motor_velocity_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - motor_velocity");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
 
   if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "position_commanded",
                                                     joint_position_commanded_interfaces_)) {
@@ -204,9 +226,14 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - effort_commanded");
     return controller_interface::CallbackReturn::FAILURE;
   }
-  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "current_commanded",
-                                                    motor_current_commanded_interfaces_)) {
-    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_commanded");
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "current_q_commanded",
+                                                    current_q_commanded_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_q_commanded");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "current_d_commanded",
+                                                    current_d_commanded_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - current_d_commanded");
     return controller_interface::CallbackReturn::FAILURE;
   }
 
@@ -283,6 +310,11 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - brake_released");
     return controller_interface::CallbackReturn::FAILURE;
   }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "statusword",
+                                                    statusword_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - statusword");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -308,12 +340,19 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
     DriveState& drive_state_msg = state_msg.states.at(i);
 
     try {
+      drive_state_msg.timestamp = time;
       drive_state_msg.name = params_.joints.at(i);
+      drive_state_msg.statusword = static_cast<uint32_t>(
+          duatic::controllers::compat::require_value(statusword_interfaces_.at(i).get()));
       drive_state_msg.joint_position =
           duatic::controllers::compat::require_value(joint_position_interfaces_.at(i).get());
       drive_state_msg.joint_velocity =
           duatic::controllers::compat::require_value(joint_velocity_interfaces_.at(i).get());
       drive_state_msg.joint_effort = duatic::controllers::compat::require_value(joint_effort_interfaces_.at(i).get());
+      drive_state_msg.motor_position =
+          duatic::controllers::compat::require_value(motor_position_interfaces_.at(i).get());
+      drive_state_msg.motor_velocity =
+          duatic::controllers::compat::require_value(motor_velocity_interfaces_.at(i).get());
 
       drive_state_msg.temperature_system = static_cast<float>(
           duatic::controllers::compat::require_value(joint_temperature_system_interfaces_.at(i).get()));
@@ -332,8 +371,10 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
           duatic::controllers::compat::require_value(joint_velocity_commanded_interfaces_.at(i).get());
       drive_state_msg.joint_effort_commanded =
           duatic::controllers::compat::require_value(joint_effort_commanded_interfaces_.at(i).get());
-      drive_state_msg.motor_current_commanded =
-          duatic::controllers::compat::require_value(motor_current_commanded_interfaces_.at(i).get());
+      drive_state_msg.current_q_commanded =
+          duatic::controllers::compat::require_value(current_q_commanded_interfaces_.at(i).get());
+      drive_state_msg.current_d_commanded =
+          duatic::controllers::compat::require_value(current_d_commanded_interfaces_.at(i).get());
       drive_state_msg.current_d = duatic::controllers::compat::require_value(joint_current_d_interfaces_.at(i).get());
       drive_state_msg.current_q = duatic::controllers::compat::require_value(joint_current_q_interfaces_.at(i).get());
       drive_state_msg.current_phase_a =

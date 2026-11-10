@@ -287,6 +287,7 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   const auto current_status_word = state.getStatusword();
   print_drive_status_changes(get_name(), current_status_word, last_status_word_, logger_);
   last_status_word_ = current_status_word;
+  state_.statusword = static_cast<double>(current_status_word.getData());
   last_reading_update_ = state.getStamp();
 
   // Now update the state vector
@@ -294,6 +295,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.joint_velocity = state.getJointVelocity();
   state_.joint_acceleration = state.getJointAcceleration();
   state_.joint_torque = state.getJointTorque();
+
+  state_.motor_position = state.getMotorPosition();
+  state_.motor_velocity = state.getMotorVelocity();
 
   state_.current_q = state.getMeasuredCurrentQ();
   state_.current_d = state.getMeasuredCurrentD();
@@ -320,7 +324,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   // This is just as a feedback for certain controllers - we cannot command acceleration to the drive
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = reading.getCommanded().getJointTorque();
-  state_.current_q_commanded = reading.getCommanded().getCurrent();
+  state_.current_q_commanded = state.getDesiredCurrentQ();
+  state_.current_d_commanded = state.getDesiredCurrentD();
   // Some control mode information
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
