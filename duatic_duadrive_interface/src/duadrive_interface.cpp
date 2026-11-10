@@ -320,7 +320,9 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   // This is just as a feedback for certain controllers - we cannot command acceleration to the drive
   state_.joint_acceleration_commanded = command_.joint_acceleration;
   state_.joint_torque_commanded = reading.getCommanded().getJointTorque();
-  state_.current_q_commanded = reading.getCommanded().getCurrent();
+  // The commanded block of the reading is overwritten by the host-side command in the SDK
+  // (current is never set there -> 0); use the drive-reported desired current from the state instead
+  state_.current_q_commanded = state.getDesiredCurrentQ();
   // Some control mode information
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
