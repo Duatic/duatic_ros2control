@@ -72,6 +72,26 @@ if(BUILD_TESTING)
   target_link_libraries(test_travel_range
     ${PROJECT_NAME}
   )
+  ament_add_gtest(test_drive_health_interfaces
+    test/test_drive_health_interfaces.cpp
+  )
+  target_link_libraries(test_drive_health_interfaces
+    ${PROJECT_NAME}
+  )
+  ament_add_gtest(test_coupled_error_active
+    test/test_coupled_error_active.cpp
+  )
+  target_link_libraries(test_coupled_error_active
+    ${PROJECT_NAME}
+  )
+  find_package(duatic_controller_msgs REQUIRED)
+  ament_add_gtest(test_drive_state_ids
+    test/test_drive_state_ids.cpp
+  )
+  target_link_libraries(test_drive_state_ids
+    ${PROJECT_NAME}
+    ${duatic_controller_msgs_TARGETS}
+  )
 endif()
 
 # ---- Install & export -----------------------------------------------------

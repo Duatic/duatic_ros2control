@@ -95,6 +95,10 @@ struct DuaDriveInterfaceState
   double bus_voltage{};
   // 1.0 once motor motion proved the brake pin is out, 0.0 otherwise
   double brake_released{};
+  // current_drive_state as rsl_drive_sdk protocol id
+  double drive_state{};
+  // 1.0 while the latest reading is older than the communication timeout, 0.0 otherwise
+  double communication_timeout{};
 
   // These 2 fields are not exported to the outside but are just intended to be used within the coupled kinematics
   // hardware interface
