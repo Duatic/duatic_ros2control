@@ -10,6 +10,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>duatic_controller_msgs</test_depend>
 
   <!-- PUBLIC: used in public headers -->
   <depend>hardware_interface</depend>

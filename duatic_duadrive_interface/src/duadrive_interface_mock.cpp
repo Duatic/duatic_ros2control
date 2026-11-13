@@ -43,6 +43,7 @@ hardware_interface::CallbackReturn DuaDriveInterfaceMock::init(const DuaDriveInt
   generate_command_interface_desriptions();
   // Simulated drives have no brake pin that could hold the joint
   state_.brake_released = 1.0;
+  state_.current_drive_state = rsl_drive_sdk::fsm::StateEnum::ControlOp;
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -68,6 +69,8 @@ hardware_interface::return_type DuaDriveInterfaceMock::read([[maybe_unused]] con
                                                             [[maybe_unused]] const rclcpp::Duration& period)
 {
   last_reading_update_ = std::chrono::system_clock::now();
+  state_.drive_state = rsl_drive_sdk::fsm::stateEnumToId(state_.current_drive_state);
+  state_.communication_timeout = communication_has_timeout() ? 1.0 : 0.0;
   return hardware_interface::return_type::OK;
 }
 
