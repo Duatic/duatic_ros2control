@@ -120,6 +120,14 @@ if(BUILD_TESTING)
     lifecycle_msgs::lifecycle_msgs
   )
 
+  ament_add_ros_isolated_gtest(test_status_broadcaster
+    test/test_status_broadcaster.cpp
+  )
+  target_link_libraries(test_status_broadcaster
+    ${PROJECT_NAME}
+    lifecycle_msgs::lifecycle_msgs
+  )
+
   ament_add_ros_isolated_gtest(test_brake_release_controller
     test/test_brake_release_controller.cpp
   )

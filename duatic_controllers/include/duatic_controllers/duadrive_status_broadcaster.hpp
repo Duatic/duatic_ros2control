@@ -105,6 +105,11 @@ private:
   StateInterfaceReferences joint_voltage_phase_b_interfaces_;
   StateInterfaceReferences joint_voltage_phase_c_interfaces_;
   StateInterfaceReferences joint_brake_released_interfaces_;
+  StateInterfaceReferences joint_drive_state_interfaces_;
+  StateInterfaceReferences joint_communication_timeout_interfaces_;
+  StateInterfaceReferences joint_error_active_interfaces_;
+  StateInterfaceReferences joint_fault_latched_interfaces_;
+  StateInterfaceReferences joint_communication_timeout_latched_interfaces_;
 
   // Buffer message in order to avoid additional allocations
   DriveStateCollection state_msg;
