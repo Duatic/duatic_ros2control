@@ -24,6 +24,8 @@
 
 #include <duatic_controllers/duadrive_status_broadcaster.hpp>
 
+#include <cmath>
+
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
 #include <controller_interface/helpers.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
@@ -31,6 +33,18 @@
 
 namespace duatic::controllers
 {
+namespace
+{
+// Values that are no known protocol id, e.g. a NaN from hardware without an initial value, read as NA
+uint16_t to_drive_state(const double value)
+{
+  using duatic_controller_msgs::msg::DriveState;
+  if (!std::isfinite(value) || value < 0.0 || value > DriveState::DRIVE_STATE_DEVICE_MISSING) {
+    return DriveState::DRIVE_STATE_NA;
+  }
+  return static_cast<uint16_t>(value);
+}
+}  // namespace
 
 StatusBroadcaster::StatusBroadcaster()
 {
@@ -77,6 +91,12 @@ controller_interface::InterfaceConfiguration StatusBroadcaster::state_interface_
     config.names.emplace_back(joint + "/voltage_coil_C");
 
     config.names.emplace_back(joint + "/brake_released");
+
+    config.names.emplace_back(joint + "/drive_state");
+    config.names.emplace_back(joint + "/communication_timeout");
+    config.names.emplace_back(joint + "/error_active");
+    config.names.emplace_back(joint + "/fault_latched");
+    config.names.emplace_back(joint + "/communication_timeout_latched");
   }
   return config;
 }
@@ -168,6 +188,16 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
   joint_voltage_phase_c_interfaces_.reserve(params_.joints.size());
   joint_brake_released_interfaces_.clear();
   joint_brake_released_interfaces_.reserve(params_.joints.size());
+  joint_drive_state_interfaces_.clear();
+  joint_drive_state_interfaces_.reserve(params_.joints.size());
+  joint_communication_timeout_interfaces_.clear();
+  joint_communication_timeout_interfaces_.reserve(params_.joints.size());
+  joint_error_active_interfaces_.clear();
+  joint_error_active_interfaces_.reserve(params_.joints.size());
+  joint_fault_latched_interfaces_.clear();
+  joint_fault_latched_interfaces_.reserve(params_.joints.size());
+  joint_communication_timeout_latched_interfaces_.clear();
+  joint_communication_timeout_latched_interfaces_.reserve(params_.joints.size());
 
   state_msg.states.clear();
   state_msg.states.resize(params_.joints.size());
@@ -283,6 +313,31 @@ StatusBroadcaster::on_activate([[maybe_unused]] const rclcpp_lifecycle::State& p
     RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - brake_released");
     return controller_interface::CallbackReturn::FAILURE;
   }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "drive_state",
+                                                    joint_drive_state_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - drive_state");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "communication_timeout",
+                                                    joint_communication_timeout_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - communication_timeout");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "error_active",
+                                                    joint_error_active_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - error_active");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "fault_latched",
+                                                    joint_fault_latched_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - fault_latched");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
+  if (!controller_interface::get_ordered_interfaces(state_interfaces_, params_.joints, "communication_timeout_latched",
+                                                    joint_communication_timeout_latched_interfaces_)) {
+    RCLCPP_WARN(get_node()->get_logger(), "Could not get ordered interfaces - communication_timeout_latched");
+    return controller_interface::CallbackReturn::FAILURE;
+  }
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -352,6 +407,18 @@ controller_interface::return_type StatusBroadcaster::update(const rclcpp::Time& 
 
       drive_state_msg.brake_released =
           duatic::controllers::compat::require_value(joint_brake_released_interfaces_.at(i).get()) != 0.0;
+
+      drive_state_msg.drive_state =
+          to_drive_state(duatic::controllers::compat::require_value(joint_drive_state_interfaces_.at(i).get()));
+      drive_state_msg.communication_timeout =
+          duatic::controllers::compat::require_value(joint_communication_timeout_interfaces_.at(i).get()) != 0.0;
+      drive_state_msg.error_active =
+          duatic::controllers::compat::require_value(joint_error_active_interfaces_.at(i).get()) != 0.0;
+      drive_state_msg.fault_latched =
+          duatic::controllers::compat::require_value(joint_fault_latched_interfaces_.at(i).get()) != 0.0;
+      drive_state_msg.communication_timeout_latched =
+          duatic::controllers::compat::require_value(joint_communication_timeout_latched_interfaces_.at(i).get()) !=
+          0.0;
     } catch (const duatic::controllers::exceptions::MissingInterfaceValue& e) {
       RCLCPP_ERROR(get_node()->get_logger(), "Failed to read state interface values for joint '%s': %s",
                    params_.joints[i].c_str(), e.what());
