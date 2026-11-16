@@ -209,6 +209,11 @@ public:
       const auto urdf_joint = urdf_model.getJoint(joint_name);
       const auto has_brake = utils::str_to_bool(joint.parameters.at("has_brake"));
       const std::chrono::milliseconds communication_timeout{ std::stoi(joint.parameters.at("communication_timeout")) };
+      if (communication_timeout.count() <= 0) {
+        RCLCPP_FATAL_STREAM(
+            logger_, "communication_timeout must be a positive number of ms, got: " << communication_timeout.count());
+        return hardware_interface::CallbackReturn::FAILURE;
+      }
       const auto brake_clearance = std::stod(joint.parameters.at("brake_clearance"));
       if (!(brake_clearance > 0.0)) {
         RCLCPP_FATAL_STREAM(logger_, "brake_clearance must be a positive number of rad, got: " << brake_clearance);
@@ -283,6 +288,7 @@ public:
           .brake_clearance = brake_clearance,
           .maximum_joint_effort = 0.0,
           .maximum_joint_velocity = 0.0,
+          .communication_timeout = communication_timeout,
       });
     }
 

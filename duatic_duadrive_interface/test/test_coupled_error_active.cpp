@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -35,7 +36,8 @@ public:
   }
 };
 
-std::string joint(const std::string& name, const std::string& drive_parameter_file)
+std::string joint(const std::string& name, const std::string& drive_parameter_file,
+                  const std::string& communication_timeout_ms)
 {
   return R"(
     <joint name=")" +
@@ -47,7 +49,8 @@ std::string joint(const std::string& name, const std::string& drive_parameter_fi
          drive_parameter_file + R"(</param>
       <param name="has_brake">false</param>
       <param name="brake_clearance">0.9</param>
-      <param name="communication_timeout">100</param>
+      <param name="communication_timeout">)" +
+         communication_timeout_ms + R"(</param>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
@@ -58,7 +61,7 @@ std::string joint(const std::string& name, const std::string& drive_parameter_fi
     </joint>)";
 }
 
-std::string urdf(const std::string& drive_parameter_file)
+std::string urdf(const std::string& drive_parameter_file, const std::string& joint2_communication_timeout_ms)
 {
   return R"(<?xml version="1.0"?>
 <robot name="two_joints">
@@ -75,7 +78,8 @@ std::string urdf(const std::string& drive_parameter_file)
   </joint>
   <ros2_control name="TwoJointSystem" type="system">
     <hardware><plugin>unused</plugin></hardware>)" +
-         joint("joint1", drive_parameter_file) + joint("joint2", drive_parameter_file) + R"(
+         joint("joint1", drive_parameter_file, "100") +
+         joint("joint2", drive_parameter_file, joint2_communication_timeout_ms) + R"(
   </ros2_control>
 </robot>
 )";
@@ -99,10 +103,7 @@ protected:
         std::filesystem::temp_directory_path() / ("test_coupled_error_active_" + std::to_string(getpid()) + ".yaml");
     std::ofstream(drive_parameter_file_) << "{}\n";
 
-    hardware_interface::HardwareComponentParams params;
-    params.hardware_info = hardware_interface::parse_control_resources_from_urdf(urdf(drive_parameter_file_))[0];
-    params.clock = std::make_shared<rclcpp::Clock>();
-    ASSERT_EQ(system_.init(params), hardware_interface::CallbackReturn::SUCCESS);
+    ASSERT_EQ(system_.init(params_with_joint2_timeout("250")), hardware_interface::CallbackReturn::SUCCESS);
     system_.on_export_state_interfaces();
     system_.on_export_command_interfaces();
     ASSERT_EQ(system_.on_configure(rclcpp_lifecycle::State()), hardware_interface::CallbackReturn::SUCCESS);
@@ -112,6 +113,15 @@ protected:
   void TearDown() override
   {
     std::filesystem::remove(drive_parameter_file_);
+  }
+
+  hardware_interface::HardwareComponentParams params_with_joint2_timeout(const std::string& communication_timeout_ms)
+  {
+    hardware_interface::HardwareComponentParams params;
+    params.hardware_info =
+        hardware_interface::parse_control_resources_from_urdf(urdf(drive_parameter_file_, communication_timeout_ms))[0];
+    params.clock = std::make_shared<rclcpp::Clock>();
+    return params;
   }
 
   void read()
@@ -128,6 +138,28 @@ protected:
   TwoDriveSystem system_;
 };
 }  // namespace
+
+TEST_F(CoupledErrorActiveTest, DrivesUseTheCommunicationTimeoutFromTheUrdf)
+{
+  EXPECT_EQ(system_.drive(0).communication_timeout(), std::chrono::milliseconds(100));
+  EXPECT_EQ(system_.drive(1).communication_timeout(), std::chrono::milliseconds(250));
+}
+
+TEST_F(CoupledErrorActiveTest, StaleReadingsHelperRestoresTheConfiguredTimeout)
+{
+  system_.drive(1).set_readings_stale(true);
+  system_.drive(1).set_readings_stale(false);
+  EXPECT_EQ(system_.drive(1).communication_timeout(), std::chrono::milliseconds(250));
+}
+
+TEST_F(CoupledErrorActiveTest, NonPositiveCommunicationTimeoutFailsInit)
+{
+  for (const std::string timeout_ms : { "0", "-5" }) {
+    TwoDriveSystem system;
+    EXPECT_EQ(system.init(params_with_joint2_timeout(timeout_ms)), hardware_interface::CallbackReturn::FAILURE)
+        << timeout_ms;
+  }
+}
 
 TEST_F(CoupledErrorActiveTest, NothingLatchedWhileHealthy)
 {

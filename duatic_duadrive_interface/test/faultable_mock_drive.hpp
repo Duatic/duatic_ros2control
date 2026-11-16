@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 
 #include "duatic_duadrive_interface/duadrive_interface_mock.hpp"
 
@@ -26,7 +27,18 @@ public:
   // A negative timeout makes every reading count as stale
   void set_readings_stale(const bool stale)
   {
-    params_.communication_timeout = std::chrono::milliseconds(stale ? -1 : 100);
+    if (!configured_timeout_) {
+      configured_timeout_ = params_.communication_timeout;
+    }
+    params_.communication_timeout = stale ? std::chrono::milliseconds(-1) : *configured_timeout_;
   }
+
+  std::chrono::milliseconds communication_timeout() const
+  {
+    return params_.communication_timeout;
+  }
+
+private:
+  std::optional<std::chrono::milliseconds> configured_timeout_;
 };
 }  // namespace duatic::duadrive_interface::test
