@@ -207,9 +207,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   if (!drive_->setMaxMotorVelocity(maximum_motor_velocity)) {
     throw std::runtime_error("Failed to configure maximum motor velocity");
   }
-  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s "
-                                                         << " Maximum motor velocity: " << maximum_motor_velocity
-                                                         << " rad/s");
+  RCLCPP_INFO_STREAM(logger_, "Maximum joint velocity: " << params_.maximum_joint_velocity << " rad/s");
 
   // Maximum torque -- NOTE: this overrides any values configured in the drive config files
   const auto maximum_motor_torque = params_.maximum_joint_effort * hw_limits_gain;
