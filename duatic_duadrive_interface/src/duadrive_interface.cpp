@@ -327,8 +327,6 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   state_.joint_freeze_mode_commanded = command_.joint_freeze_mode;
   state_.current_drive_mode = active_mode_;
   state_.current_drive_state = state.getStatusword().getStateEnum();
-  state_.drive_state = rsl_drive_sdk::fsm::stateEnumToId(state_.current_drive_state);
-  state_.communication_timeout = communication_has_timeout() ? 1.0 : 0.0;
 
   // Update brake release state
   motor_travel_.update(state.getMotorPosition());

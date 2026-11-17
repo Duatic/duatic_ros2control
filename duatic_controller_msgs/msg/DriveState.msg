@@ -52,29 +52,3 @@ float64 voltage_phase_c
 
 # True once motor motion proved the brake pin is out. Always true for drives without a brake.
 bool brake_released
-
-# Drive state machine states, the protocol ids of rsl_drive_sdk
-uint16 DRIVE_STATE_NA=0
-uint16 DRIVE_STATE_COLDSTART=1
-uint16 DRIVE_STATE_WARMSTART=2
-uint16 DRIVE_STATE_CONFIGURE=3
-uint16 DRIVE_STATE_CALIBRATE=4
-uint16 DRIVE_STATE_STANDBY=5
-uint16 DRIVE_STATE_MOTOROP=6
-uint16 DRIVE_STATE_CONTROLOP=7
-uint16 DRIVE_STATE_ERROR=8
-uint16 DRIVE_STATE_FATAL=9
-uint16 DRIVE_STATE_MOTORPREOP=10
-uint16 DRIVE_STATE_DEVICE_MISSING=11
-# Current drive state machine state, one of DRIVE_STATE_*
-uint16 drive_state
-# True while the latest reading from the drive is older than its communication timeout
-bool communication_timeout
-# True once a drive error froze the hardware system this drive belongs to.
-# The latches below stay set until the hardware component is reloaded, in practice when the controller manager restarts.
-# The two cause latches only name drives that failed in the cycle that froze the system, not failures after it.
-bool error_active
-# True once this drive was in Error or Fatal state and so froze its hardware system
-bool fault_latched
-# True once this drive had a communication timeout and so froze its hardware system
-bool communication_timeout_latched

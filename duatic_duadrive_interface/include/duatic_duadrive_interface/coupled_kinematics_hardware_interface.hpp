@@ -77,26 +77,12 @@ public:
   {
     // This is rather simple - we just append all state interface descriptions of each drive and are done
     std::vector<hardware_interface::InterfaceDescription> state_interfaces;
-    // Sized once, the state interface mapping keeps pointers into it
-    drive_error_latches_.assign(drives_.size(), DriveErrorLatch{});
 
-    for (std::size_t i = 0; i < drives_.size(); i++) {
-      const auto& drive = drives_[i];
+    for (const auto& drive : drives_) {
       RCLCPP_INFO_STREAM(logger_, "Setting up state interfaces for drive: " << drive->get_name());
       const auto drive_state_interfaces = drive->get_state_interface_descriptions();
       RCLCPP_INFO_STREAM(logger_, "size: " << drive_state_interfaces.size());
       state_interfaces.insert(state_interfaces.end(), drive_state_interfaces.begin(), drive_state_interfaces.end());
-      // The system wide error latch, repeated per drive so per-joint consumers see it
-      state_interfaces.emplace_back(create_interface_description<double>(drive->get_name(), "error_active", 0.0));
-      state_interface_pre_mapping_[get_interface_name(drive->get_name(), "error_active")] = &error_active_state_;
-      // What this drive contributed to the latch
-      state_interfaces.emplace_back(create_interface_description<double>(drive->get_name(), "fault_latched", 0.0));
-      state_interface_pre_mapping_[get_interface_name(drive->get_name(), "fault_latched")] =
-          &drive_error_latches_[i].fault;
-      state_interfaces.emplace_back(
-          create_interface_description<double>(drive->get_name(), "communication_timeout_latched", 0.0));
-      state_interface_pre_mapping_[get_interface_name(drive->get_name(), "communication_timeout_latched")] =
-          &drive_error_latches_[i].communication_timeout;
     }
 
     // More interesting is now the internal state data mapping
@@ -439,8 +425,6 @@ public:
 
   hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override
   {
-    // Causes are only recorded in the cycle that trips the latch
-    const bool error_was_active = error_active_;
     // TODO(firesurfer) - replace with std::views::zip (or own implementation) when available
     for (std::size_t i = 0; i < drives_.size(); i++) {
       auto& drive = drives_[i];
@@ -469,24 +453,17 @@ public:
         RCLCPP_ERROR_STREAM_ONCE(logger_,
                                  "Drive: " << drive->get_name() << " is in error/fatal state. Freezing the system");
         error_active_ = true;
-        if (!error_was_active) {
-          drive_error_latches_[i].fault = 1.0;
-        }
       }
-      if (latest_reading.communication_timeout != 0.0) {
+      if (drive->communication_has_timeout()) {
         RCLCPP_ERROR_STREAM_ONCE(logger_, "Drive: " << drive->get_name()
                                                     << " reports a communication timeout. Freezing the system");
         error_active_ = true;
-        if (!error_was_active) {
-          drive_error_latches_[i].communication_timeout = 1.0;
-        }
       }
     }
 
     // Now comes the interesting part. We need to take the data from each drive and apply the serial linkage
     // NOTE: This assumes the joints are declared in the correct order (No clue how I could validate that)
     kinematics_translator::map_from_coupled_to_serial(state_coupled_kinematics_, state_serial_kinematics_);
-    error_active_state_ = error_active_ ? 1.0 : 0.0;
     // Perform the update of the exposed state interface
     update_state_interfaces(state_interface_mapping_, *this);
 
@@ -627,15 +604,6 @@ protected:
   std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   bool error_active_{ false };
-  // error_active_ as exported on the per-drive error_active state interfaces
-  double error_active_state_{ 0.0 };
-  // Per drive cause of error_active_, recorded in the cycle that set it and latched like it
-  struct DriveErrorLatch
-  {
-    double fault{ 0.0 };
-    double communication_timeout{ 0.0 };
-  };
-  std::vector<DriveErrorLatch> drive_error_latches_;
 
   // Internal methods
   /**
