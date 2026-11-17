@@ -71,10 +71,7 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
     create_interface_description<double>(get_name(), "voltage_coil_B", 0.0),
     create_interface_description<double>(get_name(), "voltage_coil_C", 0.0),
 
-    create_interface_description<double>(get_name(), "brake_released", 0.0),
-
-    create_interface_description<double>(get_name(), "drive_state", 0.0),
-    create_interface_description<double>(get_name(), "communication_timeout", 0.0)
+    create_interface_description<double>(get_name(), "brake_released", 0.0)
   };
 
   state_interface_mapping_.insert({ state_interface_descriptions_[0].get_name(), &state_.joint_position });
@@ -106,9 +103,6 @@ void DuaDriveInterfaceBase::generate_state_interface_descriptions()
   state_interface_mapping_.insert({ state_interface_descriptions_[21].get_name(), &state_.voltage_coil_C });
 
   state_interface_mapping_.insert({ state_interface_descriptions_[22].get_name(), &state_.brake_released });
-
-  state_interface_mapping_.insert({ state_interface_descriptions_[23].get_name(), &state_.drive_state });
-  state_interface_mapping_.insert({ state_interface_descriptions_[24].get_name(), &state_.communication_timeout });
 
   assert((state_interface_mapping_.size() == state_interface_descriptions_.size()) && "Error in interface mapping "
                                                                                       "sizes");

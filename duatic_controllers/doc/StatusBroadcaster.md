@@ -50,14 +50,6 @@ For each drive the following information is published:
 | current phase b | measured current of phase 2 in A |
 | current phase c | measured current of phase 3 in A |
 | brake released | true once motor motion proved the brake pin is out, see [BrakeReleaseController](./BrakeReleaseController.md#checking-the-release) |
-| drive state | drive state machine state, one of the `DRIVE_STATE_*` constants of `DriveState` |
-| communication timeout | true while the latest reading from the drive is older than its communication timeout |
-| error active | true once a drive error froze the hardware system this drive belongs to |
-| fault latched | true once this drive was in Error or Fatal state and so froze its hardware system |
-| communication timeout latched | true once this drive had a communication timeout and so froze its hardware system |
-
-The three latched fields stay set until the hardware component is reloaded, in practice when the controller manager restarts.
-fault latched and communication timeout latched only name drives that failed in the cycle that froze the system, not failures after it.
 
 ## Parameters
 
