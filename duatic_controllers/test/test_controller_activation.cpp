@@ -33,6 +33,7 @@
 #include <duatic_controllers/freedrive_controller.hpp>
 #include <duatic_controllers/freeze_controller.hpp>
 #include <duatic_controllers/gravity_compensation_controller.hpp>
+#include <duatic_controllers/mecanum_odometry_broadcaster.hpp>
 #include <duatic_controllers/ros2_control_compat.hpp>
 
 namespace
@@ -208,7 +209,13 @@ std::vector<ControllerCase> controller_cases()
     make_case<duatic::controllers::FreezeController>("freeze_controller",
                                                      { { "names", std::vector<std::string>{ "arm" } } }),
     make_case<duatic::controllers::GravityCompensationController>("gravity_compensation_controller",
-                                                                  { { "joints", kJoints } })
+                                                                  { { "joints", kJoints } }),
+    make_case<duatic::controllers::MecanumOdometryBroadcaster>("mecanum_odometry_broadcaster",
+                                                               { { "front_left_wheel_joint_name", "fl" },
+                                                                 { "front_right_wheel_joint_name", "fr" },
+                                                                 { "rear_right_wheel_joint_name", "rr" },
+                                                                 { "rear_left_wheel_joint_name", "rl" },
+                                                                 { "kinematics.wheels_radius", 0.1 } })
   };
 }
 }  // namespace
