@@ -516,6 +516,14 @@ public:
         return hardware_interface::return_type::ERROR;
       }
     }
+    // A brake target write blocks for one SDO round-trip, so at most one drive writes it per cycle, in turn
+    for (std::size_t n = 0; n < drives_.size(); n++) {
+      const std::size_t i = (next_brake_write_ + n) % drives_.size();
+      if (drives_[i]->write_pending_brake_target()) {
+        next_brake_write_ = (i + 1) % drives_.size();
+        break;
+      }
+    }
     return hardware_interface::return_type::OK;
   }
 
@@ -598,6 +606,8 @@ protected:
   std::unordered_map<std::string, rsl_drive_sdk::mode::ModeEnum> current_active_drive_modes_;
 
   bool error_active_{ false };
+  // Drive whose pending brake target is checked first in the next cycle
+  std::size_t next_brake_write_{ 0 };
 
   // Internal methods
   /**

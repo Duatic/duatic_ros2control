@@ -254,6 +254,8 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
 hardware_interface::CallbackReturn DuaDriveInterface::deactivate()
 {
   if (drive_) {
+    // Deactivation engages the brake directly, a target still waiting is obsolete
+    pending_brake_target_.reset();
     if (params_.has_brake) {
       // in case we have a brake -> disable drive and engage the brake
       rsl_drive_sdk::Command cmd;
@@ -383,12 +385,8 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
       current_target_brake_state = command_.target_brake_state;
       // Safety check that only valid values are commanded
       if (current_target_brake_state >= 0 && current_target_brake_state < 3) {
-        rsl_drive_sdk::BrakeState target_brake_state =
-            static_cast<rsl_drive_sdk::BrakeState>(current_target_brake_state);
-        RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target_brake_state);
-        drive_->setBrakeTargetState(target_brake_state);
-
-        current_brake_state_ = target_brake_state;
+        // The SDO blocks, so the system writes the brake targets of its drives one per cycle
+        pending_brake_target_ = static_cast<rsl_drive_sdk::BrakeState>(current_target_brake_state);
       }
     }
 
@@ -405,6 +403,22 @@ hardware_interface::return_type DuaDriveInterface::write([[maybe_unused]] const 
 
   // From this part of the drive API we do not get any feedback. Therefore we can only return OK here
   return hardware_interface::return_type::OK;
+}
+bool DuaDriveInterface::write_pending_brake_target()
+{
+  if (!pending_brake_target_ || !drive_->goalStateHasBeenReached()) {
+    return false;
+  }
+  const auto target = *pending_brake_target_;
+  pending_brake_target_.reset();
+  if (!drive_->setBrakeTargetState(target)) {
+    // The brake keeps its state, and so does the freeze guard in write()
+    RCLCPP_ERROR_STREAM(logger_, "Failed to write brake target state " << target << " for: " << get_name());
+    return true;
+  }
+  RCLCPP_INFO_STREAM(logger_, "New brake target state:" << target);
+  current_brake_state_ = target;
+  return true;
 }
 
 }  // namespace duatic::duadrive_interface

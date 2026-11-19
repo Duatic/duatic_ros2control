@@ -28,6 +28,7 @@
 // System
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <thread>
@@ -92,6 +93,11 @@ public:
    * @brief reset the brake release status and the motor travel seen so far
    */
   void reset_brake_released() final;
+  /**
+   * @brief write the brake target state recorded by write() to the drive
+   * @return true if a write was attempted, which blocks the caller for one SDO round-trip
+   */
+  bool write_pending_brake_target() final;
 
 private:
   ecat_master::EthercatMasterSingleton::Handle ecat_master_handle_;
@@ -103,6 +109,8 @@ private:
 
   float configured_gear_ratio_{ 0.0 };
   int current_target_brake_state{ 0 };
+  // Brake target waiting for write_pending_brake_target(), the latest command wins
+  std::optional<rsl_drive_sdk::BrakeState> pending_brake_target_;
 
   // Gets called when the bus startup has been finished but before going into the RT loop
   void on_bus_startup_finished();
