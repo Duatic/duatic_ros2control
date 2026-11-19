@@ -55,6 +55,82 @@ constexpr bool sanitize_command_input(double& cmd)
   return true;
 }
 
+/**
+ * @brief true if at least one warning flag is set
+ */
+inline bool any_set(const duadrive_sdk::v1::Warnings& w)
+{
+  return w.over_temperature_bridge || w.over_temperature_stator || w.over_temperature_cpu || w.encoder_outlier_motor ||
+         w.encoder_outlier_gear || w.encoder_outlier_joint || w.incomplete_calibration || w.encoder_crc_gear ||
+         w.encoder_crc_joint;
+}
+
+/**
+ * @brief true if at least one error flag is set
+ */
+inline bool any_set(const duadrive_sdk::v1::Errors& e)
+{
+  return e.invalid_joint_torque || e.pdo_timeout || e.direct_drive_elec_zero_offset_invalid ||
+         e.max_velocity_exceeded || e.joint_position_limits_soft || e.joint_position_limits_hard;
+}
+
+/**
+ * @brief true if at least one fatal flag is set
+ */
+inline bool any_set(const duadrive_sdk::v1::Fatals& f)
+{
+  return f.over_temperature_bridge || f.over_temperature_stator || f.over_temperature_cpu || f.motor_encoder ||
+         f.current_sensor || f.over_voltage || f.under_voltage || f.joint_motor_encoder;
+}
+
+/**
+ * @brief helper function which prints the warnings, errors and fatals raised or cleared between two status words via
+ * ROS2 logging. Raised flags are logged with their severity, cleared flags as info
+ */
+inline void print_drive_status_changes(const std::string& drive_name, const duadrive_sdk::v1::StatusEvent& event,
+                                       rclcpp::Logger& logger)
+{
+  if (any_set(event.get_warnings_raised())) {
+    RCLCPP_WARN_STREAM(logger, "[" << drive_name << "]:Warning: " << event.get_warnings_raised());
+  }
+  if (any_set(event.get_errors_raised())) {
+    RCLCPP_ERROR_STREAM(logger, "[" << drive_name << "]:Error: " << event.get_errors_raised());
+  }
+  if (any_set(event.get_fatals_raised())) {
+    RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:Fatal: " << event.get_fatals_raised());
+  }
+  if (any_set(event.get_warnings_cleared())) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:Warning disappeared: " << event.get_warnings_cleared());
+  }
+  if (any_set(event.get_errors_cleared())) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:Error disappeared: " << event.get_errors_cleared());
+  }
+  if (any_set(event.get_fatals_cleared())) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:Fatal disappeared: " << event.get_fatals_cleared());
+  }
+}
+
+/**
+ * @brief helper function which prints all warnings, errors and fatals of a status word via ROS2 logging
+ */
+inline void print_drive_status(const std::string& drive_name, const duadrive_sdk::v1::Statusword& status_word,
+                               rclcpp::Logger& logger)
+{
+  if (status_word.has_warnings()) {
+    RCLCPP_WARN_STREAM(logger, "[" << drive_name << "]:Warning: " << status_word.get_warnings());
+  }
+  if (status_word.has_errors()) {
+    RCLCPP_ERROR_STREAM(logger, "[" << drive_name << "]:Error: " << status_word.get_errors());
+  }
+  if (status_word.has_fatals()) {
+    RCLCPP_FATAL_STREAM(logger, "[" << drive_name << "]:Fatal: " << status_word.get_fatals());
+  }
+  if (!status_word.has_warnings() && !status_word.has_errors() && !status_word.has_fatals()) {
+    RCLCPP_INFO_STREAM(logger, "[" << drive_name << "]:"
+                                   << "Drive status: OK");
+  }
+}
+
 inline const std::set<std::string> relevant_interface_types{ "position", "velocity", "effort", "freeze_mode" };
 /**
  * @brief select the new drive mode from the selected (claimed) drive interfaces

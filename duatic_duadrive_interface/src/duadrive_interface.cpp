@@ -132,8 +132,7 @@ hardware_interface::CallbackReturn DuaDriveInterface::activate()
   drive_->sync_read();
 
   // Print the current drive state (e.g. warnings, errors, fatals)
-  // TODO(firesurfer) re-add more specific printing functions
-  RCLCPP_INFO_STREAM(logger_, status_word);
+  print_drive_status(get_name(), status_word, logger_);
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
   if (status_word.get_fsm_state() == FSMState::Fatal) {
     RCLCPP_FATAL_STREAM(logger_, "Drive: " << get_name() << " is in Fatal state - aborting startup!");
@@ -268,10 +267,8 @@ hardware_interface::return_type DuaDriveInterface::read([[maybe_unused]] const r
   // TODO(firesurfer) this might be bad to have in the real time loop
   const auto current_status_word = reading.status_word;
   if (last_status_word_) {
-    duadrive_sdk::v1::StatusEvent event(last_status_word_.value(), current_status_word);
-    if (event.has_changes()) {
-      RCLCPP_INFO_STREAM(logger_, event);
-    }
+    print_drive_status_changes(get_name(),
+                               duadrive_sdk::v1::StatusEvent(last_status_word_.value(), current_status_word), logger_);
   }
   last_status_word_ = current_status_word;
   last_reading_update_ = reading.drive_time_stamp.value_or(reading.time_stamp);
