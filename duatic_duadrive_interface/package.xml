@@ -18,8 +18,9 @@
   <depend>urdf</depend>
   <depend>ament_index_cpp</depend>
   <depend>eigen</depend>
-  <depend>rsl_drive_sdk</depend>
-  <depend>ecat_sdk_master</depend>
+  <depend>duatic_duadrive_sdk</depend>
+  <depend>duatic_ecat_interface</depend>
+  <depend>duatic_message_logger</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

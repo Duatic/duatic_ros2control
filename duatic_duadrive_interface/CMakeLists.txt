@@ -10,8 +10,9 @@ set(PUBLIC_DEPENDENCY_TARGETS
   urdf::urdf
   ament_index_cpp::ament_index_cpp
   Eigen3::Eigen
-  rsl_drive_sdk::rsl_drive_sdk
-  ecat_sdk_master::ecat_sdk_master
+  duatic_duadrive_sdk::duatic_duadrive_sdk
+  duatic_ecat_interface::duatic_ecat_interface
+  duatic_message_logger::duatic_message_logger
 )
 
 # Package name = target namespace; list exceptions via find_package() separately
@@ -29,6 +30,7 @@ add_library(${PROJECT_NAME} SHARED
   src/duadrive_interface_base.cpp
   src/duadrive_interface_mock.cpp
   src/coupled_kinematics_hardware_interface.cpp
+  src/ethercat_bus_singleton.cpp
 )
 
 # Require C++20
