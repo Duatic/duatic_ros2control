@@ -170,6 +170,14 @@ public:
   virtual void reset_brake_released()
   {
   }
+  /**
+   * @brief write the brake target state recorded by write() to the drive
+   * @return true if a write was attempted, which blocks the caller for one SDO round-trip
+   */
+  virtual bool write_pending_brake_target()
+  {
+    return false;
+  }
 
   void stage_command(const DuaDriveInterfaceCommands command)
   {
