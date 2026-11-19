@@ -1,8 +1,4 @@
 repositories:
-  rsl_drive_sdk:
-    type: git
-    url: https://github.com/Duatic/rsl_drive_sdk.git
-    version: main
   proxsuite:
     type: git
     url: https://github.com/Simple-Robotics/proxsuite.git
