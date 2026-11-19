@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: Duatic/ci-workflows/.github/workflows/ci_orchestrator.yml@v2
+    uses: Duatic/ci-workflows/.github/workflows/ci_orchestrator.yml@test/factory-apt-archive-deps
     with:
       ros_distro: ${{ inputs.ros_distro }}
       gated: ${{ github.event_name != 'schedule' }}
