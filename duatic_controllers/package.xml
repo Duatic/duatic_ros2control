@@ -14,6 +14,7 @@
 
   <!-- PUBLIC: used in public headers -->
   <depend>generate_parameter_library</depend>
+  <depend>control_msgs</depend>
   <depend>controller_interface</depend>
   <depend>controller_manager_msgs</depend>
   <depend>hardware_interface</depend>

@@ -43,6 +43,10 @@ mecanum_odometry_broadcaster:
 | `/<controller name>/odometry` | `nav_msgs/msg/Odometry` | pose in the odometry frame, twist in the base frame |
 | `/<controller name>/tf_odometry` | `tf2_msgs/msg/TFMessage` | odometry frame to base frame, only with `enable_odom_tf` |
 
+| Service | Type | Effect |
+| ------- | ---- | ------ |
+| `/<controller name>/set_odometry` | `control_msgs/srv/SetOdometry` | continues the odometry from the requested pose, only while active |
+
 ## Parameters
 
 Apart from the wheel joint names, the parameters have the same names, defaults and meaning as those of the
@@ -58,7 +62,7 @@ Apart from the wheel joint names, the parameters have the same names, defaults a
 | `kinematics.wheels_radius` | Wheel radius in m | - | > 0 |
 | `kinematics.sum_of_robot_center_projection_on_X_Y_axis` | lx + ly, the distances from the robot center to the wheels along x and y, in m | - | > 0 |
 | `tf_frame_prefix_enable` | Prefix the frame ids with `tf_frame_prefix` | true | - |
-| `tf_frame_prefix` | Frame id prefix, the controller's namespace if empty | "" | - |
+| `tf_frame_prefix` | Frame id prefix, in which `~` stands for the controller's namespace; the namespace if empty | "" | - |
 | `base_frame_id` | Child frame id of the odometry | base_link | - |
 | `odom_frame_id` | Frame id of the odometry | odom | - |
 | `enable_odom_tf` | Publish `~/tf_odometry` | true | - |

@@ -4,6 +4,7 @@ project(duatic_controllers)
 # ---- Dependencies ---------------------------------------------------------
 # Targets used in public headers: linked PUBLIC, exported      (package.xml: <depend>)
 set(PUBLIC_DEPENDENCY_TARGETS
+  control_msgs::control_msgs
   controller_interface::controller_interface
   controller_manager_msgs::controller_manager_msgs
   hardware_interface::hardware_interface

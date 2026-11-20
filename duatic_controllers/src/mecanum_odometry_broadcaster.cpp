@@ -25,10 +25,12 @@
 #include <duatic_controllers/mecanum_odometry_broadcaster.hpp>
 
 #include <cmath>
-#include <numbers>
+#include <numbers>  // NOLINT(build/include_order)
 #include <string>
 
+#include <controller_interface/tf_prefix.hpp>
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
+#include <lifecycle_msgs/msg/state.hpp>
 
 #include <duatic_controllers/ros2_control_compat.hpp>
 
@@ -86,17 +88,12 @@ MecanumOdometryBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle
   lever_x_ = -cos_offset_ * kinematics.base_frame_offset.x + sin_offset_ * kinematics.base_frame_offset.y;
   lever_y_ = -sin_offset_ * kinematics.base_frame_offset.x - cos_offset_ * kinematics.base_frame_offset.y;
 
-  // Prefix without a leading and with a trailing '/', the controller's namespace if no prefix is given
-  std::string tf_prefix;
-  if (params_.tf_frame_prefix_enable) {
-    tf_prefix = params_.tf_frame_prefix.empty() ? std::string(get_node()->get_namespace()) : params_.tf_frame_prefix;
-    if (tf_prefix.back() != '/') {
-      tf_prefix += "/";
-    }
-    if (tf_prefix.front() == '/') {
-      tf_prefix.erase(0, 1);
-    }
-  }
+  // An empty prefix stands for the controller's namespace, as '~' does
+  const auto tf_prefix =
+      params_.tf_frame_prefix_enable ?
+          controller_interface::resolve_tf_prefix(params_.tf_frame_prefix.empty() ? "~" : params_.tf_frame_prefix,
+                                                  get_node()->get_namespace()) :
+          std::string();
   const auto odom_frame_id = tf_prefix + params_.odom_frame_id;
   const auto base_frame_id = tf_prefix + params_.base_frame_id;
 
@@ -116,6 +113,10 @@ MecanumOdometryBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle
   odometry_pub_rt_ = std::make_unique<realtime_tools::RealtimePublisher<OdometryMsg>>(odometry_pub_);
   tf_pub_ = get_node()->create_publisher<TfMsg>("~/tf_odometry", rclcpp::SystemDefaultsQoS());
   tf_pub_rt_ = std::make_unique<realtime_tools::RealtimePublisher<TfMsg>>(tf_pub_);
+  set_odometry_service_ = get_node()->create_service<SetOdometrySrv>(
+      "~/set_odometry",
+      [this](const std::shared_ptr<SetOdometrySrv::Request> request,
+             std::shared_ptr<SetOdometrySrv::Response> response) { set_odometry(*request, *response); });
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -123,6 +124,17 @@ MecanumOdometryBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle
 controller_interface::return_type MecanumOdometryBroadcaster::update(const rclcpp::Time& time,
                                                                      const rclcpp::Duration& period)
 {
+  if (set_odometry_requested_.exchange(false)) {
+    if (const auto pose = requested_pose_.try_get()) {
+      x_ = pose->x;
+      y_ = pose->y;
+      yaw_ = std::remainder(pose->yaw, 2.0 * std::numbers::pi);
+    } else {
+      // The service thread holds the pose, retry in the next cycle
+      set_odometry_requested_.store(true);
+    }
+  }
+
   WheelVelocities wheel_velocities;
   for (std::size_t i = 0; i < wheel_velocities.size(); ++i) {
     const auto velocity = compat::try_get_value(state_interfaces_[i]);
@@ -184,6 +196,25 @@ void MecanumOdometryBroadcaster::integrate(const WheelVelocities& wheel_velociti
   const double sin_yaw = std::sin(yaw_);
   x_ += (cos_yaw * v_x_ - sin_yaw * v_y_) * dt;
   y_ += (sin_yaw * v_x_ + cos_yaw * v_y_) * dt;
+}
+
+void MecanumOdometryBroadcaster::set_odometry(const SetOdometrySrv::Request& request,
+                                              SetOdometrySrv::Response& response)
+{
+  if (get_node()->get_current_state().id() != lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE) {
+    response.success = false;
+    response.message = "Controller is not active";
+    return;
+  }
+  if (!std::isfinite(request.x) || !std::isfinite(request.y) || !std::isfinite(request.yaw)) {
+    response.success = false;
+    response.message = "Pose is not finite";
+    return;
+  }
+  requested_pose_.set(request);
+  set_odometry_requested_.store(true);
+  response.success = true;
+  response.message = "Odometry set request accepted";
 }
 
 }  // namespace duatic::controllers

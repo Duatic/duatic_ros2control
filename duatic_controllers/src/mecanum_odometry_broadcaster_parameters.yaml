@@ -82,7 +82,7 @@ mecanum_odometry_broadcaster:
   tf_frame_prefix: {
     type: string,
     default_value: "",
-    description: "(optional) Prefix to be appended to the tf frames, will be added to odom_frame_id and base_frame_id before publishing. If the parameter is empty, controller's namespace will be used.",
+    description: "(optional) Prefix to be appended to the tf frames, will be added to odom_frame_id and base_frame_id before publishing. A tilde (~) is replaced with the controller's namespace. If the parameter is empty, controller's namespace will be used.",
     read_only: true,
   }
   base_frame_id: {

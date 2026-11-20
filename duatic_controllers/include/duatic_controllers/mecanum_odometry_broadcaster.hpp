@@ -25,12 +25,15 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <memory>
 
+#include <control_msgs/srv/set_odometry.hpp>
 #include <controller_interface/controller_interface.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <realtime_tools/realtime_publisher.hpp>
+#include <realtime_tools/realtime_thread_safe_box.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
 #include <duatic_controllers/mecanum_odometry_broadcaster_parameters.hpp>
@@ -43,6 +46,8 @@ namespace duatic::controllers
  * Computes and publishes odometry the same way as `mecanum_drive_controller/MecanumDriveController` of
  * ros2_controllers, on `~/odometry` and, if `enable_odom_tf` is set, `~/tf_odometry`. It only claims the wheel
  * velocity state interfaces, so it can run next to a mecanum drive controller or while that one is inactive.
+ *
+ * The `~/set_odometry` service moves the integrated pose to a requested one.
  */
 class MecanumOdometryBroadcaster : public controller_interface::ControllerInterface
 {
@@ -96,6 +101,16 @@ private:
    */
   void integrate(const WheelVelocities& wheel_velocities, double dt);
 
+  using SetOdometrySrv = control_msgs::srv::SetOdometry;
+
+  /**
+   * @brief Hands a requested pose to update(), which continues the odometry from it.
+   *
+   * @param request Pose in the odometry frame, x and y in m and yaw in rad.
+   * @param response Success unless the controller is not active.
+   */
+  void set_odometry(const SetOdometrySrv::Request& request, SetOdometrySrv::Response& response);
+
   std::shared_ptr<mecanum_odometry_broadcaster::ParamListener> param_listener_;
   mecanum_odometry_broadcaster::Params params_;
 
@@ -123,5 +138,9 @@ private:
   std::unique_ptr<realtime_tools::RealtimePublisher<TfMsg>> tf_pub_rt_;
   OdometryMsg odometry_msg_;
   TfMsg tf_msg_;
+
+  rclcpp::Service<SetOdometrySrv>::SharedPtr set_odometry_service_;
+  realtime_tools::RealtimeThreadSafeBox<SetOdometrySrv::Request> requested_pose_;
+  std::atomic<bool> set_odometry_requested_{ false };
 };
 }  // namespace duatic::controllers

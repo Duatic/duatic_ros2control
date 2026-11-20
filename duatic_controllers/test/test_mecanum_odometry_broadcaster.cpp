@@ -28,11 +28,12 @@
 #include <cmath>
 #include <limits>
 #include <memory>
-#include <numbers>
+#include <numbers>  // NOLINT(build/include_order)
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <control_msgs/srv/set_odometry.hpp>
 #include <hardware_interface/handle.hpp>
 #include <hardware_interface/loaned_state_interface.hpp>
 #include <lifecycle_msgs/msg/state.hpp>
@@ -149,6 +150,29 @@ protected:
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     return received_;
+  }
+
+  /**
+   * @brief Request a pose from the ``~/set_odometry`` service of the broadcaster.
+   *
+   * @return Whether the broadcaster accepted the request.
+   */
+  bool set_odometry(double x, double y, double yaw)
+  {
+    using SetOdometry = control_msgs::srv::SetOdometry;
+    auto request = std::make_shared<SetOdometry::Request>();
+    request->x = x;
+    request->y = y;
+    request->yaw = yaw;
+    // Scoped, so receive() can spin the listener on its own afterwards
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(controller_.get_node()->get_node_base_interface());
+    executor.add_node(listener_);
+    auto client = listener_->create_client<SetOdometry>("/mecanum_odometry_broadcaster/set_odometry");
+    EXPECT_TRUE(client->wait_for_service(std::chrono::seconds(5)));
+    auto future = client->async_send_request(request);
+    EXPECT_EQ(executor.spin_until_future_complete(future, std::chrono::seconds(5)), rclcpp::FutureReturnCode::SUCCESS);
+    return future.valid() && future.get()->success;
   }
 
   duatic::controllers::MecanumOdometryBroadcaster controller_;
@@ -268,4 +292,25 @@ TEST_F(MecanumOdometryBroadcasterTest, IntegratesStepsShorterThanATenthOfAMillis
   const auto msg = receive();
   ASSERT_TRUE(msg);
   EXPECT_NEAR(msg->pose.pose.position.x, 0.05, 1e-9);
+}
+
+TEST_F(MecanumOdometryBroadcasterTest, ContinuesFromPoseSetByService)
+{
+  ASSERT_TRUE(set_odometry(1.0, 2.0, 0.5));
+
+  const auto msg = receive();
+  ASSERT_TRUE(msg);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.x, 1.0);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.y, 2.0);
+  EXPECT_NEAR(2.0 * std::atan2(msg->pose.pose.orientation.z, msg->pose.pose.orientation.w), 0.5, 1e-12);
+}
+
+TEST_F(MecanumOdometryBroadcasterTest, RejectsNonFinitePoseFromService)
+{
+  EXPECT_FALSE(set_odometry(1.0, std::numeric_limits<double>::quiet_NaN(), 0.0));
+
+  const auto msg = receive();
+  ASSERT_TRUE(msg);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.x, 0.0);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.y, 0.0);
 }
