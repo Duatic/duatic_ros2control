@@ -4,6 +4,7 @@ project(duatic_controllers)
 # ---- Dependencies ---------------------------------------------------------
 # Targets used in public headers: linked PUBLIC, exported      (package.xml: <depend>)
 set(PUBLIC_DEPENDENCY_TARGETS
+  control_msgs::control_msgs
   controller_interface::controller_interface
   controller_manager_msgs::controller_manager_msgs
   hardware_interface::hardware_interface
@@ -12,7 +13,9 @@ set(PUBLIC_DEPENDENCY_TARGETS
   realtime_tools::realtime_tools
   duatic_controller_msgs::duatic_controller_msgs
   geometry_msgs::geometry_msgs
+  nav_msgs::nav_msgs
   std_srvs::std_srvs
+  tf2_msgs::tf2_msgs
   trajectory_msgs::trajectory_msgs
   Eigen3::Eigen
   pinocchio::pinocchio
@@ -52,6 +55,7 @@ set(PARAMETER_TARGETS
   cartesian_pose_controller_parameters
   freeze_controller_parameters
   brake_release_controller_parameters
+  mecanum_odometry_broadcaster_parameters
 )
 foreach(params IN LISTS PARAMETER_TARGETS)
   generate_parameter_library(${params} src/${params}.yaml)
@@ -67,6 +71,7 @@ add_library(${PROJECT_NAME} SHARED
   src/cartesian_pose_controller.cpp
   src/freeze_controller.cpp
   src/brake_release_controller.cpp
+  src/mecanum_odometry_broadcaster.cpp
 )
 
 # Require C++20
@@ -124,6 +129,14 @@ if(BUILD_TESTING)
     test/test_brake_release_controller.cpp
   )
   target_link_libraries(test_brake_release_controller
+    ${PROJECT_NAME}
+    lifecycle_msgs::lifecycle_msgs
+  )
+
+  ament_add_ros_isolated_gtest(test_mecanum_odometry_broadcaster
+    test/test_mecanum_odometry_broadcaster.cpp
+  )
+  target_link_libraries(test_mecanum_odometry_broadcaster
     ${PROJECT_NAME}
     lifecycle_msgs::lifecycle_msgs
   )
