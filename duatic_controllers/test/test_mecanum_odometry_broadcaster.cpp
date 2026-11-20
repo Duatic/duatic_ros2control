@@ -25,7 +25,10 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
+#include <limits>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <vector>
@@ -77,7 +80,8 @@ protected:
     });
     ASSERT_EQ(controller_.init(params), controller_interface::return_type::OK);
     ASSERT_EQ(controller_.get_node()->configure().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
-    EXPECT_TRUE(controller_.command_interface_configuration().names.empty());
+    EXPECT_EQ(controller_.command_interface_configuration().type,
+              controller_interface::interface_configuration_type::NONE);
 
     std::vector<hardware_interface::LoanedStateInterface> state_loans;
     for (const auto& full_name : controller_.state_interface_configuration().names) {
@@ -194,4 +198,74 @@ TEST_F(MecanumOdometryBroadcasterTest, IntegratesStraightDriveIntoPosition)
   EXPECT_GE(msg->pose.pose.position.x, 1.0 + 0.01 - 1e-9);
   EXPECT_NEAR(msg->pose.pose.position.y, 0.0, 1e-12);
   EXPECT_DOUBLE_EQ(msg->pose.pose.orientation.w, 1.0);
+}
+
+TEST_F(MecanumOdometryBroadcasterTest, IgnoresNonFiniteWheelVelocities)
+{
+  ASSERT_TRUE(receive());
+  for (const auto* joint : { "fl", "fr", "rr", "rl" }) {
+    set_velocity(joint, 10.0);
+  }
+
+  for (const double invalid : { std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() }) {
+    set_velocity("fl", invalid);
+    for (int i = 0; i < 10; i++) {
+      ASSERT_EQ(controller_.update(controller_.get_node()->now(), rclcpp::Duration::from_seconds(0.01)),
+                controller_interface::return_type::OK);
+    }
+  }
+
+  for (const auto* joint : { "fl", "fr", "rr", "rl" }) {
+    set_velocity(joint, 0.0);
+  }
+  const auto msg = receive();
+  ASSERT_TRUE(msg);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.x, 0.0);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.position.y, 0.0);
+  EXPECT_DOUBLE_EQ(msg->pose.pose.orientation.w, 1.0);
+}
+
+TEST_F(MecanumOdometryBroadcasterTest, KeepsHeadingWithinHalfTurnWhileSpinning)
+{
+  ASSERT_TRUE(receive());
+  // Spin at 2.5 pi rad/s for 1 s, so the unbounded heading would reach 2.5 pi
+  const double wheel_velocity = 2.5 * std::numbers::pi * kCenterProjection / kWheelsRadius;
+  set_velocity("fl", -wheel_velocity);
+  set_velocity("rl", -wheel_velocity);
+  set_velocity("fr", wheel_velocity);
+  set_velocity("rr", wheel_velocity);
+  for (int i = 0; i < 100; i++) {
+    ASSERT_EQ(controller_.update(controller_.get_node()->now(), rclcpp::Duration::from_seconds(0.01)),
+              controller_interface::return_type::OK);
+  }
+
+  for (const auto* joint : { "fl", "fr", "rr", "rl" }) {
+    set_velocity(joint, 0.0);
+  }
+  const auto msg = receive();
+  ASSERT_TRUE(msg);
+  // A heading in [-pi, pi] gives a quaternion with w >= 0, 2.5 pi would give cos(1.25 pi) < 0
+  EXPECT_GE(msg->pose.pose.orientation.w, 0.0);
+  EXPECT_NEAR(2.0 * std::atan2(msg->pose.pose.orientation.z, msg->pose.pose.orientation.w), 0.5 * std::numbers::pi,
+              1e-9);
+}
+
+TEST_F(MecanumOdometryBroadcasterTest, IntegratesStepsShorterThanATenthOfAMillisecond)
+{
+  ASSERT_TRUE(receive());
+  for (const auto* joint : { "fl", "fr", "rr", "rl" }) {
+    set_velocity(joint, 10.0);
+  }
+
+  // 1 m/s forward for 1000 updates of 0.05 ms
+  for (int i = 0; i < 1000; i++) {
+    ASSERT_EQ(controller_.update(controller_.get_node()->now(), rclcpp::Duration::from_seconds(0.00005)),
+              controller_interface::return_type::OK);
+  }
+  for (const auto* joint : { "fl", "fr", "rr", "rl" }) {
+    set_velocity(joint, 0.0);
+  }
+  const auto msg = receive();
+  ASSERT_TRUE(msg);
+  EXPECT_NEAR(msg->pose.pose.position.x, 0.05, 1e-9);
 }

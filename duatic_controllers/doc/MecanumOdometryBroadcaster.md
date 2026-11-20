@@ -56,11 +56,11 @@ Apart from the wheel joint names, the parameters have the same names, defaults a
 | `rear_left_wheel_joint_name` | Same for the rear left wheel | - | may not be empty |
 | `kinematics.base_frame_offset.{x,y,theta}` | Offset of the base frame from the robot center | 0.0 | - |
 | `kinematics.wheels_radius` | Wheel radius in m | - | > 0 |
-| `kinematics.sum_of_robot_center_projection_on_X_Y_axis` | lx + ly, the distances from the robot center to the wheels along x and y, in m | 0.0 | - |
+| `kinematics.sum_of_robot_center_projection_on_X_Y_axis` | lx + ly, the distances from the robot center to the wheels along x and y, in m | - | > 0 |
 | `tf_frame_prefix_enable` | Prefix the frame ids with `tf_frame_prefix` | true | - |
 | `tf_frame_prefix` | Frame id prefix, the controller's namespace if empty | "" | - |
 | `base_frame_id` | Child frame id of the odometry | base_link | - |
 | `odom_frame_id` | Frame id of the odometry | odom | - |
-| `enable_odom_tf` | Publish `~/tf_odometry`, can be changed at runtime | true | - |
+| `enable_odom_tf` | Publish `~/tf_odometry` | true | - |
 | `pose_covariance_diagonal` | Diagonal of the pose covariance | 0.1 each | 6 values |
 | `twist_covariance_diagonal` | Diagonal of the twist covariance | 0.1 each | 6 values |

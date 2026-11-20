@@ -25,6 +25,7 @@
 #include <duatic_controllers/mecanum_odometry_broadcaster.hpp>
 
 #include <cmath>
+#include <numbers>
 #include <string>
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>
@@ -36,16 +37,20 @@ namespace duatic::controllers
 
 controller_interface::InterfaceConfiguration MecanumOdometryBroadcaster::command_interface_configuration() const
 {
-  return { controller_interface::interface_configuration_type::INDIVIDUAL, {} };
+  return { controller_interface::interface_configuration_type::NONE, {} };
 }
 
 controller_interface::InterfaceConfiguration MecanumOdometryBroadcaster::state_interface_configuration() const
 {
+  std::array<std::string, WheelIndex::WHEEL_COUNT> joints;
+  joints[WheelIndex::FRONT_LEFT] = params_.front_left_wheel_joint_name;
+  joints[WheelIndex::FRONT_RIGHT] = params_.front_right_wheel_joint_name;
+  joints[WheelIndex::REAR_RIGHT] = params_.rear_right_wheel_joint_name;
+  joints[WheelIndex::REAR_LEFT] = params_.rear_left_wheel_joint_name;
+
   controller_interface::InterfaceConfiguration config;
   config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  // Same order as WheelIndex
-  for (const auto& joint : { params_.front_left_wheel_joint_name, params_.front_right_wheel_joint_name,
-                             params_.rear_right_wheel_joint_name, params_.rear_left_wheel_joint_name }) {
+  for (const auto& joint : joints) {
     config.names.push_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
   }
   return config;
@@ -65,7 +70,21 @@ controller_interface::CallbackReturn MecanumOdometryBroadcaster::on_init()
 controller_interface::CallbackReturn
 MecanumOdometryBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle::State& previous_state)
 {
-  params_ = param_listener_->get_params();
+  try {
+    param_listener_->refresh_dynamic_parameters();
+    params_ = param_listener_->get_params();
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception during controller configuration: " << e.what());
+    return controller_interface::CallbackReturn::ERROR;
+  }
+
+  const auto& kinematics = params_.kinematics;
+  linear_factor_ = 0.25 * kinematics.wheels_radius;
+  angular_factor_ = linear_factor_ / kinematics.sum_of_robot_center_projection_on_X_Y_axis;
+  cos_offset_ = std::cos(-kinematics.base_frame_offset.theta);
+  sin_offset_ = std::sin(-kinematics.base_frame_offset.theta);
+  lever_x_ = -cos_offset_ * kinematics.base_frame_offset.x + sin_offset_ * kinematics.base_frame_offset.y;
+  lever_y_ = -sin_offset_ * kinematics.base_frame_offset.x - cos_offset_ * kinematics.base_frame_offset.y;
 
   // Prefix without a leading and with a trailing '/', the controller's namespace if no prefix is given
   std::string tf_prefix;
@@ -104,22 +123,21 @@ MecanumOdometryBroadcaster::on_configure([[maybe_unused]] const rclcpp_lifecycle
 controller_interface::return_type MecanumOdometryBroadcaster::update(const rclcpp::Time& time,
                                                                      const rclcpp::Duration& period)
 {
-  param_listener_->try_update_params(params_);
-
-  const auto front_left = compat::try_get_value(state_interfaces_[FRONT_LEFT]);
-  const auto front_right = compat::try_get_value(state_interfaces_[FRONT_RIGHT]);
-  const auto rear_right = compat::try_get_value(state_interfaces_[REAR_RIGHT]);
-  const auto rear_left = compat::try_get_value(state_interfaces_[REAR_LEFT]);
-  if (!front_left || !front_right || !rear_right || !rear_left) {
-    RCLCPP_DEBUG(get_node()->get_logger(), "Unable to retrieve the velocity of every wheel");
-    return controller_interface::return_type::OK;
+  WheelVelocities wheel_velocities;
+  for (std::size_t i = 0; i < wheel_velocities.size(); ++i) {
+    const auto velocity = compat::try_get_value(state_interfaces_[i]);
+    if (!velocity || !std::isfinite(*velocity)) {
+      RCLCPP_DEBUG(get_node()->get_logger(), "Unable to retrieve a finite velocity of every wheel");
+      return controller_interface::return_type::OK;
+    }
+    wheel_velocities[i] = *velocity;
   }
-  if (!std::isnan(*front_left) && !std::isnan(*front_right) && !std::isnan(*rear_right) && !std::isnan(*rear_left)) {
-    integrate(*front_left, *front_right, *rear_right, *rear_left, period.seconds());
-  }
+  integrate(wheel_velocities, period.seconds());
 
   // Quaternion of a rotation by yaw about z
   geometry_msgs::msg::Quaternion orientation;
+  orientation.x = 0.0;
+  orientation.y = 0.0;
   orientation.z = std::sin(0.5 * yaw_);
   orientation.w = std::cos(0.5 * yaw_);
 
@@ -144,34 +162,24 @@ controller_interface::return_type MecanumOdometryBroadcaster::update(const rclcp
   return controller_interface::return_type::OK;
 }
 
-void MecanumOdometryBroadcaster::integrate(const double front_left, const double front_right, const double rear_right,
-                                           const double rear_left, const double dt)
+void MecanumOdometryBroadcaster::integrate(const WheelVelocities& wheel_velocities, const double dt)
 {
-  // Too short to integrate with
-  if (dt < 0.0001) {
-    return;
-  }
+  const double front_left = wheel_velocities[WheelIndex::FRONT_LEFT];
+  const double front_right = wheel_velocities[WheelIndex::FRONT_RIGHT];
+  const double rear_right = wheel_velocities[WheelIndex::REAR_RIGHT];
+  const double rear_left = wheel_velocities[WheelIndex::REAR_LEFT];
 
   // Body twist at the robot center
-  const double radius = params_.kinematics.wheels_radius;
-  const double v_x_center = 0.25 * radius * (front_left + rear_left + rear_right + front_right);
-  const double v_y_center = 0.25 * radius * (-front_left + rear_left - rear_right + front_right);
-  omega_ = 0.25 * radius / params_.kinematics.sum_of_robot_center_projection_on_X_Y_axis *
-           (-front_left - rear_left + rear_right + front_right);
+  const double v_x_center = linear_factor_ * (front_left + rear_left + rear_right + front_right);
+  const double v_y_center = linear_factor_ * (-front_left + rear_left - rear_right + front_right);
+  omega_ = angular_factor_ * (-front_left - rear_left + rear_right + front_right);
 
   // Rotate into the base frame and add the lever arm of the base frame offset
-  const auto& offset = params_.kinematics.base_frame_offset;
-  const double cos_offset = std::cos(-offset.theta);
-  const double sin_offset = std::sin(-offset.theta);
-  const double v_x_rotated = cos_offset * v_x_center - sin_offset * v_y_center;
-  const double v_y_rotated = sin_offset * v_x_center + cos_offset * v_y_center;
-  const double lever_x = -cos_offset * offset.x + sin_offset * offset.y;
-  const double lever_y = -sin_offset * offset.x - cos_offset * offset.y;
-  v_x_ = v_x_rotated + lever_y * omega_;
-  v_y_ = v_y_rotated - lever_x * omega_;
+  v_x_ = cos_offset_ * v_x_center - sin_offset_ * v_y_center + lever_y_ * omega_;
+  v_y_ = sin_offset_ * v_x_center + cos_offset_ * v_y_center - lever_x_ * omega_;
 
   // Integrate the pose in the odometry frame, rotating the twist by the already updated heading
-  yaw_ += omega_ * dt;
+  yaw_ = std::remainder(yaw_ + omega_ * dt, 2.0 * std::numbers::pi);
   const double cos_yaw = std::cos(yaw_);
   const double sin_yaw = std::sin(yaw_);
   x_ += (cos_yaw * v_x_ - sin_yaw * v_y_) * dt;

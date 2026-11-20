@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <memory>
 
@@ -47,72 +48,69 @@ class MecanumOdometryBroadcaster : public controller_interface::ControllerInterf
 {
 public:
   /**
-   * @brief Claims no command interfaces.
-   * @return An empty individual interface configuration.
+   * @copydoc controller_interface::ControllerInterfaceBase::command_interface_configuration
+   * @note None, the wheels are never commanded.
    */
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
 
   /**
-   * @brief Claims the velocity state interface of each wheel.
-   * @return The interfaces in the order front left, front right, rear right, rear left, which update() relies on.
+   * @copydoc controller_interface::ControllerInterfaceBase::state_interface_configuration
+   * @note The velocity interface of each wheel, in the order of WheelIndex.
    */
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
   /**
-   * @brief Integrates the wheel velocities over period and publishes the odometry stamped with time.
-   *
-   * Skips integration while a wheel velocity is NaN and publishes nothing while a wheel velocity is unavailable.
-   *
-   * @param time Stamp of the published messages.
-   * @param period Integration step; steps below 0.1 ms leave the odometry unchanged.
-   * @return Always OK.
+   * @copydoc controller_interface::ControllerInterfaceBase::update
+   * @note Neither integrates nor publishes while a wheel velocity is unavailable or not finite.
    */
   controller_interface::return_type update(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
-  /**
-   * @brief Creates the parameter listener.
-   * @return ERROR if the parameters cannot be declared, SUCCESS otherwise.
-   */
+  /// @copydoc controller_interface::ControllerInterfaceBase::on_init
   controller_interface::CallbackReturn on_init() override;
 
   /**
-   * @brief Reads the parameters, sets the kinematics and frames and creates the publishers.
-   *
-   * The integrated pose is kept, so it continues across a cleanup and configure.
-   *
-   * @return SUCCESS.
-   * @throws rclcpp::exceptions::RCLError If a publisher cannot be created.
+   * @copydoc rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::on_configure
+   * @note Keeps the integrated pose, so it continues across a cleanup and configure.
    */
   controller_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State& previous_state) override;
 
 private:
-  /// @brief Index of each wheel in the claimed state interfaces.
+  /// @brief Index of each wheel in the claimed state interfaces and in WheelVelocities.
   enum WheelIndex : std::size_t
   {
     FRONT_LEFT = 0,
     FRONT_RIGHT = 1,
     REAR_RIGHT = 2,
     REAR_LEFT = 3,
+    WHEEL_COUNT = 4,
   };
+
+  /// @brief Velocity of each wheel in rad/s, indexed by WheelIndex.
+  using WheelVelocities = std::array<double, WheelIndex::WHEEL_COUNT>;
 
   /**
    * @brief Advances the odometry by one step of mecanum forward kinematics.
    *
-   * @param front_left Wheel velocity in rad/s.
-   * @param front_right Wheel velocity in rad/s.
-   * @param rear_right Wheel velocity in rad/s.
-   * @param rear_left Wheel velocity in rad/s.
-   * @param dt Step in s; below 0.1 ms neither pose nor twist change.
+   * @param wheel_velocities Velocity of each wheel in rad/s.
+   * @param dt Step in s.
    */
-  void integrate(double front_left, double front_right, double rear_right, double rear_left, double dt);
+  void integrate(const WheelVelocities& wheel_velocities, double dt);
 
   std::shared_ptr<mecanum_odometry_broadcaster::ParamListener> param_listener_;
   mecanum_odometry_broadcaster::Params params_;
 
+  // Kinematics constants derived from the parameters in on_configure
+  double linear_factor_ = 0.0;   ///< Wheel velocity sum [rad/s] to body velocity [m/s]
+  double angular_factor_ = 0.0;  ///< Wheel velocity sum [rad/s] to yaw rate [rad/s]
+  double cos_offset_ = 1.0;      ///< Cosine of the inverted base frame offset angle
+  double sin_offset_ = 0.0;      ///< Sine of the inverted base frame offset angle
+  double lever_x_ = 0.0;         ///< [m] Robot center relative to the base frame, in the base frame
+  double lever_y_ = 0.0;         ///< [m]
+
   // Pose in the odometry frame and twist in the base frame
   double x_ = 0.0;      ///< [m]
   double y_ = 0.0;      ///< [m]
-  double yaw_ = 0.0;    ///< [rad]
+  double yaw_ = 0.0;    ///< [rad] in [-pi, pi]
   double v_x_ = 0.0;    ///< [m/s]
   double v_y_ = 0.0;    ///< [m/s]
   double omega_ = 0.0;  ///< [rad/s]
