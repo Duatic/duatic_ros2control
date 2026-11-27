@@ -62,6 +62,13 @@
       Calculate the estimated endeffector wrench from the measured torques of the drives
     </description>
   </class>
+  <class name="duatic_controllers/MecanumOdometryBroadcaster"
+         type="duatic::controllers::MecanumOdometryBroadcaster"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Publishes mecanum wheel odometry like the mecanum_drive_controller
+    </description>
+  </class>
 
 
 </library>

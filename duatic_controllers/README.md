@@ -33,3 +33,4 @@ In the following we always use the exported name without the `duatic_controllers
 | [ForceTorqueBroadcaster](./doc/ForceTorqueBroadcaster.md) | A virtual FTS sensor calculating a wrench at the TCP using the joint torques |
 | CartesianPoseController | A cartesian pose controller which handles the DynaArm kinematics more joyfully |
 | [GravityCompensationController](./doc/GravityCompensationController.md) | A feed forward controller which tries to keep the current dynamics |
+| [MecanumOdometryBroadcaster](./doc/MecanumOdometryBroadcaster.md) | Publishes the wheel odometry of a mecanum base |

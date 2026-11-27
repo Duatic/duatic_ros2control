@@ -14,6 +14,7 @@
 
   <!-- PUBLIC: used in public headers -->
   <depend>generate_parameter_library</depend>
+  <depend>control_msgs</depend>
   <depend>controller_interface</depend>
   <depend>controller_manager_msgs</depend>
   <depend>hardware_interface</depend>
@@ -22,7 +23,9 @@
   <depend>realtime_tools</depend>
   <depend>duatic_controller_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
   <depend>std_srvs</depend>
+  <depend>tf2_msgs</depend>
   <depend>trajectory_msgs</depend>
   <depend>eigen</depend>
   <depend>pinocchio</depend>
