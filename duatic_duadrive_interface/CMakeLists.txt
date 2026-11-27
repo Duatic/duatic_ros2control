@@ -72,6 +72,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_travel_range
     ${PROJECT_NAME}
   )
+  ament_add_gtest(test_communication_timeout
+    test/test_communication_timeout.cpp
+  )
+  target_link_libraries(test_communication_timeout
+    ${PROJECT_NAME}
+  )
 endif()
 
 # ---- Install & export -----------------------------------------------------
